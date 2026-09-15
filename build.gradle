@@ -1,0 +1,74 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenLocal()
+    maven {
+        url = 'https://repo.runelite.net'
+    }
+    mavenCentral()
+}
+
+def runeLiteVersion = 'latest.release'
+def lwjglVersion = '3.3.2'
+
+/* LWJGL ships one native-library jar per platform and expects the consumer
+   to pick the right one. net.runelite:client pulls in the base
+   org.lwjgl:lwjgl / lwjgl-opengl modules itself, and Gradle's own automatic
+   platform-variant matching for their native artifacts has been observed
+   (on this very machine) picking an unrelated platform's natives. So skip
+   that matching for just these two modules: exclude them from client's
+   transitive deps and supply the base jar plus the correct native classifier
+   ourselves, computed from the running JVM. Only the dev client (the `run`
+   task) needs this; the plugin jar itself has no LWJGL dependency. */
+def osName = System.getProperty('os.name').toLowerCase()
+def osArch = System.getProperty('os.arch')
+def lwjglNatives
+if (osName.contains('win')) {
+    lwjglNatives = (osArch.contains('aarch64') || osArch.contains('arm')) ? 'natives-windows-arm64'
+        : (osArch.contains('86') && !osArch.contains('64')) ? 'natives-windows-x86'
+        : 'natives-windows'
+} else if (osName.contains('mac') || osName.contains('darwin')) {
+    lwjglNatives = osArch.startsWith('aarch64') ? 'natives-macos-arm64' : 'natives-macos'
+} else {
+    lwjglNatives = (osArch.startsWith('aarch64') || osArch.startsWith('arm')) ? 'natives-linux-arm64' : 'natives-linux'
+}
+
+dependencies {
+    compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation(group: 'net.runelite', name: 'client', version: runeLiteVersion) {
+        exclude group: 'org.lwjgl', module: 'lwjgl'
+        exclude group: 'org.lwjgl', module: 'lwjgl-opengl'
+    }
+    testRuntimeOnly "org.lwjgl:lwjgl:${lwjglVersion}"
+    testRuntimeOnly "org.lwjgl:lwjgl:${lwjglVersion}:${lwjglNatives}"
+    testRuntimeOnly "org.lwjgl:lwjgl-opengl:${lwjglVersion}"
+    testRuntimeOnly "org.lwjgl:lwjgl-opengl:${lwjglVersion}:${lwjglNatives}"
+}
+
+group = 'com.grant9008'
+version = '0.1.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+/* `gradlew run` (or the "Run Dev Client.bat" launcher): a full RuneLite
+   client with this plugin loaded, for testing in-game. RuneLite insists on
+   assertions being enabled in developer mode, hence -ea. */
+tasks.register('run', JavaExec) {
+    description = 'Starts a RuneLite client with Personal Space loaded, for testing in-game.'
+    group = 'application'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.grant9008.personalspace.PersonalSpacePluginTest'
+    jvmArgs '-ea'
+    args '--developer-mode'
+}

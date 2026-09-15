@@ -1,0 +1,118 @@
+package com.grant9008.personalspace;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.junit.Assert;
+import org.junit.Test;
+
+public class StackSpreaderTest
+{
+	private static final long TILE_A = 1L;
+	private static final long TILE_B = 2L;
+
+	private static Map<Integer, int[]> byId(List<StackSpreader.Placement> placements)
+	{
+		Map<Integer, int[]> m = new HashMap<>();
+		for (StackSpreader.Placement p : placements)
+		{
+			Assert.assertNull("a player must only be placed once", m.put(p.id, new int[]{p.dx, p.dz}));
+		}
+		return m;
+	}
+
+	@Test
+	public void aLonePlayerIsNeverMoved()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		in.add(new StackSpreader.Entry(5, TILE_A, false));
+		in.add(new StackSpreader.Entry(9, TILE_B, false));
+		Assert.assertTrue(StackSpreader.place(in, true, 5, 32).isEmpty());
+	}
+
+	@Test
+	public void twoPlayersGoEastAndWest()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		in.add(new StackSpreader.Entry(7, TILE_A, false));
+		in.add(new StackSpreader.Entry(3, TILE_A, false));
+		Map<Integer, int[]> out = byId(StackSpreader.place(in, true, 5, 32));
+		Assert.assertArrayEquals(new int[]{32, 0}, out.get(3));   // lower id takes slot 0 (east)
+		Assert.assertArrayEquals(new int[]{-32, 0}, out.get(7));
+	}
+
+	@Test
+	public void localPlayerStaysPutWhenExcluded()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		in.add(new StackSpreader.Entry(1, TILE_A, true));
+		in.add(new StackSpreader.Entry(2, TILE_A, false));
+		Map<Integer, int[]> out = byId(StackSpreader.place(in, false, 5, 32));
+		Assert.assertFalse("local player must not be placed", out.containsKey(1));
+		Assert.assertArrayEquals("the other player steps aside", new int[]{32, 0}, out.get(2));
+	}
+
+	@Test
+	public void localPlayerTakesASlotWhenIncluded()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		in.add(new StackSpreader.Entry(1, TILE_A, true));
+		in.add(new StackSpreader.Entry(2, TILE_A, false));
+		Map<Integer, int[]> out = byId(StackSpreader.place(in, true, 5, 32));
+		Assert.assertEquals(2, out.size());
+		Assert.assertTrue(out.containsKey(1));
+	}
+
+	@Test
+	public void placementDoesNotDependOnInputOrder()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		for (int id : new int[]{40, 12, 99, 7})
+		{
+			in.add(new StackSpreader.Entry(id, TILE_A, false));
+		}
+		Map<Integer, int[]> first = byId(StackSpreader.place(in, true, 5, 44));
+		for (int i = 0; i < 20; i++)
+		{
+			Collections.shuffle(in);
+			Map<Integer, int[]> again = byId(StackSpreader.place(in, true, 5, 44));
+			for (int id : first.keySet())
+			{
+				Assert.assertArrayEquals("slot for " + id + " must be stable", first.get(id), again.get(id));
+			}
+		}
+	}
+
+	@Test
+	public void maxStackCapsHowManyMove()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		for (int id = 0; id < 8; id++)
+		{
+			in.add(new StackSpreader.Entry(id, TILE_A, false));
+		}
+		Assert.assertEquals(5, StackSpreader.place(in, true, 5, 32).size());
+		Assert.assertEquals(2, StackSpreader.place(in, true, 2, 32).size());
+	}
+
+	@Test
+	public void ringSlotsSitOnTheCircleAndSpreadEvenly()
+	{
+		for (int n = 1; n <= 5; n++)
+		{
+			for (int i = 0; i < n; i++)
+			{
+				int[] o = StackSpreader.ringOffset(i, n, 40);
+				double r = Math.hypot(o[0], o[1]);
+				Assert.assertEquals("slot " + i + " of " + n + " should be on the ring", 40.0, r, 1.0);
+			}
+		}
+		// Opposite slots of a pair cancel out, so the pair is centred on the tile.
+		int[] a = StackSpreader.ringOffset(0, 2, 30);
+		int[] b = StackSpreader.ringOffset(1, 2, 30);
+		Assert.assertEquals(0, a[0] + b[0]);
+		Assert.assertEquals(0, a[1] + b[1]);
+	}
+}

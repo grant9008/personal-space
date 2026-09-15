@@ -1,0 +1,17 @@
+# Gradle's own working directory. These are machine-local build caches and
+# lock files; committing them breaks `git pull` for everyone else, because
+# git refuses to overwrite the untracked copies their own builds created.
+.gradle/
+build/
+
+# IntelliJ (the project is developed in IDEA)
+.idea/
+*.iml
+out/
+
+# Compiled output
+*.class
+*.jar
+# ...except the Gradle wrapper, if one is ever added — that one IS meant to
+# be committed, and a blanket *.jar would swallow it silently.
+!gradle/wrapper/gradle-wrapper.jar
