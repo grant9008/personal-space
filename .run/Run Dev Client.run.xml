@@ -1,0 +1,21 @@
+<component name="ProjectRunConfigurationManager">
+  <!-- Shared IntelliJ run configuration. IntelliJ picks up every *.run.xml in this folder
+       automatically, so after "File > Open" on the project folder, "Run Dev Client" appears
+       in the run dropdown next to the green play button. It is the same thing
+       "Run Dev Client.bat" does: a full RuneLite client with this plugin loaded.
+       -ea is required because RuneLite insists on assertions in developer mode, and the
+       JRE is pinned to the SDK named "11" (the one the other plugin projects use) because
+       the RuneLite client is built for Java 11. -->
+  <configuration default="false" name="Run Dev Client" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.grant9008.personalspace.PersonalSpacePluginTest" />
+    <module name="personal-space.test" />
+    <option name="VM_PARAMETERS" value="-ea" />
+    <option name="PROGRAM_PARAMETERS" value="--developer-mode" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <option name="ALTERNATIVE_JRE_PATH" value="11" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
