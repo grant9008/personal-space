@@ -41,12 +41,16 @@ public class ShapeMemoryTest
 	}
 
 	@Test
-	public void aCrowdStaysACrowdWhileTheSamePeopleAreThere()
+	public void aCrowdBecomesARowOnceEveryoneTurnsToFaceTheSameThing()
 	{
+		// Two players walk up to a bank booth facing different ways, then both turn to face it.
 		ShapeMemory memory = new ShapeMemory();
 		Assert.assertFalse(tick(memory, group(1, 0, 2, 1024)).row);
-		Assert.assertFalse("they happen to face the same way now, but nobody came or went",
-			tick(memory, group(1, 1024, 2, 1024)).row);
+		ShapeMemory.Shape turned = tick(memory, group(1, 1024, 2, 1024));
+		Assert.assertTrue(turned.row);
+		// One of them turns away again: still a row, so nobody moves.
+		Assert.assertTrue(tick(memory, group(1, 0, 2, 1024)).row);
+		Assert.assertEquals("one change, never back", 1, memory.changes);
 	}
 
 	@Test

@@ -12,10 +12,12 @@ import java.util.Map;
  *
  * <p>A player casting spells or skilling keeps turning towards what they're working on. If the tile's
  * shape were worked out from scratch every tick, each turn could flip the tile between a row and a
- * crowd, or swing the row round, and everyone on it would get new spots. So the shape is kept for as
- * long as the same players are on the tile. Someone leaving (or briefly dropping out and coming
- * back) never changes it either; only a genuinely new arrival does. Even then a row stays a row,
- * facing the same way, unless the facings have clearly changed.
+ * crowd, or swing the row round, and everyone on it would get new spots. So a row is kept for as
+ * long as the same players are on the tile. A crowd can still become a row once everyone faces the
+ * same way: people walking up to a bank booth only turn to face it after they arrive. That change
+ * only goes one way, so it can happen at most once. Someone leaving (or briefly dropping out and
+ * coming back) never changes the shape; only a genuinely new arrival does. Even then a row stays a
+ * row, facing the same way, unless the facings have clearly changed.
  *
  * <p>Client thread only. Knows nothing about RuneLite; unit tested.
  */
@@ -83,9 +85,18 @@ final class ShapeMemory
 		if (old != null && old.smart == smart && old.ids.containsAll(ids))
 		{
 			// Same people, or some of them stepped away: keep the shape, and keep remembering
-			// everyone so someone coming straight back doesn't count as a newcomer.
-			current.put(tile, old);
-			return old.shape;
+			// everyone so someone coming straight back doesn't count as a newcomer. The one change
+			// allowed is a crowd that has since turned to face the same thing becoming a row.
+			Double facing = smart && !old.shape.row && group.size() >= 2 ? StackSpreader.sharedFacing(group, StackSpreader.SAME_FACING) : null;
+			if (facing == null)
+			{
+				current.put(tile, old);
+				return old.shape;
+			}
+			Remembered promoted = new Remembered(old.ids, smart, new Shape(true, facing));
+			changes++;
+			current.put(tile, promoted);
+			return promoted.shape;
 		}
 		Shape shape;
 		if (!smart)

@@ -5,11 +5,11 @@ draws one of them, so a packed bank, the Grand Exchange, an anvil or a campfire 
 Personal Space brings everyone back into view and gives them a little room, so every player and
 every outfit can be seen.
 
-![Before and after at the Grand Exchange](docs/before-after-grand-exchange.jpg)
+![Before and after at the Grand Exchange](docs/photos/grand-exchange-crowd.jpg)
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/sidebar.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -39,18 +39,20 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ## In game
 
-![Before and after at Varrock West Bank](docs/before-after-bank.jpg)
+![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
 
-![Before and after in a Varrock doorway by a fire](docs/before-after-doorway.jpg)
+![Before and after along the Varrock West Bank counter](docs/photos/bank-counter.jpg)
 
-![Before and after on the Grand Exchange steps](docs/before-after-ge-steps.jpg)
+![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
 
-![Before and after across the whole Grand Exchange](docs/before-after-ge-wide.jpg)
+![Before and after on the Grand Exchange steps](docs/photos/grand-exchange-steps.jpg)
 
-![Players in a curve around an anvil in Varrock](docs/anvil-crowd.jpg)
+![Before and after across the whole Grand Exchange](docs/photos/grand-exchange-wide.jpg)
+
+![Players in a curve around an anvil in Varrock](docs/photos/anvil.jpg)
 *Smithing together: a group that would all share one tile forms a curve around the anvil.*
 
-![Personal Space and its sidebar at Varrock West Bank](docs/in-game-sidebar.jpg)
+![Personal Space and its sidebar at Varrock West Bank](docs/photos/in-game-sidebar.jpg)
 *Choose how many players can share a tile and how far apart they stand; changes show straight away.*
 
 ## Using it
