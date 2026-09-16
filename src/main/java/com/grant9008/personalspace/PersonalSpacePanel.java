@@ -23,12 +23,14 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
@@ -93,34 +95,39 @@ final class PersonalSpacePanel extends PluginPanel
 
 	PersonalSpacePanel(ConfigManager configManager, PersonalSpaceConfig config)
 	{
+		// No automatic scroll wrapper: the settings scroll on their own, and the links stay pinned
+		// to the bottom of the sidebar out of the way.
+		super(false);
 		this.configManager = configManager;
 		this.config = config;
 
-		setLayout(new GridBagLayout());
-		setBorder(new EmptyBorder(10, 10, 10, 10));
+		setLayout(new BorderLayout());
+		setBorder(new EmptyBorder(0, 0, 0, 0));
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 
+		JPanel content = new JPanel(new GridBagLayout());
+		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		content.setBorder(new EmptyBorder(10, 10, 10, 10));
 		GridBagConstraints c = column();
-		add(buildHeader(), c);
+		content.add(buildHeader(), c);
 
 		c.gridy++;
-		add(buildCrowdCard(), c);
-
-
-		c.gridy++;
-		c.insets = new Insets(0, 0, 6, 0);
-		add(buildTroubleshooting(), c);
+		content.add(buildCrowdCard(), c);
 
 		c.gridy++;
-		c.insets = new Insets(4, 0, 0, 0);
-		add(buildFooter(), c);
+		content.add(buildTroubleshooting(), c);
 
-		// Push everything to the top when the sidebar is taller than the content.
-		c.gridy++;
-		c.weighty = 1;
-		JPanel filler = new JPanel();
-		filler.setOpaque(false);
-		add(filler, c);
+		// Keep the content at the top of the scroll area.
+		JPanel top = new JPanel(new BorderLayout());
+		top.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		top.add(content, BorderLayout.NORTH);
+		JScrollPane scroll = new JScrollPane(top);
+		scroll.setBorder(null);
+		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		scroll.getVerticalScrollBar().setUnitIncrement(16);
+		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		add(scroll, BorderLayout.CENTER);
+		add(buildFooter(), BorderLayout.SOUTH);
 
 		wireControls();
 		refreshControls();
@@ -332,20 +339,24 @@ final class PersonalSpacePanel extends PluginPanel
 	private JPanel buildFooter()
 	{
 		JPanel p = new JPanel(new GridBagLayout());
-		p.setOpaque(false);
+		p.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		p.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(1, 0, 0, 0, ColorScheme.DARKER_GRAY_COLOR),
+			new EmptyBorder(6, 10, 8, 10)));
 		GridBagConstraints c = column();
 
-		ActionButton support = new ActionButton("Support the developer", new HeartIcon(ColorScheme.BRAND_ORANGE), false);
+		JLabel support = new JLabel("Support the developer", new HeartIcon(ColorScheme.BRAND_ORANGE), SwingConstants.CENTER);
+		support.setIconTextGap(6);
 		support.setToolTipText("Personal Space is free. If you enjoy it, you can chip in here.");
-		support.onClick(() -> LinkBrowser.browse(SUPPORT_URL));
+		link(support, ColorScheme.LIGHT_GRAY_COLOR, () -> LinkBrowser.browse(SUPPORT_URL));
 		p.add(support, c);
 
 		c.gridy++;
-		c.insets = new Insets(6, 0, 0, 0);
+		c.insets = new Insets(3, 0, 0, 0);
 		JPanel small = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
 		small.setOpaque(false);
 		JLabel report = new JLabel("Report a problem");
-		link(report, ColorScheme.LIGHT_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
+		link(report, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
 		small.add(report);
 		JLabel version = new JLabel("v" + PersonalSpacePlugin.VERSION);
 		version.setFont(FontManager.getRunescapeSmallFont());
@@ -647,84 +658,6 @@ final class PersonalSpacePanel extends PluginPanel
 	}
 
 	// ---- controls ----------------------------------------------------------------------
-
-	/** A full-width button: orange for the main action, dark for secondary ones. */
-	private static final class ActionButton extends JLabel
-	{
-		private final boolean primary;
-		private boolean hover;
-		private Runnable action = () ->
-		{
-		};
-
-		ActionButton(String text, Icon icon, boolean primary)
-		{
-			super(text, icon, SwingConstants.CENTER);
-			this.primary = primary;
-			setOpaque(true);
-			setIconTextGap(7);
-			setFont(primary ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeSmallFont());
-			setBorder(new EmptyBorder(primary ? 8 : 7, 6, primary ? 8 : 7, 6));
-			setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-			addMouseListener(new MouseAdapter()
-			{
-				@Override
-				public void mouseClicked(MouseEvent e)
-				{
-					if (isEnabled())
-					{
-						action.run();
-					}
-				}
-
-				@Override
-				public void mouseEntered(MouseEvent e)
-				{
-					hover = true;
-					restyle();
-				}
-
-				@Override
-				public void mouseExited(MouseEvent e)
-				{
-					hover = false;
-					restyle();
-				}
-			});
-			restyle();
-		}
-
-		void onClick(Runnable action)
-		{
-			this.action = action;
-		}
-
-		@Override
-		public void setEnabled(boolean enabled)
-		{
-			super.setEnabled(enabled);
-			restyle();
-		}
-
-		private void restyle()
-		{
-			Color bg;
-			Color fg;
-			if (primary)
-			{
-				bg = !isEnabled() ? ColorScheme.MEDIUM_GRAY_COLOR : hover ? ColorScheme.BRAND_ORANGE.brighter() : ColorScheme.BRAND_ORANGE;
-				fg = SELECTED_TEXT;
-			}
-			else
-			{
-				bg = hover ? ColorScheme.MEDIUM_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR;
-				fg = Color.WHITE;
-			}
-			setBackground(bg);
-			setForeground(fg);
-			repaint();
-		}
-	}
 
 	/** An on/off switch drawn in RuneLite's colours. Fires only on a user click. */
 	private static final class ToggleSwitch extends JComponent
