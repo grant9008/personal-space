@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.5.2";
+	static final String VERSION = "1.5.3";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -72,6 +72,8 @@ public class PersonalSpacePlugin extends Plugin
 	private final StackRegistry stacks = new StackRegistry();
 	/** Who has which spot on each crowded tile, so crowds don't reshuffle. */
 	private final SlotBook slots = new SlotBook();
+	/** Whether each tile is a row or a crowd, kept while the same people are on it. */
+	private final ShapeMemory shapes = new ShapeMemory();
 	/** Tiles laid out as a row last tick, so a tile doesn't flip between row and circle. */
 	private java.util.Set<Long> rowTiles = new java.util.HashSet<>();
 	/** Created in startUp, once the client is injected. */
@@ -414,6 +416,7 @@ public class PersonalSpacePlugin extends Plugin
 		offsets.snapAllToZero();
 		stacks.clear();
 		slots.clear();
+		shapes.clear();
 		rowTiles.clear();
 		stillness.clear();
 		gate = client.getGameState() == GameState.LOGGED_IN ? gate : Snapshot.Gate.NOT_LOGGED_IN;
@@ -442,6 +445,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 
 		java.util.Set<Long> newRowTiles = new java.util.HashSet<>();
+		shapes.startTick();
 		java.util.Map<Long, List<Integer>> movableByTile = new java.util.HashMap<>();
 		java.util.Map<Long, List<int[]>> spotsByTile = new java.util.HashMap<>();
 		CollisionTerrain terrain = null;
@@ -466,9 +470,9 @@ public class PersonalSpacePlugin extends Plugin
 				continue;
 			}
 			boolean middleTaken = movable.size() < group.size() || movable.size() > capacity;
-			double needed = rowTiles.contains(tile) ? StackSpreader.STILL_SAME_FACING : StackSpreader.SAME_FACING;
-			Double facing = smart ? StackSpreader.sharedFacing(group, needed) : null;
-			boolean row = facing != null;
+			ShapeMemory.Shape shape = shapes.decide(tile, group, smart);
+			boolean row = shape.row;
+			double facing = shape.angle;
 			if (row)
 			{
 				newRowTiles.add(tile);
@@ -489,7 +493,7 @@ public class PersonalSpacePlugin extends Plugin
 			int tileSpacing = row && terrain.isCounter(plane, sceneX, sceneY, facing)
 				? Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING)
 				: spacing;
-			spotsByTile.put(tile, StackSpreader.spots(row, row ? facing : 0.0, middleTaken, tileSpacing, capacity,
+			spotsByTile.put(tile, StackSpreader.spots(row, facing, middleTaken, tileSpacing, capacity,
 				(dx, dz) -> t.canStand(plane, ax, az, ax + dx, az + dz)));
 			movableByTile.put(tile, movable);
 		}
