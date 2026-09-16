@@ -287,19 +287,24 @@ final class CrowdPlanner
 				straight = true;
 				kind = "counter row";
 			}
-			else if (row && around.facesFire(tile, shape.angle))
+			else
 			{
-				tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.FIRE_SPACING);
-				kind = "fire row";
+				// Gathered round a fire, in a row or not: stay close, whatever the slider says, and
+				// everyone faces the fire.
+				int[] fire = fireFaced(group, around.firesNear(tile));
+				if (fire != null || (row && around.facesFire(tile, shape.angle)))
+				{
+					tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.FIRE_SPACING);
+					kind = row ? "fire row" : "crowd round a fire";
+				}
+				if (fire != null)
+				{
+					plan.fires.put(tile, new int[]{fire[0] * 2 * HALF_TILE, fire[1] * 2 * HALF_TILE});
+				}
 			}
 			if (row && !straight)
 			{
 				plan.curvedRows.add(tile);
-			}
-			int[] fire = fireFaced(group, around.firesNear(tile));
-			if (fire != null)
-			{
-				plan.fires.put(tile, new int[]{fire[0] * 2 * HALF_TILE, fire[1] * 2 * HALF_TILE});
 			}
 
 			// Neighbouring booth tiles each get their own row: a straight row stops short of a tile

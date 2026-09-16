@@ -19,7 +19,7 @@ every outfit can be seen.
   crowds get more room.
 - **Players walk into place** with their own walk animation.
 - **At an anvil, range or fire**, players form a curve around it and all face it, so nobody ends
-  up hitting thin air. A crowd gathered round a fire all face the fire, whichever side of it they
+  up hitting thin air. A crowd gathered round a fire stays close and faces the fire, whichever side of it they
   end up on. Two players share the space in front of it evenly; extra players fill the
   curve outwards, then stand in the gaps of a second row behind.
 - **At a bank counter**, players line up side by side along the counter, close together, like a

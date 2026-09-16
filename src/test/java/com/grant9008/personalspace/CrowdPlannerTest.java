@@ -381,6 +381,54 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void aBigCrowdRoundAFireStaysCloseAtAnySpacing()
+	{
+		CrowdPlanner.Surroundings fireNorth = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				List<int[]> fires = new ArrayList<>();
+				fires.add(new int[]{0, 1});
+				return fires;
+			}
+		};
+		// Ten players, most facing the fire to the north but not all the same way: a crowd round the fire.
+		List<StackSpreader.Entry> ten = players(1, NORTH, 2, 900, 3, 1150, 4, NORTH, 5, 950, 6, 1100, 7, NORTH, 8, SOUTH, 9, 600, 10, NORTH);
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(ten, id -> true, PersonalSpaceConfig.MAX_SPACING, 10, true, false, 1, fireNorth);
+		Assert.assertEquals(PersonalSpaceConfig.FIRE_SPACING, plan.tiles.get(TILE).spacing);
+		Assert.assertArrayEquals(new int[]{0, 128}, plan.fires.get(TILE));
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertTrue("player " + p.id + " wandered off: " + p.dx + "," + p.dz, Math.hypot(p.dx, p.dz) <= 2 * PersonalSpaceConfig.FIRE_SPACING);
+		}
+	}
+
+	@Test
 	public void aCrowdFacingAFireIsTurnedToFaceIt()
 	{
 		List<int[]> fireNorth = new ArrayList<>();
