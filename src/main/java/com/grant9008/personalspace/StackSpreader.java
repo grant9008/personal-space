@@ -119,7 +119,7 @@ final class StackSpreader
 	 */
 	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout)
 	{
-		return place(entries, includeLocal, maxStack, spacing, layout, java.util.Collections.emptySet(), null);
+		return place(entries, includeLocal, maxStack, spacing, layout, java.util.Collections.emptySet(), null, null);
 	}
 
 	/**
@@ -131,6 +131,16 @@ final class StackSpreader
 	 */
 	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout,
 		Set<Long> wasRow, Set<Long> isRow)
+	{
+		return place(entries, includeLocal, maxStack, spacing, layout, wasRow, isRow, null);
+	}
+
+	/**
+	 * As above, also filling {@code rowFacing} with the direction each row faces (radians, game
+	 * convention), so the crowd layout can keep rows in front of what they're using.
+	 */
+	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout,
+		Set<Long> wasRow, Set<Long> isRow, Map<Long, Double> rowFacing)
 	{
 		Map<Long, List<Entry>> byTile = new LinkedHashMap<>();
 		for (Entry e : entries)
@@ -167,11 +177,15 @@ final class StackSpreader
 			double needed = wasRow.contains(tile) ? STILL_SAME_FACING : SAME_FACING;
 			Double facing = layout == Layout.RING ? null : sharedFacing(group, needed);
 			boolean line = layout == Layout.LINE || (layout == Layout.AUTO && facing != null);
+			double angle = facing != null ? facing : 0.0;
 			if (line && isRow != null)
 			{
 				isRow.add(tile);
 			}
-			double angle = facing != null ? facing : 0.0;
+			if (line && rowFacing != null)
+			{
+				rowFacing.put(tile, angle);
+			}
 
 			for (int i = 0; i < n; i++)
 			{

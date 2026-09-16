@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.4.0";
+	static final String VERSION = "1.4.1";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -356,13 +356,17 @@ public class PersonalSpacePlugin extends Plugin
 
 		int spacing = config.spacing();
 		java.util.Set<Long> newRowTiles = new java.util.HashSet<>();
+		java.util.Map<Long, Double> rowFacing = new java.util.HashMap<>();
 		List<StackSpreader.Placement> placements = StackSpreader.place(
 			entries, config.includeLocalPlayer(), config.maxStack(), spacing, layoutFor(config.arrangement()),
-			rowTiles, newRowTiles);
+			rowTiles, newRowTiles, rowFacing);
 		rowTiles = newRowTiles;
-		if (config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO && !placements.isEmpty())
+		if (!placements.isEmpty())
 		{
-			placements = CrowdLayout.settle(placements, obstacles(entries, placements), terrain(wv), spacing);
+			CrowdLayout.Terrain terrain = terrain(wv);
+			placements = config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO
+				? CrowdLayout.settle(placements, obstacles(entries, placements), terrain, spacing, rowFacing)
+				: CrowdLayout.keepStandable(placements, terrain);
 		}
 		placements = StackSpreader.keepCurrentSpots(placements, new StackSpreader.Targets()
 		{

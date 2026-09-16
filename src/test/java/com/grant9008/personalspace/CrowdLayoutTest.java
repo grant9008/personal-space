@@ -142,6 +142,52 @@ public class CrowdLayoutTest
 	}
 
 	@Test
+	public void aRowAtABoothDoesNotTurnIntoAQueue()
+	{
+		// Five players facing a booth to the north, widest spacing, with still players standing
+		// just behind them pushing forward: nobody is drawn more than a quarter tile back, nobody
+		// goes past the booth, and nobody wanders more than a tile and a bit away.
+		CollisionTerrain terrain = new CollisionTerrain(openGround()); // even with no collision data at all
+		java.util.Set<Long> none = java.util.Collections.emptySet();
+		java.util.Map<Long, Double> facing = new java.util.HashMap<>();
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		for (int i = 0; i < 5; i++)
+		{
+			in.add(new StackSpreader.Entry(i + 1, TILE, false, 1024));
+		}
+		List<StackSpreader.Placement> seeds = StackSpreader.place(in, true, 5, PersonalSpaceConfig.MAX_SPACING,
+			StackSpreader.Layout.AUTO, none, new java.util.HashSet<>(), facing);
+		Assert.assertTrue("the tile is a row", facing.containsKey(TILE));
+
+		List<CrowdLayout.Obstacle> queue = new ArrayList<>();
+		queue.add(new CrowdLayout.Obstacle(0, CX, CZ - 128));
+		queue.add(new CrowdLayout.Obstacle(0, CX - 128, CZ - 128));
+		queue.add(new CrowdLayout.Obstacle(0, CX + 128, CZ - 128));
+
+		List<StackSpreader.Placement> out = CrowdLayout.settle(seeds, queue, terrain, PersonalSpaceConfig.MAX_SPACING, facing);
+		for (StackSpreader.Placement p : out)
+		{
+			Assert.assertTrue("player " + p.id + " pushed back into the queue: " + p.dz, p.dz >= -CrowdLayout.ROW_BACK - 1);
+			Assert.assertTrue("player " + p.id + " went past the booth: " + p.dz, p.dz <= CrowdLayout.ROW_FORWARD + 1);
+			Assert.assertTrue("player " + p.id + " wandered off", Math.hypot(p.dx, p.dz) <= CrowdLayout.ROW_REACH + 1);
+		}
+	}
+
+	@Test
+	public void circleStillKeepsPeopleOutOfBooths()
+	{
+		int[][][] flags = openGround();
+		flags[0][TX][TZ + 1] = CollisionTerrain.BLOCK_FULL;
+		CollisionTerrain terrain = new CollisionTerrain(flags);
+		List<StackSpreader.Placement> ring = stack(4, 200, StackSpreader.Layout.RING, -1);
+		for (StackSpreader.Placement p : CrowdLayout.keepStandable(ring, terrain))
+		{
+			Assert.assertTrue("player " + p.id + " inside the booth: " + p.dz,
+				CZ + p.dz <= TZ * 128 + 127 - CollisionTerrain.EDGE_MARGIN);
+		}
+	}
+
+	@Test
 	public void terrainStepRules()
 	{
 		int[][] f = new int[3][3];

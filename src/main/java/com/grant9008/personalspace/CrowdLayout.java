@@ -46,6 +46,12 @@ final class CrowdLayout
 	}
 
 	static final int ITERATIONS = 16;
+	/** How far back from their real spot a player in a row may be drawn: a quarter tile, so rows don't turn into queues. */
+	static final int ROW_BACK = 32;
+	/** How far forward a player in a row may be drawn: short of the thing they're facing, a tile ahead. */
+	static final int ROW_FORWARD = 90;
+	/** How far a player in a row may be drawn from their tile at all. */
+	static final int ROW_REACH = 150;
 	/** Nobody is drawn further than this from their real spot, in local units (three tiles). */
 	static final int MAX_REACH = 384;
 	private static final double PULL_TO_START = 0.12;
@@ -65,6 +71,19 @@ final class CrowdLayout
 	static List<StackSpreader.Placement> settle(List<StackSpreader.Placement> placements, List<Obstacle> obstacles,
 		Terrain terrain, int spacing)
 	{
+		return settle(placements, obstacles, terrain, spacing, java.util.Collections.emptyMap());
+	}
+
+	/**
+	 * As above. Players on a row tile (one where everyone faces the same thing) are also kept in
+	 * front of that thing: no more than {@link #ROW_BACK} behind their real spot, never past the
+	 * thing itself, and within {@link #ROW_REACH} of their tile, whatever the spacing.
+	 *
+	 * @param rowFacing direction each row tile faces, in radians (game convention)
+	 */
+	static List<StackSpreader.Placement> settle(List<StackSpreader.Placement> placements, List<Obstacle> obstacles,
+		Terrain terrain, int spacing, Map<Long, Double> rowFacing)
+	{
 		int n = placements.size();
 		if (n == 0 || spacing <= 0)
 		{
@@ -79,6 +98,9 @@ final class CrowdLayout
 		double[] px = new double[n];
 		double[] pz = new double[n];
 		double[] maxR = new double[n];
+		boolean[] row = new boolean[n];
+		double[] fwdX = new double[n];
+		double[] fwdZ = new double[n];
 
 		Map<Long, Integer> groupSize = new HashMap<>();
 		for (StackSpreader.Placement p : placements)
@@ -99,7 +121,20 @@ final class CrowdLayout
 			az[i] = StackRegistry.sceneY(p.tile) * 128 + 64;
 			int size = groupSize.getOrDefault(p.tile, 1);
 			maxR[i] = Math.min(MAX_REACH, spacing * Math.max(1.0, (size - 1) / 2.0) + 1);
-			double[] start = pullInside(terrain, plane[i], ax[i], az[i], ax[i] + p.dx, az[i] + p.dz);
+			Double facing = rowFacing.get(p.tile);
+			double startX = ax[i] + p.dx;
+			double startZ = az[i] + p.dz;
+			if (facing != null)
+			{
+				row[i] = true;
+				fwdX[i] = -Math.sin(facing);
+				fwdZ[i] = -Math.cos(facing);
+				maxR[i] = Math.min(maxR[i], ROW_REACH);
+				double[] kept = keepInRow(ax[i], az[i], startX, startZ, fwdX[i], fwdZ[i], maxR[i]);
+				startX = kept[0];
+				startZ = kept[1];
+			}
+			double[] start = pullInside(terrain, plane[i], ax[i], az[i], startX, startZ);
 			sx[i] = start[0];
 			sz[i] = start[1];
 			px[i] = sx[i];
@@ -157,6 +192,12 @@ final class CrowdLayout
 				{
 					cx = ax[i] + rx * maxR[i] / r;
 					cz = az[i] + rz * maxR[i] / r;
+				}
+				if (row[i])
+				{
+					double[] kept = keepInRow(ax[i], az[i], cx, cz, fwdX[i], fwdZ[i], maxR[i]);
+					cx = kept[0];
+					cz = kept[1];
 				}
 
 				if (stand(terrain, plane[i], ax[i], az[i], cx, cz))
@@ -218,6 +259,42 @@ final class CrowdLayout
 	private static boolean stand(Terrain terrain, int plane, double ax, double az, double x, double z)
 	{
 		return terrain.canStand(plane, (int) ax, (int) az, (int) Math.round(x), (int) Math.round(z));
+	}
+
+	/**
+	 * Keep a row player's spot between {@link #ROW_BACK} behind and {@link #ROW_FORWARD} in front of
+	 * their real spot (along the direction the row faces), and within {@code reach} of it.
+	 */
+	static double[] keepInRow(double ax, double az, double x, double z, double fwdX, double fwdZ, double reach)
+	{
+		double dx = x - ax;
+		double dz = z - az;
+		double forward = dx * fwdX + dz * fwdZ;
+		double clamped = Math.max(-ROW_BACK, Math.min(ROW_FORWARD, forward));
+		dx += (clamped - forward) * fwdX;
+		dz += (clamped - forward) * fwdZ;
+		double r = Math.hypot(dx, dz);
+		if (r > reach)
+		{
+			dx *= reach / r;
+			dz *= reach / r;
+		}
+		return new double[]{ax + dx, az + dz};
+	}
+
+	/** Circle arrangement: no settling, but still nobody inside a booth, stall or wall. */
+	static List<StackSpreader.Placement> keepStandable(List<StackSpreader.Placement> placements, Terrain terrain)
+	{
+		List<StackSpreader.Placement> out = new ArrayList<>(placements.size());
+		for (StackSpreader.Placement p : placements)
+		{
+			int plane = StackRegistry.plane(p.tile);
+			double ax = StackRegistry.sceneX(p.tile) * 128 + 64;
+			double az = StackRegistry.sceneY(p.tile) * 128 + 64;
+			double[] spot = pullInside(terrain, plane, ax, az, ax + p.dx, az + p.dz);
+			out.add(new StackSpreader.Placement(p.id, p.tile, (int) Math.round(spot[0] - ax), (int) Math.round(spot[1] - az)));
+		}
+		return out;
 	}
 
 	/** Move a starting spot towards the real tile until it's somewhere a player could stand. */
