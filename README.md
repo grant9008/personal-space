@@ -5,7 +5,7 @@ draws one of them, so a packed bank, the Grand Exchange, an anvil or a campfire 
 Personal Space brings everyone back into view and gives them a little room, so every player and
 every outfit can be seen.
 
-![Before and after at the Grand Exchange](docs/photos/grand-exchange-crowd.jpg)
+![Before and after at the Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
@@ -44,6 +44,8 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 ![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
 
 ![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
+
+![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 
 ![Before and after on the Grand Exchange steps](docs/photos/grand-exchange-steps.jpg)
 
