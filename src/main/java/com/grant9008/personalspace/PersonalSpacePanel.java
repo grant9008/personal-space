@@ -20,11 +20,9 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -45,9 +43,9 @@ import net.runelite.client.util.LinkBrowser;
 /**
  * The Personal Space sidebar.
  *
- * <p>Top to bottom: title with the on/off switch, a one-line status, a "Crowd" card and a
- * "Movement" card with the everyday settings, a "Before & after" photo card, a folded-away
- * Troubleshooting section, and links to support the developer or report a problem.
+ * <p>Top to bottom: title with the on/off switch, a "Crowd" card and a "Movement" card with the
+ * everyday settings, a folded-away Troubleshooting section (status, test mode, live checks and a
+ * copyable report), and links to support the developer or report a problem.
  *
  * <p>Swing thread only. The plugin pushes a fresh {@link Snapshot} a couple of times a second via
  * {@link #update}, and calls {@link #refreshControls} whenever the config changes (including from
@@ -61,11 +59,9 @@ final class PersonalSpacePanel extends PluginPanel
 	private static final int TEXT_WIDTH_PX = 150;
 	private static final Color SELECTED_TEXT = new Color(30, 30, 30);
 	private static final Color CARD = ColorScheme.DARKER_GRAY_COLOR;
-	private static final Color SUCCESS = ColorScheme.PROGRESS_COMPLETE_COLOR;
 
 	private final ConfigManager configManager;
 	private final PersonalSpaceConfig config;
-	private final Consumer<Consumer<PhotoBooth.Status>> takePhoto;
 
 	private final ToggleSwitch activeSwitch = new ToggleSwitch();
 	private final JLabel statusDot = new JLabel();
@@ -89,11 +85,6 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JPanel walkSpeedRow = new JPanel(new GridBagLayout());
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 
-	private final ActionButton photoButton = new ActionButton("Take photo", new CameraIcon(SELECTED_TEXT), true);
-	private final JLabel photoStatus = new JLabel();
-	private final JLabel openFolderLink = new JLabel("Open folder");
-	private File lastPhoto;
-
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
 	private final ToggleSwitch testModeSwitch = new ToggleSwitch();
@@ -106,11 +97,10 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private Snapshot last = new Snapshot();
 
-	PersonalSpacePanel(ConfigManager configManager, PersonalSpaceConfig config, Consumer<Consumer<PhotoBooth.Status>> takePhoto)
+	PersonalSpacePanel(ConfigManager configManager, PersonalSpaceConfig config)
 	{
 		this.configManager = configManager;
 		this.config = config;
-		this.takePhoto = takePhoto;
 
 		setLayout(new GridBagLayout());
 		setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -120,17 +110,10 @@ final class PersonalSpacePanel extends PluginPanel
 		add(buildHeader(), c);
 
 		c.gridy++;
-		c.insets = new Insets(0, 0, 10, 0);
-		add(buildStatus(), c);
-
-		c.gridy++;
 		add(buildCrowdCard(), c);
 
 		c.gridy++;
 		add(buildMovementCard(), c);
-
-		c.gridy++;
-		add(buildPhotoCard(), c);
 
 		c.gridy++;
 		c.insets = new Insets(0, 0, 6, 0);
@@ -154,20 +137,20 @@ final class PersonalSpacePanel extends PluginPanel
 
 	// ---- called by the plugin ----------------------------------------------------------
 
-	/** Swing thread. Show a fresh snapshot. */
+	/** Swing thread. Show a fresh snapshot. Only the Troubleshooting section shows it, and only while open. */
 	void update(Snapshot s)
 	{
 		last = s;
+		if (!troubleshootingBody.isVisible())
+		{
+			return;
+		}
 
 		StatusSummary.Headline h = StatusSummary.headline(s);
 		statusDot.setIcon(new Dot(colorFor(h.level), 10));
 		statusTitle.setText(wrap(h.title));
 		statusDetail.setText(wrap(h.detail));
 
-		if (!troubleshootingBody.isVisible())
-		{
-			return;
-		}
 		List<StatusSummary.Check> checks = StatusSummary.checks(s);
 		if (checks.size() != checkRows.size())
 		{
@@ -216,19 +199,6 @@ final class PersonalSpacePanel extends PluginPanel
 		repaint();
 	}
 
-	/** Swing thread. Show how the before-and-after photo is getting on. */
-	void showPhotoStatus(PhotoBooth.Status status)
-	{
-		photoStatus.setText(wrap(status.text));
-		photoStatus.setForeground(status.failed ? ColorScheme.PROGRESS_ERROR_COLOR
-			: status.file != null ? SUCCESS : ColorScheme.LIGHT_GRAY_COLOR);
-		photoStatus.setVisible(true);
-		photoButton.setEnabled(!status.busy);
-		lastPhoto = status.file != null ? status.file : lastPhoto;
-		openFolderLink.setVisible(lastPhoto != null);
-		revalidate();
-	}
-
 	// ---- building ----------------------------------------------------------------------
 
 	private JPanel buildHeader()
@@ -260,9 +230,7 @@ final class PersonalSpacePanel extends PluginPanel
 	{
 		JPanel card = new JPanel(new BorderLayout(8, 0));
 		card.setBackground(CARD);
-		card.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
-			new EmptyBorder(8, 8, 8, 8)));
+		card.setBorder(new EmptyBorder(8, 8, 8, 8));
 
 		statusDot.setVerticalAlignment(SwingConstants.TOP);
 		statusDot.setBorder(new EmptyBorder(3, 0, 0, 0));
@@ -336,49 +304,6 @@ final class PersonalSpacePanel extends PluginPanel
 		return wrapCard(card);
 	}
 
-	private JPanel buildPhotoCard()
-	{
-		JPanel card = card("Before & after");
-		GridBagConstraints c = cardConstraints();
-
-		JLabel blurb = new JLabel(wrap("Snap the scene without and with Personal Space, side by side. Great for sharing."));
-		blurb.setFont(FontManager.getRunescapeSmallFont());
-		blurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		card.add(blurb, c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		photoButton.setToolTipText("Takes a few seconds: everyone is shown as normal, then spread out, and both are saved.");
-		photoButton.onClick(() ->
-		{
-			if (takePhoto != null)
-			{
-				showPhotoStatus(PhotoBooth.Status.working("Getting ready..."));
-				takePhoto.accept(this::showPhotoStatus);
-			}
-		});
-		card.add(photoButton, c);
-
-		c.gridy++;
-		c.insets = new Insets(6, 0, 0, 0);
-		photoStatus.setFont(FontManager.getRunescapeSmallFont());
-		photoStatus.setVisible(false);
-		card.add(photoStatus, c);
-
-		c.gridy++;
-		c.insets = new Insets(2, 0, 0, 0);
-		link(openFolderLink, ColorScheme.BRAND_ORANGE, () ->
-		{
-			if (lastPhoto != null && lastPhoto.getParentFile() != null)
-			{
-				LinkBrowser.open(lastPhoto.getParentFile().getAbsolutePath());
-			}
-		});
-		openFolderLink.setVisible(false);
-		card.add(openFolderLink, c);
-		return wrapCard(card);
-	}
-
 	private JPanel buildTroubleshooting()
 	{
 		JPanel p = new JPanel(new GridBagLayout());
@@ -403,6 +328,10 @@ final class PersonalSpacePanel extends PluginPanel
 
 		troubleshootingBody.setOpaque(false);
 		GridBagConstraints b = column();
+		b.insets = new Insets(4, 0, 6, 0);
+		troubleshootingBody.add(buildStatus(), b);
+
+		b.gridy++;
 		b.insets = new Insets(4, 0, 0, 0);
 		troubleshootingBody.add(switchRow("Test: shift only me", testModeSwitch,
 			"Ignores everyone else and draws your own character a little to the east, to check the effect works."), b);
@@ -1128,44 +1057,6 @@ final class PersonalSpacePanel extends PluginPanel
 		public int getIconHeight()
 		{
 			return 8;
-		}
-	}
-
-	/** A simple camera. */
-	private static final class CameraIcon implements Icon
-	{
-		private final Color color;
-
-		CameraIcon(Color color)
-		{
-			this.color = color;
-		}
-
-		@Override
-		public void paintIcon(Component c, Graphics g, int x, int y)
-		{
-			Graphics2D g2 = (Graphics2D) g.create();
-			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-			g2.setColor(color);
-			g2.fillRoundRect(x, y + 3, 16, 10, 3, 3);
-			g2.fillRect(x + 5, y + 1, 6, 3);
-			g2.setColor(ColorScheme.BRAND_ORANGE);
-			g2.fillOval(x + 5, y + 5, 6, 6);
-			g2.setColor(color);
-			g2.fillOval(x + 6, y + 6, 4, 4);
-			g2.dispose();
-		}
-
-		@Override
-		public int getIconWidth()
-		{
-			return 16;
-		}
-
-		@Override
-		public int getIconHeight()
-		{
-			return 14;
 		}
 	}
 

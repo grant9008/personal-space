@@ -95,20 +95,6 @@ final class OffsetTable
 		return id >= 0 && id < CAPACITY ? tgtZ[id] : 0;
 	}
 
-	/** True once every moving player has reached their spot. */
-	boolean isSettled()
-	{
-		for (int i = 0; i < activeCount; i++)
-		{
-			int id = active[i];
-			if (curX[id] != tgtX[id] || curZ[id] != tgtZ[id])
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-
 	/** Counts frames; used to tell draws in the same frame apart. */
 	int frame()
 	{

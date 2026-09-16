@@ -5,8 +5,6 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -30,9 +28,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.RuneLite;
 import net.runelite.client.ui.ClientToolbar;
-import net.runelite.client.ui.DrawManager;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
 import org.slf4j.Logger;
@@ -45,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.3.0";
+	static final String VERSION = "1.3.1";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -71,28 +67,6 @@ public class PersonalSpacePlugin extends Plugin
 
 	@Inject
 	private RenderCallbackManager renderCallbackManager;
-
-	@Inject
-	private DrawManager drawManager;
-
-	@Inject
-	private ScheduledExecutorService executor;
-
-	/** Before-and-after photo, driven from the client thread. */
-	private enum PhotoStage
-	{
-		IDLE,
-		BEFORE,
-		SPREADING,
-		AFTER
-	}
-
-	private PhotoStage photoStage = PhotoStage.IDLE;
-	/** While true, the effect is held off so the "before" frame shows the normal game. */
-	private boolean photoHoldOff;
-	private long photoSpreadStartNanos;
-	private java.awt.image.BufferedImage photoBefore;
-	private Consumer<PhotoBooth.Status> photoListener;
 
 	private final OffsetTable offsets = new OffsetTable();
 	private final StackRegistry stacks = new StackRegistry();
@@ -147,7 +121,7 @@ public class PersonalSpacePlugin extends Plugin
 		probe = new StackProbe(client, offsets, stacks);
 		renderCallbackManager.register(probe);
 
-		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config, this::takeBeforeAfterPhoto);
+		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
 		BufferedImage icon = ImageUtil.loadImageResource(PersonalSpacePlugin.class, "panel_icon.png");
 		navButton = NavigationButton.builder()
 			.tooltip("Personal Space")
@@ -176,12 +150,6 @@ public class PersonalSpacePlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
-		clientThread.invoke(() ->
-		{
-			photoStage = PhotoStage.IDLE;
-			photoHoldOff = false;
-			photoBefore = null;
-		});
 		renderCallbackManager.unregister(probe);
 		panel = null;
 		if (navButton != null)
@@ -230,16 +198,6 @@ public class PersonalSpacePlugin extends Plugin
 		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
 		{
 			pushSnapshot(now);
-		}
-
-		if (photoStage == PhotoStage.SPREADING)
-		{
-			double seconds = (now - photoSpreadStartNanos) / 1_000_000_000.0;
-			boolean settled = moving > 0 && offsets.isSettled() && seconds >= 1.5;
-			if (settled || seconds >= 8)
-			{
-				captureAfter();
-			}
 		}
 	}
 
@@ -318,7 +276,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 
 		Snapshot.Gate newGate = safetyGate(local);
-		if (newGate != Snapshot.Gate.SAFE || !config.active() || photoHoldOff)
+		if (newGate != Snapshot.Gate.SAFE || !config.active())
 		{
 			// Hard off: straight back to real positions, no easing, no exceptions.
 			resetTickState();
@@ -444,93 +402,6 @@ public class PersonalSpacePlugin extends Plugin
 		stackedTiles = StackSpreader.stackedTiles(entries);
 		moving = placements.size();
 		skippedIds = skipped;
-	}
-
-	// ---- before-and-after photo --------------------------------------------------------
-
-	/** Any thread. Take a before-and-after photo; progress is reported to {@code listener} on the Swing thread. */
-	void takeBeforeAfterPhoto(Consumer<PhotoBooth.Status> listener)
-	{
-		clientThread.invoke(() ->
-		{
-			if (photoStage != PhotoStage.IDLE)
-			{
-				report(listener, PhotoBooth.Status.working("Already taking a photo..."));
-				return;
-			}
-			if (client.getGameState() != GameState.LOGGED_IN)
-			{
-				report(listener, PhotoBooth.Status.problem("Log in first."));
-				return;
-			}
-			if (!config.active())
-			{
-				report(listener, PhotoBooth.Status.problem("Turn Personal Space on first."));
-				return;
-			}
-			if (wrapper == null)
-			{
-				report(listener, PhotoBooth.Status.problem("Turn on the GPU plugin first."));
-				return;
-			}
-			photoListener = listener;
-			photoStage = PhotoStage.BEFORE;
-			photoHoldOff = true;
-			resetTickState();
-			report(listener, PhotoBooth.Status.working("Taking the before shot..."));
-			drawManager.requestNextFrameListener(image ->
-			{
-				photoBefore = ImageUtil.bufferedImageFromImage(image);
-				clientThread.invokeLater(() ->
-				{
-					photoHoldOff = false;
-					photoStage = PhotoStage.SPREADING;
-					photoSpreadStartNanos = System.nanoTime();
-					report(photoListener, PhotoBooth.Status.working("Spreading everyone out..."));
-				});
-			});
-		});
-	}
-
-	/** Client thread. */
-	private void captureAfter()
-	{
-		photoStage = PhotoStage.AFTER;
-		String caption = moving > 0
-			? moving + " players spread out on " + stackedTiles + (stackedTiles == 1 ? " crowded tile" : " crowded tiles")
-			: "No crowds nearby";
-		drawManager.requestNextFrameListener(image ->
-		{
-			java.awt.image.BufferedImage after = ImageUtil.bufferedImageFromImage(image);
-			java.awt.image.BufferedImage before = photoBefore;
-			photoBefore = null;
-			Consumer<PhotoBooth.Status> listener = photoListener;
-			executor.execute(() ->
-			{
-				try
-				{
-					java.io.File file = PhotoBooth.save(PhotoBooth.compose(before, after, caption), RuneLite.SCREENSHOT_DIR);
-					report(listener, PhotoBooth.Status.done(file));
-				}
-				catch (Exception e)
-				{
-					log.warn("Couldn't save the before-and-after photo", e);
-					report(listener, PhotoBooth.Status.problem("Couldn't save the photo."));
-				}
-				finally
-				{
-					clientThread.invokeLater(() -> photoStage = PhotoStage.IDLE);
-				}
-			});
-		});
-	}
-
-	private static void report(Consumer<PhotoBooth.Status> listener, PhotoBooth.Status status)
-	{
-		if (listener != null)
-		{
-			SwingUtilities.invokeLater(() -> listener.accept(status));
-		}
 	}
 
 	/** Why the effect must be off right now, or SAFE. */

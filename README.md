@@ -18,8 +18,6 @@ every outfit can be seen.
   wall, give room to people on the next tile, and line up side by side at things people face.
 - **Players walk into place** with their own walk animation, at a speed you choose. They glide or
   appear instantly if you prefer.
-- **Before & after photos.** One click saves a side-by-side shot of the scene without and with
-  Personal Space, ready to share.
 - **Purely cosmetic.** Nobody's real position, clickbox, name, chat or minimap dot changes.
 - **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds and
   while you're in combat, and never shows players the game itself keeps hidden.
@@ -40,11 +38,10 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Arrangement | **Smart** spreads the whole crowd around obstacles and neighbours. **Circle** is a simple ring per tile. |
 | Movement | **Walk** (with a walk speed slider), **Glide** or **Instant**. |
 | Move my character too | Off: you stay put and others step around you. |
-| Before & after | **Take photo** saves a side-by-side picture to your RuneLite screenshots folder, under *Personal Space*. |
-| Troubleshooting | Test mode, live checks and a **Copy report** button for bug reports. |
+| Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
 
-The status line at the top says what's happening: green is working, grey is waiting (for example
-no crowds nearby), orange is off or paused for safety, red is a problem worth reporting.
+If crowds aren't spreading, open **Troubleshooting**: the status at the top says why (for example
+the GPU plugin is off, or you're in a PvP area) and what to do.
 
 ## Support the developer
 
@@ -53,7 +50,7 @@ help it keep improving:
 
 - **[Tip the developer](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)** through Stripe. Any amount helps.
 - **Star this repository** on GitHub so more players find it.
-- **Share your before & after photos** from the sidebar.
+- **Share screenshots** of a busy world with Personal Space on.
 - **Report a problem** or suggest an idea in [Issues](https://github.com/grant9008/personal-space/issues).
   Pressing **Copy report** under Troubleshooting and pasting it in helps a lot.
 
@@ -70,7 +67,7 @@ decided to draw. Players stacked behind someone are briefly let through one at a
 confirmed; the frame looks identical while this happens.
 
 Everything is public RuneLite API. No reflection, nothing saved about other players, nothing sent
-anywhere. The only file it writes is a before & after photo, when you ask for one.
+anywhere.
 
 ### Known limits
 
@@ -87,7 +84,7 @@ anywhere. The only file it writes is a before & after photo, when you ask for on
 
 ```
 src/main/java/com/grant9008/personalspace/
-  PersonalSpacePlugin.java      plugin entry: safety rules, per-tick layout, photos, sidebar updates
+  PersonalSpacePlugin.java      plugin entry: safety rules, per-tick layout, sidebar updates
   SpreadingDrawCallbacks.java   sits in front of the renderer; draws players at their spots
   StackProbe.java               confirms players are ones the game is willing to draw
   StackSpreader.java            starting spots per tile (circle or side by side)
@@ -96,7 +93,6 @@ src/main/java/com/grant9008/personalspace/
   StackRegistry.java            which players share each crowded tile
   StillnessTracker.java         "is this player standing still"
   OffsetTable.java              current offsets, walking and gliding
-  PhotoBooth.java               builds and saves the before & after picture
   PersonalSpacePanel.java       the sidebar
   StatusSummary.java, Snapshot.java   status line, live checks and report
   PersonalSpaceConfig.java      settings
