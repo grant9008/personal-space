@@ -64,6 +64,10 @@ final class Snapshot
 	long probeHeld;
 	/** Players never confirmed by the game (e.g. hidden by the server), so never drawn; total. */
 	long probeGaveUp;
+	/** Times a tile switched between a row and a crowd, or a row turned; total. */
+	long shapeChanges;
+	/** Times a player with a spot was moved to a different spot to fill a gap; total. */
+	long spotMoves;
 	/** No player draws at all for over a second while connected and logged in. */
 	boolean noPlayerDrawsSustained;
 	/** Players (or you, in test mode) should be shifted but nothing was drawn shifted for over a second. */

@@ -13,8 +13,9 @@ import java.util.Map;
  * <p>A player casting spells or skilling keeps turning towards what they're working on. If the tile's
  * shape were worked out from scratch every tick, each turn could flip the tile between a row and a
  * crowd, or swing the row round, and everyone on it would get new spots. So the shape is kept for as
- * long as the same players are on the tile. When someone arrives or leaves it's worked out again,
- * and even then a row stays a row, facing the same way, unless the facings have clearly changed.
+ * long as the same players are on the tile. Someone leaving (or briefly dropping out and coming
+ * back) never changes it either; only a genuinely new arrival does. Even then a row stays a row,
+ * facing the same way, unless the facings have clearly changed.
  *
  * <p>Client thread only. Knows nothing about RuneLite; unit tested.
  */
@@ -53,6 +54,9 @@ final class ShapeMemory
 	private Map<Long, Remembered> previous = new HashMap<>();
 	private Map<Long, Remembered> current = new HashMap<>();
 
+	/** Diagnostics: how many times a tile's shape actually changed. */
+	long changes;
+
 	/** Call before deciding this tick's shapes. */
 	void startTick()
 	{
@@ -76,12 +80,15 @@ final class ShapeMemory
 		Collections.sort(ids);
 
 		Remembered old = previous.get(tile);
-		Shape shape;
-		if (old != null && old.smart == smart && old.ids.equals(ids))
+		if (old != null && old.smart == smart && old.ids.containsAll(ids))
 		{
-			shape = old.shape; // same people: nothing to reconsider
+			// Same people, or some of them stepped away: keep the shape, and keep remembering
+			// everyone so someone coming straight back doesn't count as a newcomer.
+			current.put(tile, old);
+			return old.shape;
 		}
-		else if (!smart)
+		Shape shape;
+		if (!smart)
 		{
 			shape = new Shape(false, 0);
 		}
@@ -103,7 +110,19 @@ final class ShapeMemory
 				shape = new Shape(true, facing);
 			}
 		}
-		current.put(tile, new Remembered(ids, smart, shape));
+		if (old != null && (old.shape.row != shape.row || old.shape.angle != shape.angle))
+		{
+			changes++;
+		}
+		List<Integer> remembered = ids;
+		if (old != null && old.smart == smart)
+		{
+			// Keep remembering people who stepped away, so their return isn't a new arrival.
+			java.util.Set<Integer> union = new java.util.TreeSet<>(old.ids);
+			union.addAll(ids);
+			remembered = new ArrayList<>(union);
+		}
+		current.put(tile, new Remembered(remembered, smart, shape));
 		return shape;
 	}
 

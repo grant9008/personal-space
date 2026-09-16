@@ -184,6 +184,8 @@ final class StatusSummary
 			.append(", no walk (animation not loaded): ").append(s.walkSkippedNoAnimation)
 			.append(", held for confirmation: ").append(s.probeHeld)
 			.append(", never confirmed: ").append(s.probeGaveUp)
+			.append(", tile shape changes: ").append(s.shapeChanges)
+			.append(", spot moves: ").append(s.spotMoves)
 			.append(", no draws sustained: ").append(yesNo(s.noPlayerDrawsSustained))
 			.append(", nothing moved sustained: ").append(yesNo(s.nothingMovedSustained)).append('\n');
 		b.append("Nearby: ").append(s.nearby)

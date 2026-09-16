@@ -83,6 +83,9 @@ final class SlotBook
 
 	private final Map<Long, Tile> tiles = new HashMap<>();
 
+	/** Diagnostics: how many times a player who already had a spot was given a different one. */
+	long moves;
+
 	/** True if a spot on this tile is being held for someone who just left. */
 	boolean isHolding(long tile, int tick)
 	{
@@ -202,6 +205,7 @@ final class SlotBook
 				int mover = t.occupant.get(worst);
 				t.vacate(mover, tick, false);
 				t.assign(mover, s);
+				moves++;
 			}
 
 			out.put(e.getKey(), new HashMap<>(t.slotOf));

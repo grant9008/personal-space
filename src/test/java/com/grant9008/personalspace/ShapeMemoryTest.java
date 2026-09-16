@@ -69,6 +69,29 @@ public class ShapeMemoryTest
 	}
 
 	@Test
+	public void someoneSteppingAwayAndBackDoesNotFlipTheTile()
+	{
+		ShapeMemory memory = new ShapeMemory();
+		// Two players facing different ways: a crowd.
+		Assert.assertFalse(tick(memory, group(1, 1024, 2, 0)).row);
+		// Player 2 drops out for a moment. Player 1 alone would count as a row, but must not.
+		Assert.assertFalse("a departure keeps the shape", tick(memory, group(1, 1024)).row);
+		// Player 2 comes back: not a newcomer, nothing to reconsider.
+		Assert.assertFalse(tick(memory, group(1, 1024, 2, 0)).row);
+		Assert.assertEquals("no shape changes at all", 0, memory.changes);
+	}
+
+	@Test
+	public void aRealNewcomerStillCountsAfterSomeoneLeft()
+	{
+		ShapeMemory memory = new ShapeMemory();
+		Assert.assertFalse(tick(memory, group(1, 0, 2, 1024)).row);
+		tick(memory, group(1, 1024));
+		Assert.assertTrue("player 3 is new, and everyone faces north", tick(memory, group(1, 1024, 3, 1024)).row);
+		Assert.assertEquals(1, memory.changes);
+	}
+
+	@Test
 	public void circleArrangementNeverMakesRows()
 	{
 		ShapeMemory memory = new ShapeMemory();

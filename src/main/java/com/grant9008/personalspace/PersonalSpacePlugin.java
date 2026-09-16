@@ -45,7 +45,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.5.4";
+	static final String VERSION = "1.5.5";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -675,6 +675,8 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			s.probeHeld = pr.heldTotal;
 			s.probeGaveUp = pr.gaveUpTotal;
+			s.shapeChanges = shapes.changes;
+			s.spotMoves = slots.moves;
 		}
 		s.nearby = nearby;
 		s.still = still;
