@@ -6,6 +6,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
@@ -17,10 +18,15 @@ import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Path2D;
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import javax.swing.BorderFactory;
 import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -33,13 +39,15 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.LinkBrowser;
 
 /**
  * The Personal Space sidebar.
  *
- * <p>Top: an on/off switch and a one-line status. Middle: the everyday settings as tap-to-pick
- * buttons. Bottom: a folded-away Troubleshooting section with test mode, live checks and a
- * copyable report.
+ * <p>Top to bottom: title with the on/off switch, a one-line status, a "Crowd" card and a
+ * "Movement" card with the everyday settings, a "Before & after" photo card, a folded-away
+ * Troubleshooting section, and links to support the developer or report a problem.
  *
  * <p>Swing thread only. The plugin pushes a fresh {@link Snapshot} a couple of times a second via
  * {@link #update}, and calls {@link #refreshControls} whenever the config changes (including from
@@ -47,11 +55,17 @@ import net.runelite.client.ui.PluginPanel;
  */
 final class PersonalSpacePanel extends PluginPanel
 {
+	static final String SUPPORT_URL = "https://github.com/grant9008/personal-space#support-the-developer";
+	static final String ISSUES_URL = "https://github.com/grant9008/personal-space/issues";
+
 	private static final int TEXT_WIDTH_PX = 150;
 	private static final Color SELECTED_TEXT = new Color(30, 30, 30);
+	private static final Color CARD = ColorScheme.DARKER_GRAY_COLOR;
+	private static final Color SUCCESS = ColorScheme.PROGRESS_COMPLETE_COLOR;
 
 	private final ConfigManager configManager;
 	private final PersonalSpaceConfig config;
+	private final Consumer<Consumer<PhotoBooth.Status>> takePhoto;
 
 	private final ToggleSwitch activeSwitch = new ToggleSwitch();
 	private final JLabel statusDot = new JLabel();
@@ -67,12 +81,18 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JLabel spacingValue = new JLabel();
 	private final PillGroup<PersonalSpaceConfig.Arrangement> arrangementPills = new PillGroup<>(
 		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
+
 	private final PillGroup<PersonalSpaceConfig.Movement> movementPills = new PillGroup<>(
 		PersonalSpaceConfig.Movement.values(), labels(PersonalSpaceConfig.Movement.values()));
 	private final JSlider walkSpeedSlider = new JSlider(PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED, PersonalSpaceConfig.DEFAULT_WALK_SPEED);
 	private final JLabel walkSpeedValue = new JLabel();
 	private final JPanel walkSpeedRow = new JPanel(new GridBagLayout());
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
+
+	private final ActionButton photoButton = new ActionButton("Take photo", new CameraIcon(SELECTED_TEXT), true);
+	private final JLabel photoStatus = new JLabel();
+	private final JLabel openFolderLink = new JLabel("Open folder");
+	private File lastPhoto;
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
@@ -86,10 +106,11 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private Snapshot last = new Snapshot();
 
-	PersonalSpacePanel(ConfigManager configManager, PersonalSpaceConfig config)
+	PersonalSpacePanel(ConfigManager configManager, PersonalSpaceConfig config, Consumer<Consumer<PhotoBooth.Status>> takePhoto)
 	{
 		this.configManager = configManager;
 		this.config = config;
+		this.takePhoto = takePhoto;
 
 		setLayout(new GridBagLayout());
 		setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -99,15 +120,25 @@ final class PersonalSpacePanel extends PluginPanel
 		add(buildHeader(), c);
 
 		c.gridy++;
+		c.insets = new Insets(0, 0, 10, 0);
 		add(buildStatus(), c);
 
 		c.gridy++;
-		c.insets = new Insets(4, 0, 4, 0);
-		add(buildSettings(), c);
+		add(buildCrowdCard(), c);
 
 		c.gridy++;
-		c.insets = new Insets(10, 0, 0, 0);
+		add(buildMovementCard(), c);
+
+		c.gridy++;
+		add(buildPhotoCard(), c);
+
+		c.gridy++;
+		c.insets = new Insets(0, 0, 6, 0);
 		add(buildTroubleshooting(), c);
+
+		c.gridy++;
+		c.insets = new Insets(4, 0, 0, 0);
+		add(buildFooter(), c);
 
 		// Push everything to the top when the sidebar is taller than the content.
 		c.gridy++;
@@ -152,44 +183,73 @@ final class PersonalSpacePanel extends PluginPanel
 		}
 	}
 
-	/** Swing thread. Set every control from the current config. Controls only write on a user click. */
+	/** Swing thread. Set every control from the current config. Controls only write on a user action. */
 	void refreshControls()
 	{
 		activeSwitch.setOn(config.active());
 		setSliderQuietly(perTileSlider, clamp(config.maxStack(), PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK));
 		perTileValue.setText(perTileSlider.getValue() + " players");
-		setSliderQuietly(walkSpeedSlider, clamp(config.walkSpeed(), PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED));
-		walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
-		int spacing = clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING);
-		if (!spacingSlider.getValueIsAdjusting() && spacingSlider.getValue() != spacing)
-		{
-			spacingSlider.setValue(spacing);
-		}
+		setSliderQuietly(spacingSlider, clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING));
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
 		movementPills.select(config.movement());
+		setSliderQuietly(walkSpeedSlider, clamp(config.walkSpeed(), PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED));
+		walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
+		walkSpeedRow.setVisible(config.movement() == PersonalSpaceConfig.Movement.WALK);
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
-		int offset = clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET);
-		if (!testOffsetSlider.getValueIsAdjusting() && testOffsetSlider.getValue() != offset)
-		{
-			testOffsetSlider.setValue(offset);
-		}
+		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
 		testOffsetValue.setText(testOffsetSlider.getValue() + " units");
 		setEverydayEnabled(config.active());
-		walkSpeedRow.setVisible(config.movement() == PersonalSpaceConfig.Movement.WALK);
+	}
+
+	/** Package-private for the screenshot harness. */
+	void setTroubleshootingOpen(boolean open)
+	{
+		troubleshootingBody.setVisible(open);
+		troubleshootingHeader.setIcon(new Arrow(open));
+		if (open)
+		{
+			update(last);
+		}
+		revalidate();
+		repaint();
+	}
+
+	/** Swing thread. Show how the before-and-after photo is getting on. */
+	void showPhotoStatus(PhotoBooth.Status status)
+	{
+		photoStatus.setText(wrap(status.text));
+		photoStatus.setForeground(status.failed ? ColorScheme.PROGRESS_ERROR_COLOR
+			: status.file != null ? SUCCESS : ColorScheme.LIGHT_GRAY_COLOR);
+		photoStatus.setVisible(true);
+		photoButton.setEnabled(!status.busy);
+		lastPhoto = status.file != null ? status.file : lastPhoto;
+		openFolderLink.setVisible(lastPhoto != null);
+		revalidate();
 	}
 
 	// ---- building ----------------------------------------------------------------------
 
 	private JPanel buildHeader()
 	{
-		JPanel p = new JPanel(new BorderLayout());
+		JPanel p = new JPanel(new BorderLayout(8, 0));
 		p.setOpaque(false);
-		p.setBorder(new EmptyBorder(0, 0, 8, 0));
+		p.setBorder(new EmptyBorder(0, 0, 10, 0));
+
 		JLabel title = new JLabel("Personal Space");
 		title.setFont(FontManager.getRunescapeBoldFont());
 		title.setForeground(Color.WHITE);
+		try
+		{
+			BufferedImage icon = ImageUtil.loadImageResource(PersonalSpacePlugin.class, "panel_icon.png");
+			title.setIcon(new ImageIcon(icon));
+			title.setIconTextGap(7);
+		}
+		catch (RuntimeException e)
+		{
+			// no icon, no problem
+		}
 		p.add(title, BorderLayout.WEST);
 		activeSwitch.setToolTipText("Turn spreading out crowds on or off");
 		p.add(activeSwitch, BorderLayout.EAST);
@@ -199,8 +259,10 @@ final class PersonalSpacePanel extends PluginPanel
 	private JPanel buildStatus()
 	{
 		JPanel card = new JPanel(new BorderLayout(8, 0));
-		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		card.setBorder(new EmptyBorder(8, 8, 8, 8));
+		card.setBackground(CARD);
+		card.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
+			new EmptyBorder(8, 8, 8, 8)));
 
 		statusDot.setVerticalAlignment(SwingConstants.TOP);
 		statusDot.setBorder(new EmptyBorder(3, 0, 0, 0));
@@ -218,73 +280,103 @@ final class PersonalSpacePanel extends PluginPanel
 		return card;
 	}
 
-	private JPanel buildSettings()
+	private JPanel buildCrowdCard()
 	{
-		JPanel p = new JPanel(new GridBagLayout());
-		p.setOpaque(false);
-		GridBagConstraints c = column();
+		JPanel card = card("Crowd");
+		GridBagConstraints c = cardConstraints();
 
-		c.insets = new Insets(8, 0, 2, 0);
-		p.add(labelWithValue("Players per tile", perTileValue), c);
+		card.add(labelWithValue("Players per tile", perTileValue), c);
 		c.gridy++;
-		c.insets = new Insets(0, 0, 0, 0);
 		perTileSlider.setToolTipText("How many players on one tile get their own spot. 5 is the sweet spot; up to 10 for drop-party chaos.");
-		p.add(slider(perTileSlider), c);
+		card.add(slider(perTileSlider), c);
 
 		c.gridy++;
-		c.insets = new Insets(10, 0, 4, 0);
-		JPanel spacingHeader = new JPanel(new BorderLayout());
-		spacingHeader.setOpaque(false);
-		spacingHeader.add(sectionLabel("Spacing"), BorderLayout.WEST);
-		spacingValue.setFont(FontManager.getRunescapeSmallFont());
-		spacingValue.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		spacingHeader.add(spacingValue, BorderLayout.EAST);
-		p.add(spacingHeader, c);
+		c.insets = new Insets(8, 0, 4, 0);
+		card.add(labelWithValue("Spacing", spacingValue), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
 		spacingPills.setToolTipText("Quick picks. Fine-tune with the slider below.");
-		p.add(spacingPills, c);
+		card.add(spacingPills, c);
 		c.gridy++;
-		c.insets = new Insets(2, 0, 0, 0);
-		spacingSlider.setOpaque(false);
-		spacingSlider.setFocusable(false);
 		spacingSlider.setToolTipText("Drag to set how far apart players are drawn. Changes show up live.");
-		spacingSlider.setPreferredSize(new Dimension(0, spacingSlider.getPreferredSize().height));
-		p.add(spacingSlider, c);
+		card.add(slider(spacingSlider), c);
 
 		c.gridy++;
-		c.insets = new Insets(10, 0, 4, 0);
-		p.add(sectionLabel("Arrangement"), c);
+		c.insets = new Insets(6, 0, 4, 0);
+		card.add(fieldLabel("Arrangement"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
 		arrangementPills.setToolTipText("Smart: the crowd spreads into open space, stays out of booths, stalls, anvils and walls, and lines up at things people face. Circle: a simple ring on each tile.");
-		p.add(arrangementPills, c);
+		card.add(arrangementPills, c);
+		return wrapCard(card);
+	}
+
+	private JPanel buildMovementCard()
+	{
+		JPanel card = card("Movement");
+		GridBagConstraints c = cardConstraints();
+
+		movementPills.setToolTipText("Walk: players take real steps into place. Glide: they slide. Instant: they appear in place.");
+		card.add(movementPills, c);
 
 		c.gridy++;
-		c.insets = new Insets(10, 0, 4, 0);
-		p.add(sectionLabel("Movement"), c);
+		c.insets = new Insets(8, 0, 0, 0);
+		walkSpeedRow.setOpaque(false);
+		GridBagConstraints w = column();
+		walkSpeedRow.add(labelWithValue("Walk speed", walkSpeedValue), w);
+		w.gridy++;
+		walkSpeedSlider.setToolTipText("How fast players walk into place. Slower looks calmer.");
+		walkSpeedRow.add(slider(walkSpeedSlider), w);
+		card.add(walkSpeedRow, c);
+
 		c.gridy++;
-		c.insets = new Insets(0, 0, 0, 0);
-		movementPills.setToolTipText("Walk: players take real steps into place. Glide: they slide. Instant: they appear in place.");
-		p.add(movementPills, c);
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Move my character too", includeMeSwitch,
+			"Off: you stay where you are and others step around you."), c);
+		return wrapCard(card);
+	}
+
+	private JPanel buildPhotoCard()
+	{
+		JPanel card = card("Before & after");
+		GridBagConstraints c = cardConstraints();
+
+		JLabel blurb = new JLabel(wrap("Snap the scene without and with Personal Space, side by side. Great for sharing."));
+		blurb.setFont(FontManager.getRunescapeSmallFont());
+		blurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		card.add(blurb, c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		photoButton.setToolTipText("Takes a few seconds: everyone is shown as normal, then spread out, and both are saved.");
+		photoButton.onClick(() ->
+		{
+			if (takePhoto != null)
+			{
+				showPhotoStatus(PhotoBooth.Status.working("Getting ready..."));
+				takePhoto.accept(this::showPhotoStatus);
+			}
+		});
+		card.add(photoButton, c);
 
 		c.gridy++;
 		c.insets = new Insets(6, 0, 0, 0);
-		walkSpeedRow.setOpaque(false);
-		GridBagConstraints w = column();
-		w.insets = new Insets(0, 0, 2, 0);
-		walkSpeedRow.add(labelWithValue("Walk speed", walkSpeedValue), w);
-		w.gridy++;
-		w.insets = new Insets(0, 0, 0, 0);
-		walkSpeedSlider.setToolTipText("How fast players walk into place. Slower looks calmer.");
-		walkSpeedRow.add(slider(walkSpeedSlider), w);
-		p.add(walkSpeedRow, c);
+		photoStatus.setFont(FontManager.getRunescapeSmallFont());
+		photoStatus.setVisible(false);
+		card.add(photoStatus, c);
 
 		c.gridy++;
-		c.insets = new Insets(12, 0, 0, 0);
-		p.add(switchRow("Move my character too", includeMeSwitch,
-			"Off: you stay where you are and others step around you."), c);
-		return p;
+		c.insets = new Insets(2, 0, 0, 0);
+		link(openFolderLink, ColorScheme.BRAND_ORANGE, () ->
+		{
+			if (lastPhoto != null && lastPhoto.getParentFile() != null)
+			{
+				LinkBrowser.open(lastPhoto.getParentFile().getAbsolutePath());
+			}
+		});
+		openFolderLink.setVisible(false);
+		card.add(openFolderLink, c);
+		return wrapCard(card);
 	}
 
 	private JPanel buildTroubleshooting()
@@ -316,28 +408,15 @@ final class PersonalSpacePanel extends PluginPanel
 			"Ignores everyone else and draws your own character a little to the east, to check the effect works."), b);
 
 		b.gridy++;
-		JPanel offsetRow = new JPanel(new BorderLayout());
-		offsetRow.setOpaque(false);
-		JLabel offsetLabel = new JLabel("Test distance");
-		offsetLabel.setFont(FontManager.getRunescapeSmallFont());
-		offsetLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		offsetRow.add(offsetLabel, BorderLayout.WEST);
-		testOffsetValue.setFont(FontManager.getRunescapeSmallFont());
-		testOffsetValue.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		offsetRow.add(testOffsetValue, BorderLayout.EAST);
-		troubleshootingBody.add(offsetRow, b);
-
+		troubleshootingBody.add(labelWithValue("Test distance", testOffsetValue), b);
 		b.gridy++;
 		b.insets = new Insets(0, 0, 0, 0);
-		testOffsetSlider.setOpaque(false);
-		testOffsetSlider.setFocusable(false);
 		testOffsetSlider.setToolTipText("How far test mode shifts your character. 128 units is one tile.");
-		testOffsetSlider.setPreferredSize(new Dimension(0, testOffsetSlider.getPreferredSize().height));
-		troubleshootingBody.add(testOffsetSlider, b);
+		troubleshootingBody.add(slider(testOffsetSlider), b);
 
 		b.gridy++;
 		b.insets = new Insets(8, 0, 0, 0);
-		checksPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		checksPanel.setBackground(CARD);
 		checksPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
 		troubleshootingBody.add(checksPanel, b);
 
@@ -353,17 +432,30 @@ final class PersonalSpacePanel extends PluginPanel
 		return p;
 	}
 
-	/** Open or fold the Troubleshooting section. Package-private for the screenshot harness. */
-	void setTroubleshootingOpen(boolean open)
+	private JPanel buildFooter()
 	{
-		troubleshootingBody.setVisible(open);
-		troubleshootingHeader.setIcon(new Arrow(open));
-		if (open)
-		{
-			update(last);
-		}
-		revalidate();
-		repaint();
+		JPanel p = new JPanel(new GridBagLayout());
+		p.setOpaque(false);
+		GridBagConstraints c = column();
+
+		ActionButton support = new ActionButton("Support the developer", new HeartIcon(ColorScheme.BRAND_ORANGE), false);
+		support.setToolTipText("Personal Space is free. If you enjoy it, you can chip in here.");
+		support.onClick(() -> LinkBrowser.browse(SUPPORT_URL));
+		p.add(support, c);
+
+		c.gridy++;
+		c.insets = new Insets(6, 0, 0, 0);
+		JPanel small = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+		small.setOpaque(false);
+		JLabel report = new JLabel("Report a problem");
+		link(report, ColorScheme.LIGHT_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
+		small.add(report);
+		JLabel version = new JLabel("v" + PersonalSpacePlugin.VERSION);
+		version.setFont(FontManager.getRunescapeSmallFont());
+		version.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		small.add(version);
+		p.add(small, c);
+		return p;
 	}
 
 	private void rebuildCheckRows(int count)
@@ -416,14 +508,6 @@ final class PersonalSpacePanel extends PluginPanel
 				write(PersonalSpaceConfig.KEY_MAX_STACK, perTileSlider.getValue());
 			}
 		});
-		walkSpeedSlider.addChangeListener(e ->
-		{
-			walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
-			if (walkSpeedSlider.getValue() != config.walkSpeed())
-			{
-				write(PersonalSpaceConfig.KEY_WALK_SPEED, walkSpeedSlider.getValue());
-			}
-		});
 		spacingPills.onSelect(v ->
 		{
 			spacingSlider.setValue(v);
@@ -445,6 +529,14 @@ final class PersonalSpacePanel extends PluginPanel
 			write(PersonalSpaceConfig.KEY_MOVEMENT, v);
 			walkSpeedRow.setVisible(v == PersonalSpaceConfig.Movement.WALK);
 			revalidate();
+		});
+		walkSpeedSlider.addChangeListener(e ->
+		{
+			walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
+			if (walkSpeedSlider.getValue() != config.walkSpeed())
+			{
+				write(PersonalSpaceConfig.KEY_WALK_SPEED, walkSpeedSlider.getValue());
+			}
 		});
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
@@ -471,12 +563,19 @@ final class PersonalSpacePanel extends PluginPanel
 	private void setEverydayEnabled(boolean enabled)
 	{
 		perTileSlider.setEnabled(enabled);
-		walkSpeedSlider.setEnabled(enabled);
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
 		movementPills.setEnabled(enabled);
+		walkSpeedSlider.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
+	}
+
+	/** Show the spacing as a share of a tile, and light up the matching quick pick if there is one. */
+	private void showSpacing(int units)
+	{
+		spacingValue.setText(Math.round(units * 100f / 128) + "% of a tile");
+		spacingPills.selectOrNone(units);
 	}
 
 	private void copyReport()
@@ -496,11 +595,67 @@ final class PersonalSpacePanel extends PluginPanel
 
 	// ---- small helpers -----------------------------------------------------------------
 
-	/** Show the spacing as a share of a tile, and light up the matching quick pick if there is one. */
-	private void showSpacing(int units)
+	private static GridBagConstraints column()
 	{
-		spacingValue.setText(Math.round(units * 100f / 128) + "% of a tile");
-		spacingPills.selectOrNone(units);
+		GridBagConstraints c = new GridBagConstraints();
+		c.gridx = 0;
+		c.gridy = 0;
+		c.weightx = 1;
+		c.fill = GridBagConstraints.HORIZONTAL;
+		c.anchor = GridBagConstraints.NORTH;
+		return c;
+	}
+
+	private static GridBagConstraints cardConstraints()
+	{
+		GridBagConstraints c = column();
+		c.gridy = 1; // row 0 is the card title
+		c.insets = new Insets(0, 0, 4, 0);
+		return c;
+	}
+
+	/** A card with a title row; content goes from grid row 1. */
+	private static JPanel card(String title)
+	{
+		JPanel card = new JPanel(new GridBagLayout());
+		card.setBackground(CARD);
+		card.setBorder(new EmptyBorder(8, 9, 9, 9));
+		JLabel heading = new JLabel(title.toUpperCase());
+		heading.setFont(FontManager.getRunescapeSmallFont());
+		heading.setForeground(ColorScheme.BRAND_ORANGE);
+		GridBagConstraints c = column();
+		c.insets = new Insets(0, 0, 6, 0);
+		card.add(heading, c);
+		return card;
+	}
+
+	/** Space below each card. */
+	private static JPanel wrapCard(JPanel card)
+	{
+		JPanel outer = new JPanel(new BorderLayout());
+		outer.setOpaque(false);
+		outer.setBorder(new EmptyBorder(0, 0, 8, 0));
+		outer.add(card, BorderLayout.CENTER);
+		return outer;
+	}
+
+	private static JLabel fieldLabel(String text)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		return l;
+	}
+
+	private static JPanel labelWithValue(String text, JLabel value)
+	{
+		JPanel row = new JPanel(new BorderLayout());
+		row.setOpaque(false);
+		row.add(fieldLabel(text), BorderLayout.WEST);
+		value.setFont(FontManager.getRunescapeSmallFont());
+		value.setForeground(Color.WHITE);
+		row.add(value, BorderLayout.EAST);
+		return row;
 	}
 
 	/** Move a slider to a value without fighting the user mid-drag. */
@@ -518,36 +673,6 @@ final class PersonalSpacePanel extends PluginPanel
 		s.setFocusable(false);
 		s.setPreferredSize(new Dimension(0, s.getPreferredSize().height));
 		return s;
-	}
-
-	private static JPanel labelWithValue(String text, JLabel value)
-	{
-		JPanel row = new JPanel(new BorderLayout());
-		row.setOpaque(false);
-		row.add(sectionLabel(text), BorderLayout.WEST);
-		value.setFont(FontManager.getRunescapeSmallFont());
-		value.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		row.add(value, BorderLayout.EAST);
-		return row;
-	}
-
-	private static GridBagConstraints column()
-	{
-		GridBagConstraints c = new GridBagConstraints();
-		c.gridx = 0;
-		c.gridy = 0;
-		c.weightx = 1;
-		c.fill = GridBagConstraints.HORIZONTAL;
-		c.anchor = GridBagConstraints.NORTH;
-		return c;
-	}
-
-	private static JLabel sectionLabel(String text)
-	{
-		JLabel l = new JLabel(text);
-		l.setFont(FontManager.getRunescapeSmallFont());
-		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		return l;
 	}
 
 	private static JPanel switchRow(String text, ToggleSwitch toggle, String tooltip)
@@ -572,6 +697,34 @@ final class PersonalSpacePanel extends PluginPanel
 			}
 		});
 		return row;
+	}
+
+	private static void link(JLabel label, Color color, Runnable action)
+	{
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(color);
+		label.setHorizontalAlignment(SwingConstants.CENTER);
+		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				action.run();
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				label.setForeground(Color.WHITE);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				label.setForeground(color);
+			}
+		});
 	}
 
 	private static String[] labels(Object[] values)
@@ -613,6 +766,84 @@ final class PersonalSpacePanel extends PluginPanel
 	}
 
 	// ---- controls ----------------------------------------------------------------------
+
+	/** A full-width button: orange for the main action, dark for secondary ones. */
+	private static final class ActionButton extends JLabel
+	{
+		private final boolean primary;
+		private boolean hover;
+		private Runnable action = () ->
+		{
+		};
+
+		ActionButton(String text, Icon icon, boolean primary)
+		{
+			super(text, icon, SwingConstants.CENTER);
+			this.primary = primary;
+			setOpaque(true);
+			setIconTextGap(7);
+			setFont(primary ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeSmallFont());
+			setBorder(new EmptyBorder(primary ? 8 : 7, 6, primary ? 8 : 7, 6));
+			setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					if (isEnabled())
+					{
+						action.run();
+					}
+				}
+
+				@Override
+				public void mouseEntered(MouseEvent e)
+				{
+					hover = true;
+					restyle();
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					hover = false;
+					restyle();
+				}
+			});
+			restyle();
+		}
+
+		void onClick(Runnable action)
+		{
+			this.action = action;
+		}
+
+		@Override
+		public void setEnabled(boolean enabled)
+		{
+			super.setEnabled(enabled);
+			restyle();
+		}
+
+		private void restyle()
+		{
+			Color bg;
+			Color fg;
+			if (primary)
+			{
+				bg = !isEnabled() ? ColorScheme.MEDIUM_GRAY_COLOR : hover ? ColorScheme.BRAND_ORANGE.brighter() : ColorScheme.BRAND_ORANGE;
+				fg = SELECTED_TEXT;
+			}
+			else
+			{
+				bg = hover ? ColorScheme.MEDIUM_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR;
+				fg = Color.WHITE;
+			}
+			setBackground(bg);
+			setForeground(fg);
+			repaint();
+		}
+	}
 
 	/** An on/off switch drawn in RuneLite's colours. Fires only on a user click. */
 	private static final class ToggleSwitch extends JComponent
@@ -810,7 +1041,7 @@ final class PersonalSpacePanel extends PluginPanel
 				}
 				else
 				{
-					bg = ColorScheme.DARKER_GRAY_COLOR;
+					bg = ColorScheme.DARK_GRAY_COLOR;
 					fg = ColorScheme.LIGHT_GRAY_COLOR;
 				}
 				if (!isEnabled())
@@ -897,6 +1128,82 @@ final class PersonalSpacePanel extends PluginPanel
 		public int getIconHeight()
 		{
 			return 8;
+		}
+	}
+
+	/** A simple camera. */
+	private static final class CameraIcon implements Icon
+	{
+		private final Color color;
+
+		CameraIcon(Color color)
+		{
+			this.color = color;
+		}
+
+		@Override
+		public void paintIcon(Component c, Graphics g, int x, int y)
+		{
+			Graphics2D g2 = (Graphics2D) g.create();
+			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			g2.setColor(color);
+			g2.fillRoundRect(x, y + 3, 16, 10, 3, 3);
+			g2.fillRect(x + 5, y + 1, 6, 3);
+			g2.setColor(ColorScheme.BRAND_ORANGE);
+			g2.fillOval(x + 5, y + 5, 6, 6);
+			g2.setColor(color);
+			g2.fillOval(x + 6, y + 6, 4, 4);
+			g2.dispose();
+		}
+
+		@Override
+		public int getIconWidth()
+		{
+			return 16;
+		}
+
+		@Override
+		public int getIconHeight()
+		{
+			return 14;
+		}
+	}
+
+	/** A small heart. */
+	private static final class HeartIcon implements Icon
+	{
+		private final Color color;
+
+		HeartIcon(Color color)
+		{
+			this.color = color;
+		}
+
+		@Override
+		public void paintIcon(Component c, Graphics g, int x, int y)
+		{
+			Graphics2D g2 = (Graphics2D) g.create();
+			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			g2.setColor(color);
+			Path2D heart = new Path2D.Double();
+			heart.moveTo(x + 7, y + 12);
+			heart.curveTo(x - 2, y + 6, x + 1, y - 1, x + 7, y + 3);
+			heart.curveTo(x + 13, y - 1, x + 16, y + 6, x + 7, y + 12);
+			heart.closePath();
+			g2.fill(heart);
+			g2.dispose();
+		}
+
+		@Override
+		public int getIconWidth()
+		{
+			return 14;
+		}
+
+		@Override
+		public int getIconHeight()
+		{
+			return 13;
 		}
 	}
 }
