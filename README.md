@@ -41,7 +41,7 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
 
-![Before and after along the Varrock West Bank counter](docs/photos/bank-counter.jpg)
+![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
 
 ![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
 
