@@ -7,6 +7,8 @@ every outfit can be seen.
 
 ![Before and after at the Grand Exchange](docs/before-after-grand-exchange.jpg)
 
+[![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
+
 <img src="docs/sidebar.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
@@ -49,7 +51,7 @@ no crowds nearby), orange is off or paused for safety, red is a problem worth re
 Personal Space is free, and it will stay free. If it made your world feel busier, here's how to
 help it keep improving:
 
-- **Tip the developer:** *link coming soon.*
+- **[Tip the developer](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)** through Stripe. Any amount helps.
 - **Star this repository** on GitHub so more players find it.
 - **Share your before & after photos** from the sidebar.
 - **Report a problem** or suggest an idea in [Issues](https://github.com/grant9008/personal-space/issues).
