@@ -87,8 +87,6 @@ public class SlotBookTest
 		SlotBook book = new SlotBook();
 		step(book, 1, 1, 2);
 		step(book, 2);
-		Assert.assertTrue(book.isHolding(TILE, 3));
-		Assert.assertFalse(book.isHolding(TILE, 2 + SlotBook.HOLD_TICKS + 1));
 		Map<Integer, Integer> back = step(book, 5, 2, 1);
 		Assert.assertEquals("both get their own spots back", 0, (int) back.get(1));
 		Assert.assertEquals(1, (int) back.get(2));

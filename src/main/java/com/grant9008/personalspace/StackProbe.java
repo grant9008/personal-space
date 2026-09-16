@@ -35,6 +35,12 @@ final class StackProbe implements RenderCallback
 	static final int FRESH_CYCLES = 500;
 	/** Frames to keep holding players back before deciding the missing one won't be drawn. */
 	static final int MAX_PROBE_FRAMES = 3;
+	/**
+	 * Extra time a player still counts as shown when laying out a crowd. A stackmate's confirmation
+	 * is only renewed on the frames the probe runs, so a short gap must not drop them from their
+	 * crowd, which would make everyone walk in and back out. 10 seconds.
+	 */
+	static final int SHOWN_GRACE_CYCLES = 500;
 	/** How long to leave a player alone after they failed to show up: 60 seconds. */
 	static final int GIVE_UP_CYCLES = 3000;
 
@@ -133,6 +139,19 @@ final class StackProbe implements RenderCallback
 		return id >= 0 && id < OffsetTable.CAPACITY
 			&& confirmed[id] == player
 			&& cycle - confirmedCycle[id] <= FRESH_CYCLES;
+	}
+
+	/**
+	 * True if the game has shown this player recently enough for them to count in a crowd. Players
+	 * the game never shows (hidden by the server or by another plugin) never count, so they can't
+	 * push a visible player aside next to nobody.
+	 */
+	boolean isShown(int id, Player player, int cycle)
+	{
+		return id >= 0 && id < OffsetTable.CAPACITY
+			&& confirmed[id] == player
+			&& cycle - confirmedCycle[id] <= FRESH_CYCLES + SHOWN_GRACE_CYCLES
+			&& leaveAloneUntil[id] <= cycle;
 	}
 
 	/** Fill {@code out} with the ids held back this frame on the given tile; returns how many. */

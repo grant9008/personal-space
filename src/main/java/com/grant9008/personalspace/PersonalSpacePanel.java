@@ -74,12 +74,13 @@ final class PersonalSpacePanel extends PluginPanel
 	private final PillGroup<Integer> spacingPills = new PillGroup<>(
 		new Integer[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_NORMAL, PersonalSpaceConfig.SPACING_WIDE},
 		new String[]{"Close", "Normal", "Wide"});
-	private final JSlider spacingSlider = new JSlider(PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING, PersonalSpaceConfig.SPACING_NORMAL);
+	private final JSlider spacingSlider = new JSlider(PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING, PersonalSpaceConfig.SPACING_WIDE);
 	private final JLabel spacingValue = new JLabel();
 	private final PillGroup<PersonalSpaceConfig.Arrangement> arrangementPills = new PillGroup<>(
 		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
 
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
+	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
@@ -175,6 +176,7 @@ final class PersonalSpacePanel extends PluginPanel
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
+		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
 		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
 		testOffsetValue.setText(testOffsetSlider.getValue() + " units");
@@ -261,7 +263,7 @@ final class PersonalSpacePanel extends PluginPanel
 		spacingPills.setToolTipText("Quick picks. Fine-tune with the slider below.");
 		card.add(spacingPills, c);
 		c.gridy++;
-		spacingSlider.setToolTipText("Drag to set how far apart players are drawn. Changes show up live. At bank counters and around fires, Smart keeps people close.");
+		spacingSlider.setToolTipText("How far apart players are drawn. Changes show up live. At bank counters and around fires, Smart keeps people close.");
 		card.add(slider(spacingSlider), c);
 
 		c.gridy++;
@@ -274,6 +276,11 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
+		card.add(switchRow("Small groups stay close", smallGroupsSwitch,
+			"On: two or three players stand close together and big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
 			"Off: you stay where you are and others step around you."), c);
 		return wrapCard(card);
@@ -433,6 +440,7 @@ final class PersonalSpacePanel extends PluginPanel
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
+		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
 		testOffsetSlider.addChangeListener(e ->
@@ -461,6 +469,7 @@ final class PersonalSpacePanel extends PluginPanel
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
+		smallGroupsSwitch.setEnabled(enabled);
 	}
 
 	/** Show the spacing as a share of a tile, and light up the matching quick pick if there is one. */

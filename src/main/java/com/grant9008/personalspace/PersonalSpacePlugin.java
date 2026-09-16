@@ -35,17 +35,21 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
 	name = "Personal Space",
-	description = "See the whole crowd: players on the same tile are spread out so everyone is visible. Cosmetic only; off in PvP.",
-	tags = {"stack", "stacked", "crowd", "outfit", "fashionscape", "cosmetic", "players", "social", "fire", "bank", "star"}
+	description = "See the whole crowd: players on the same tile are spread out so everyone is visible. Cosmetic only, and off wherever players can fight.",
+	tags = {"stacked", "stacking", "unstack", "overlapping", "clipping", "crowded", "fashionscape", "fashion show", "outfits",
+		"drip", "cosmetics", "gear", "other players", "show all players", "reveal", "grand exchange", "social", "hangout",
+		"lively", "roleplay", "house party", "drop party", "clan events", "group photo", "screenshots", "content creator",
+		"streamers", "shooting stars"}
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.5.6";
+	static final String VERSION = "1.6.0";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -75,16 +79,14 @@ public class PersonalSpacePlugin extends Plugin
 	private final OffsetTable offsets = new OffsetTable();
 	private final StackRegistry stacks = new StackRegistry();
 	/** Who has which spot on each crowded tile, so crowds don't reshuffle. */
-	private final SlotBook slots = new SlotBook();
-	/** Whether each tile is a row or a crowd, kept while the same people are on it. */
-	private final ShapeMemory shapes = new ShapeMemory();
-	/** Tiles laid out as a row last tick, so a tile doesn't flip between row and circle. */
-	private java.util.Set<Long> rowTiles = new java.util.HashSet<>();
-	/** Created in startUp, once the client is injected. */
+	/** Decides each tick which crowded tiles are spread and where everyone stands. */
+	private final CrowdPlanner planner = new CrowdPlanner();
 	private StackProbe probe;
 	private final StillnessTracker stillness = new StillnessTracker();
 	/** Tick number each player id was last counted on, to catch two players sharing an id. */
 	private final int[] idSeenTick = new int[OffsetTable.CAPACITY];
+	/** Tick on which each player was last found to be shown by the game. */
+	private final int[] shownTick = new int[OffsetTable.CAPACITY];
 
 	/** Our shim, while it is the client's installed draw callback. Null when nothing is hooked. Client thread. */
 	private SpreadingDrawCallbacks wrapper;
@@ -106,6 +108,8 @@ public class PersonalSpacePlugin extends Plugin
 	private int stackedTiles;
 	private int moving;
 	private int skippedIds;
+	private int unseen;
+	private String nearestTile;
 
 	/** Sidebar rate bookkeeping. */
 	private long lastPanelNanos;
@@ -311,6 +315,8 @@ public class PersonalSpacePlugin extends Plugin
 			stackedTiles = 0;
 			moving = config.testOffset() > 0 ? 1 : 0;
 			skippedIds = 0;
+			unseen = 0;
+			nearestTile = null;
 			return;
 		}
 
@@ -318,6 +324,7 @@ public class PersonalSpacePlugin extends Plugin
 		List<StackSpreader.Placement> easingBack = new ArrayList<>();
 		int nearbyCount = 0;
 		int skipped = 0;
+		int cycle = client.getGameCycle();
 		for (Player p : wv.players())
 		{
 			if (p == null)
@@ -359,28 +366,41 @@ public class PersonalSpacePlugin extends Plugin
 				}
 				continue;
 			}
+			if (probe.isShown(id, p, cycle) && probe.othersAllow(renderCallbackManager, p))
+			{
+				shownTick[id] = tick;
+			}
 			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation()));
 		}
 
-		List<StackSpreader.Placement> placements = layOut(entries, wv);
+		planner.smallGroupsClose = config.smallGroupsClose();
+		CrowdPlanner.Plan plan = planner.plan(entries, id -> shownTick[id] == tick, config.spacing(), config.maxStack(),
+			config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO, config.includeLocalPlayer(), tick, surroundings(wv));
 		offsets.clearTargets();
-		for (StackSpreader.Placement pl : placements)
+		for (StackSpreader.Placement pl : plan.placements)
 		{
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
 		}
-		List<StackSpreader.Placement> revealable = new ArrayList<>(placements);
-		for (StackSpreader.Placement pl : easingBack)
+		// Everyone on a crowded tile goes in the table, not just those given a spot: the probe needs
+		// them there to find out whether the game is willing to show them.
+		List<StackSpreader.Placement> members = new ArrayList<>(plan.placements);
+		members.addAll(plan.unplaced);
+		members.addAll(easingBack);
+		java.util.Set<Integer> unplacedIds = new java.util.HashSet<>();
+		for (StackSpreader.Placement pl : plan.unplaced)
 		{
-			revealable.add(pl);
+			unplacedIds.add(pl.id);
 		}
-		stacks.rebuild(revealable, rowTiles);
+		stacks.rebuild(members, plan.curvedRows, unplacedIds, plan.fires);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
 		still = entries.size();
 		stackedTiles = StackSpreader.stackedTiles(entries);
-		moving = placements.size();
+		moving = plan.placements.size();
 		skippedIds = skipped;
+		unseen = plan.unseen;
+		nearestTile = nearestTileReport(plan, local);
 	}
 
 	/** Why the effect must be off right now, or SAFE. */
@@ -403,11 +423,41 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return Snapshot.Gate.PVP_WORLD;
 		}
+		if (playersCanFight())
+		{
+			return Snapshot.Gate.PVP_ACTIVITY;
+		}
 		if (local.getHealthRatio() != -1)
 		{
 			return Snapshot.Gate.IN_COMBAT; // our own health bar is showing
 		}
 		return Snapshot.Gate.SAFE;
+	}
+
+	/**
+	 * True when the game offers to attack other players, as in Castle Wars, Soul Wars, Last Man
+	 * Standing, Clan Wars or the Fight Pits, even on a normal world outside the Wilderness.
+	 */
+	private boolean playersCanFight()
+	{
+		String[] options = client.getPlayerOptions();
+		if (options == null)
+		{
+			return false;
+		}
+		for (String option : options)
+		{
+			if (option == null)
+			{
+				continue;
+			}
+			String plain = Text.removeTags(option).trim();
+			if (plain.equalsIgnoreCase("Attack") || plain.equalsIgnoreCase("Fight"))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Everyone back to their real spot immediately and forget what the last tick found. Client thread. */
@@ -419,9 +469,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		offsets.snapAllToZero();
 		stacks.clear();
-		slots.clear();
-		shapes.clear();
-		rowTiles.clear();
+		planner.clear();
 		stillness.clear();
 		gate = client.getGameState() == GameState.LOGGED_IN ? gate : Snapshot.Gate.NOT_LOGGED_IN;
 		nearby = 0;
@@ -429,105 +477,107 @@ public class PersonalSpacePlugin extends Plugin
 		stackedTiles = 0;
 		moving = 0;
 		skippedIds = 0;
+		unseen = 0;
+		nearestTile = null;
 	}
 
-	/**
-	 * Client thread. Give every crowded tile its spots and hand them out, keeping everyone's spot from
-	 * last tick where possible (see {@link SlotBook}).
-	 */
-	private List<StackSpreader.Placement> layOut(List<StackSpreader.Entry> entries, WorldView wv)
+	/** Client thread. The world around crowded tiles; the collision map is only read if a tile needs it. */
+	private CrowdPlanner.Surroundings surroundings(WorldView wv)
 	{
-		int spacing = config.spacing();
-		int capacity = config.maxStack();
-		boolean smart = config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO;
-		boolean includeLocal = config.includeLocalPlayer();
-
-		java.util.Map<Long, List<StackSpreader.Entry>> byTile = new java.util.LinkedHashMap<>();
-		for (StackSpreader.Entry e : entries)
+		return new CrowdPlanner.Surroundings()
 		{
-			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>(4)).add(e);
-		}
+			private CollisionTerrain collision;
 
-		java.util.Set<Long> newRowTiles = new java.util.HashSet<>();
-		shapes.startTick();
-		java.util.Map<Long, List<Integer>> movableByTile = new java.util.HashMap<>();
-		java.util.Map<Long, List<int[]>> spotsByTile = new java.util.HashMap<>();
-		CollisionTerrain terrain = null;
-		for (java.util.Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
-		{
-			long tile = e.getKey();
-			List<StackSpreader.Entry> group = e.getValue();
-			if (group.size() < 2 && !slots.isHolding(tile, tick))
+			private CollisionTerrain collision()
 			{
-				continue;
-			}
-			List<Integer> movable = new ArrayList<>(group.size());
-			for (StackSpreader.Entry en : group)
-			{
-				if (includeLocal || !en.local)
+				if (collision == null)
 				{
-					movable.add(en.id);
+					collision = terrain(wv);
 				}
+				return collision;
 			}
-			if (movable.isEmpty())
+
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(tile) * 128 + 64;
+				int z = StackRegistry.sceneY(tile) * 128 + 64;
+				return collision().canStand(StackRegistry.plane(tile), x, z, x + dx, z + dz);
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return collision().facesObstacle(StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return collision().isCounter(StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				List<int[]> out = new ArrayList<>(1);
+				for (int east = -1; east <= 1; east++)
+				{
+					for (int north = -1; north <= 1; north++)
+					{
+						if (hasFire(wv, StackRegistry.plane(tile), StackRegistry.sceneX(tile) + east, StackRegistry.sceneY(tile) + north))
+						{
+							out.add(new int[]{east, north});
+						}
+					}
+				}
+				return out;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return PersonalSpacePlugin.this.facesFire(wv, StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
+			}
+		};
+	}
+
+	/** What was decided for the spread tile nearest to you, for the report; null if none is near. */
+	private static String nearestTileReport(CrowdPlanner.Plan plan, Player local)
+	{
+		LocalPoint lp = local.getLocalLocation();
+		WorldPoint wp = local.getWorldLocation();
+		if (lp == null || wp == null)
+		{
+			return null;
+		}
+		Long nearest = null;
+		int nearestDistance = Integer.MAX_VALUE;
+		for (long tile : plan.tiles.keySet())
+		{
+			if (StackRegistry.plane(tile) != wp.getPlane())
 			{
 				continue;
 			}
-			boolean middleTaken = movable.size() < group.size() || movable.size() > capacity;
-			ShapeMemory.Shape shape = shapes.decide(tile, group, smart);
-			boolean row = shape.row;
-			double facing = shape.angle;
-			if (row)
+			int distance = Math.max(Math.abs(StackRegistry.sceneX(tile) - lp.getSceneX()),
+				Math.abs(StackRegistry.sceneY(tile) - lp.getSceneY()));
+			if (distance < nearestDistance || (distance == nearestDistance && tile < nearest))
 			{
-				newRowTiles.add(tile);
-			}
-
-			if (terrain == null)
-			{
-				terrain = terrain(wv);
-			}
-			final CollisionTerrain t = terrain;
-			int plane = StackRegistry.plane(tile);
-			int sceneX = StackRegistry.sceneX(tile);
-			int sceneY = StackRegistry.sceneY(tile);
-			int ax = sceneX * 128 + 64;
-			int az = sceneY * 128 + 64;
-			// At a bank counter or row of booths, and around a fire, keep people close together:
-			// spread wide, a bank crowd reads as a queue and a fire looks deserted.
-			int tileSpacing = spacing;
-			if (row && terrain.isCounter(plane, sceneX, sceneY, facing))
-			{
-				tileSpacing = Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING);
-			}
-			else if (row && facesFire(wv, plane, sceneX, sceneY, facing))
-			{
-				tileSpacing = Math.min(spacing, PersonalSpaceConfig.FIRE_SPACING);
-			}
-			spotsByTile.put(tile, StackSpreader.spots(row, facing, middleTaken, tileSpacing, capacity,
-				(dx, dz) -> t.canStand(plane, ax, az, ax + dx, az + dz)));
-			movableByTile.put(tile, movable);
-		}
-		rowTiles = newRowTiles;
-
-		java.util.Map<Long, java.util.Map<Integer, Integer>> assigned =
-			slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
-
-		List<StackSpreader.Placement> placements = new ArrayList<>();
-		for (java.util.Map.Entry<Long, java.util.Map<Integer, Integer>> e : assigned.entrySet())
-		{
-			List<int[]> spots = spotsByTile.get(e.getKey());
-			for (java.util.Map.Entry<Integer, Integer> a : e.getValue().entrySet())
-			{
-				int[] spot = spots.get(a.getValue());
-				placements.add(new StackSpreader.Placement(a.getKey(), e.getKey(), spot[0], spot[1]));
+				nearest = tile;
+				nearestDistance = distance;
 			}
 		}
-		placements.sort(java.util.Comparator.comparingInt(p -> p.id));
-		return placements;
+		return nearest == null ? null : plan.tiles.get(nearest) + ", " + nearestDistance + " tiles from you";
 	}
 
 	/** Client thread. True if the tile a row is facing has a fire on it. */
 	private boolean facesFire(WorldView wv, int plane, int sceneX, int sceneY, double angle)
+	{
+		return hasFire(wv, plane, sceneX + (int) Math.round(-Math.sin(angle)), sceneY + (int) Math.round(-Math.cos(angle)));
+	}
+
+	/** Client thread. True if this scene tile has a fire on it. */
+	private boolean hasFire(WorldView wv, int plane, int x, int y)
 	{
 		Scene scene = wv.getScene();
 		if (scene == null)
@@ -535,8 +585,6 @@ public class PersonalSpacePlugin extends Plugin
 			return false;
 		}
 		Tile[][][] tiles = scene.getTiles();
-		int x = sceneX + (int) Math.round(-Math.sin(angle));
-		int y = sceneY + (int) Math.round(-Math.cos(angle));
 		if (tiles == null || plane < 0 || plane >= tiles.length || x < 0 || x >= tiles[plane].length
 			|| y < 0 || y >= tiles[plane][x].length || tiles[plane][x][y] == null)
 		{
@@ -559,31 +607,6 @@ public class PersonalSpacePlugin extends Plugin
 			}
 		}
 		return false;
-	}
-
-	private static StackSpreader.Layout layoutFor(PersonalSpaceConfig.Arrangement arrangement)
-	{
-		return arrangement == PersonalSpaceConfig.Arrangement.CIRCLE ? StackSpreader.Layout.RING : StackSpreader.Layout.AUTO;
-	}
-
-	/** Still players who aren't being moved (you, when you stay put, and anyone on a tile by themselves). */
-	private static List<CrowdLayout.Obstacle> obstacles(List<StackSpreader.Entry> entries, List<StackSpreader.Placement> placements)
-	{
-		java.util.Set<Integer> moving = new java.util.HashSet<>();
-		for (StackSpreader.Placement p : placements)
-		{
-			moving.add(p.id);
-		}
-		List<CrowdLayout.Obstacle> out = new ArrayList<>();
-		for (StackSpreader.Entry e : entries)
-		{
-			if (!moving.contains(e.id))
-			{
-				out.add(new CrowdLayout.Obstacle(StackRegistry.plane(e.tile),
-					StackRegistry.sceneX(e.tile) * 128 + 64, StackRegistry.sceneY(e.tile) * 128 + 64));
-			}
-		}
-		return out;
 	}
 
 	/** The game's walkability map for the current area, so nobody is drawn inside a booth or wall. */
@@ -632,6 +655,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.spacing = config.spacing();
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
+		s.smallGroupsClose = config.smallGroupsClose();
 		s.testOffset = config.testOffset();
 
 		boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
@@ -675,9 +699,11 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			s.probeHeld = pr.heldTotal;
 			s.probeGaveUp = pr.gaveUpTotal;
-			s.shapeChanges = shapes.changes;
-			s.spotMoves = slots.moves;
 		}
+		s.shapeChanges = planner.shapeChanges();
+		s.spotMoves = planner.spotMoves();
+		s.unseenStacked = unseen;
+		s.nearestTile = nearestTile;
 		s.nearby = nearby;
 		s.still = still;
 		s.stackedTiles = stackedTiles;

@@ -15,21 +15,43 @@ every outfit can be seen.
 
 - **Shows the players the game hides.** Stacked players are drawn again, spread out around their tile.
 - **Smart arrangement.** Crowds spread out around their tile, never into a bank booth, stall, anvil
-  or wall, and line up side by side at things people face.
+  or wall, and line up side by side at things people face. Small groups stay close together; big
+  crowds get more room.
 - **Players walk into place** with their own walk animation.
-- **At an anvil or range**, players form a curve around it and all face it, so nobody ends up
-  hitting thin air. Extra players make a second row behind.
-- **At a bank counter or around a fire**, players stay close together, whatever the spacing slider
-  says, so a bank crowd doesn't look like a queue and a campfire doesn't look deserted.
+- **At an anvil, range or fire**, players form a curve around it and all face it, so nobody ends
+  up hitting thin air. A crowd gathered round a fire all face the fire, whichever side of it they
+  end up on. Two players share the space in front of it evenly; extra players fill the
+  curve outwards, then stand in the gaps of a second row behind.
+- **At a bank counter**, players line up side by side along the counter, close together, like a
+  busy bank rather than a queue. Around a fire they stay close too, whatever the spacing slider says.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
+  When a crowd shrinks to one player, they step back to the middle of their tile.
 - **Purely cosmetic.** Nobody's real position, clickbox, name, chat or minimap dot changes.
-- **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds and
-  while you're in combat, and never shows players the game itself keeps hidden.
+- **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds, in
+  PvP minigames such as Castle Wars, Soul Wars and Last Man Standing, and while you're in combat.
+  It never shows players the game itself (or another plugin such as Entity Hider) keeps hidden,
+  and they never push anyone else aside.
 
 Needs the **GPU** plugin (or 117 HD) turned on.
 
 <br clear="right">
+
+## In game
+
+![Before and after at Varrock West Bank](docs/before-after-bank.jpg)
+
+![Before and after in a Varrock doorway by a fire](docs/before-after-doorway.jpg)
+
+![Before and after on the Grand Exchange steps](docs/before-after-ge-steps.jpg)
+
+![Before and after across the whole Grand Exchange](docs/before-after-ge-wide.jpg)
+
+![Players in a curve around an anvil in Varrock](docs/anvil-crowd.jpg)
+*Smithing together: a group that would all share one tile forms a curve around the anvil.*
+
+![Personal Space and its sidebar at Varrock West Bank](docs/in-game-sidebar.jpg)
+*Choose how many players can share a tile and how far apart they stand; changes show straight away.*
 
 ## Using it
 
@@ -39,8 +61,9 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | --- | --- |
 | On/off switch | Spread out crowds, or show the game as normal. |
 | Players per tile | How many players on one tile get their own spot: 2 to 10, with 5 as the sweet spot. |
-| Spacing | Close, Normal or Wide, or drag the slider up to two tiles apart. Changes show live. |
+| Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. Bank counters, fires and anvils stay closer on their own. Changes show live. |
 | Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |
+| Small groups stay close | On: two or three players on a tile stand close together and only big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot. |
 | Move my character too | Off: you stay put and others step around you. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
 
@@ -91,12 +114,14 @@ src/main/java/com/grant9008/personalspace/
   PersonalSpacePlugin.java      plugin entry: safety rules, per-tick layout, sidebar updates
   SpreadingDrawCallbacks.java   sits in front of the renderer; draws players at their spots
   StackProbe.java               confirms players are ones the game is willing to draw
-  StackSpreader.java            starting spots per tile (circle or side by side)
-  CrowdLayout.java              Smart arrangement: settles the whole crowd
+  CrowdPlanner.java             per tick: which tiles are spread and who stands where
+  StackSpreader.java            the spots on a tile: rings, curved rows, straight counter rows
+  ShapeMemory.java              keeps a tile's row or crowd shape while the same people are there
+  SlotBook.java                 keeps everyone's spot as people come and go
   CollisionTerrain.java         where a player can stand, from the game's walkability map
   StackRegistry.java            which players share each crowded tile
   StillnessTracker.java         "is this player standing still"
-  OffsetTable.java              current offsets, walking and gliding
+  OffsetTable.java              current offsets and walking into place
   PersonalSpacePanel.java       the sidebar
   StatusSummary.java, Snapshot.java   status line, live checks and report
   PersonalSpaceConfig.java      settings

@@ -14,6 +14,7 @@ final class Snapshot
 		WILDERNESS("In the Wilderness"),
 		PVP_AREA("In a PvP area"),
 		PVP_WORLD("On a PvP-type world"),
+		PVP_ACTIVITY("Players can fight here"),
 		IN_COMBAT("You are in combat");
 
 		final String label;
@@ -30,9 +31,10 @@ final class Snapshot
 	boolean active;
 	PersonalSpaceConfig.Arrangement arrangement = PersonalSpaceConfig.Arrangement.AUTO;
 	PersonalSpaceConfig.Mode mode = PersonalSpaceConfig.Mode.SPREAD;
-	int spacing = PersonalSpaceConfig.SPACING_NORMAL;
+	int spacing = PersonalSpaceConfig.SPACING_WIDE;
 	int maxStack;
 	boolean includeLocal;
+	boolean smallGroupsClose = true;
 	/** Players drawn mid-step with their walk animation; total. */
 	long walkDraws;
 	/** Moving players drawn without a walk animation because they were busy with an emote or action; total. */
@@ -68,6 +70,10 @@ final class Snapshot
 	long shapeChanges;
 	/** Times a player with a spot was moved to a different spot to fill a gap; total. */
 	long spotMoves;
+	/** Players standing still on a crowded tile whom the game isn't showing, last tick. */
+	int unseenStacked;
+	/** What was decided for the spread tile nearest to you, or null if none. */
+	String nearestTile;
 	/** No player draws at all for over a second while connected and logged in. */
 	boolean noPlayerDrawsSustained;
 	/** Players (or you, in test mode) should be shifted but nothing was drawn shifted for over a second. */

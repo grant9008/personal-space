@@ -24,8 +24,12 @@ final class StackRegistry
 	private static final int[] NONE = new int[0];
 
 	private volatile Map<Long, int[]> byTile = Collections.emptyMap();
-	/** Tiles laid out as a side-by-side row this tick. */
-	private volatile java.util.Set<Long> rows = Collections.emptySet();
+	/** Tiles laid out as a curved row this tick. */
+	private volatile java.util.Set<Long> curvedRows = Collections.emptySet();
+	/** Players on a crowded tile who weren't given a spot this tick (past the limit, you staying put, or not shown yet). */
+	private volatile java.util.Set<Integer> unplaced = Collections.emptySet();
+	/** Tiles gathered round a fire, and where the fire is from the tile centre. */
+	private volatile Map<Long, int[]> fires = Collections.emptyMap();
 
 	static long key(int plane, int sceneX, int sceneY)
 	{
@@ -48,16 +52,55 @@ final class StackRegistry
 	}
 
 	/** Replace the table with the tiles and members in these placements (placement order is kept). */
-	void rebuild(List<StackSpreader.Placement> placements, java.util.Set<Long> rowTiles)
+	void rebuild(List<StackSpreader.Placement> placements, java.util.Set<Long> curvedRowTiles)
 	{
-		rows = rowTiles == null ? Collections.emptySet() : new java.util.HashSet<>(rowTiles);
-		rebuild(placements);
+		rebuild(placements, curvedRowTiles, Collections.emptySet());
 	}
 
-	/** True if this tile is a side-by-side row, where everyone faces the same thing. */
-	boolean isRow(long tileKey)
+	void rebuild(List<StackSpreader.Placement> members, java.util.Set<Long> curvedRowTiles, java.util.Set<Integer> unplacedIds)
 	{
-		return rows.contains(tileKey);
+		rebuild(members, curvedRowTiles, unplacedIds, Collections.emptyMap());
+	}
+
+	void rebuild(List<StackSpreader.Placement> members, java.util.Set<Long> curvedRowTiles, java.util.Set<Integer> unplacedIds,
+		Map<Long, int[]> fireByTile)
+	{
+		curvedRows = curvedRowTiles == null ? Collections.emptySet() : new java.util.HashSet<>(curvedRowTiles);
+		unplaced = unplacedIds == null ? Collections.emptySet() : new java.util.HashSet<>(unplacedIds);
+		fires = fireByTile == null ? Collections.emptyMap() : new HashMap<>(fireByTile);
+		rebuild(members);
+	}
+
+	/** Where the fire this tile's crowd is gathered round is, from the tile centre, or null. */
+	int[] fireAt(long tileKey)
+	{
+		return fires.get(tileKey);
+	}
+
+	/**
+	 * Which way a player drawn at (dx, dz) from this tile's centre should face: towards the fire the
+	 * crowd is gathered round, round towards what a curved row faces, or just their own facing.
+	 */
+	int drawOrientation(long tileKey, int orientation, int dx, int dz)
+	{
+		int[] fire = fires.get(tileKey);
+		if (fire != null)
+		{
+			return StackSpreader.faceTowards(orientation, dx, dz, fire[0], fire[1]);
+		}
+		return curvedRows.contains(tileKey) ? StackSpreader.faceSameSpot(orientation, dx, dz) : orientation;
+	}
+
+	/** True if this player is on a crowded tile but wasn't given a spot this tick. */
+	boolean isUnplaced(int id)
+	{
+		return unplaced.contains(id);
+	}
+
+	/** True if this tile is a curved row, whose players turn to face what the row is facing. */
+	boolean isCurvedRow(long tileKey)
+	{
+		return curvedRows.contains(tileKey);
 	}
 
 	void rebuild(List<StackSpreader.Placement> placements)
@@ -88,7 +131,9 @@ final class StackRegistry
 
 	void clear()
 	{
-		rows = Collections.emptySet();
+		curvedRows = Collections.emptySet();
+		unplaced = Collections.emptySet();
+		fires = Collections.emptyMap();
 		byTile = Collections.emptyMap();
 	}
 

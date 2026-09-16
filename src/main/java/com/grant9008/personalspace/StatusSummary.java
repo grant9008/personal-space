@@ -167,6 +167,7 @@ final class StatusSummary
 			.append(", spacing ").append(s.spacing)
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
+			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 
 			.append(", test offset ").append(s.testOffset).append('\n');
 		b.append("Safety: ").append(s.gate.label).append('\n');
@@ -192,7 +193,9 @@ final class StatusSummary
 			.append(", standing still: ").append(s.still)
 			.append(", stacked tiles: ").append(s.stackedTiles)
 			.append(", being spread: ").append(s.moving)
-			.append(", skipped ids: ").append(s.skippedIds).append('\n');
+			.append(", skipped ids: ").append(s.skippedIds)
+			.append(", stacked but not shown by the game: ").append(s.unseenStacked).append('\n');
+		b.append("Nearest spread tile: ").append(s.nearestTile == null ? "none" : s.nearestTile).append('\n');
 		return b.toString();
 	}
 

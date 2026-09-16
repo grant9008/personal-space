@@ -21,6 +21,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_SPACING = "spacingUnits";
 	String KEY_MAX_STACK = "maxStack";
 	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
+	String KEY_SMALL_GROUPS_CLOSE = "smallGroupsClose";
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
@@ -33,8 +34,16 @@ public interface PersonalSpaceConfig extends Config
 	int MIN_SPACING = 16;
 	int MAX_SPACING = 256;
 	int SPACING_CLOSE = 40;
-	int SPACING_NORMAL = 72;
-	int SPACING_WIDE = 112;
+	int SPACING_NORMAL = 128;
+	/** Two tiles apart: what looks best in a big Grand Exchange crowd, so it's the default. Banks, fires and anvils stay closer on their own. */
+	int SPACING_WIDE = 256;
+	/**
+	 * The slider sets the spacing for a full crowd. Two players on a tile stand at most this far apart
+	 * (a bit over half a tile), and bigger groups spread further, reaching the slider's spacing at
+	 * {@link #FULL_CROWD} players: two people two tiles apart just look lost.
+	 */
+	int PAIR_SPACING = 72;
+	int FULL_CROWD = 8;
 	/** Smart keeps people at a bank counter or row of booths at most this far apart, whatever the slider says. */
 	int COUNTER_SPACING = 42;
 	/** Smart keeps people around a fire at most this far apart, whatever the slider says. */
@@ -112,12 +121,12 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_SPACING,
 		name = "Spacing",
-		description = "How far apart players are drawn, in game units. 128 is one tile.",
+		description = "How far apart players are drawn, in game units (128 is one tile). With 'Small groups stay close' on, this is for a big crowd and smaller groups stand closer.",
 		position = 2
 	)
 	default int spacing()
 	{
-		return SPACING_NORMAL;
+		return SPACING_WIDE;
 	}
 
 	@Range(min = MIN_STACK, max = MAX_STACK)
@@ -141,6 +150,17 @@ public interface PersonalSpaceConfig extends Config
 	default boolean includeLocalPlayer()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+		keyName = KEY_SMALL_GROUPS_CLOSE,
+		name = "Small groups stay close",
+		description = "On: two or three players on a tile stand close together and only big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot.",
+		position = 5
+	)
+	default boolean smallGroupsClose()
+	{
+		return true;
 	}
 
 	@ConfigItem(

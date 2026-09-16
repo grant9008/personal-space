@@ -1,37 +1,23 @@
 package com.grant9008.personalspace;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * Pure layout logic: given who is standing on which tile, decide who gets nudged and by how much.
- * Knows nothing about RuneLite so it can be unit tested on its own.
+ * The geometry of a crowded tile: where its spots are, which way a group faces, and which way a
+ * moved player should turn. Knows nothing about RuneLite so it can be unit tested on its own.
  *
- * <p>Players on the same tile are sorted by id, so a player keeps the same spot tick after tick
- * while the group is unchanged.
- *
- * <p>Two arrangements:
+ * <p>Two shapes (chosen by {@link ShapeMemory}):
  * <ul>
- * <li><b>Row</b>: shoulder to shoulder in a curve around the thing the group is facing. Right when
- * everyone faces the same thing (an anvil, bank booth, range, furnace or fire): nobody is put inside
- * it, nobody ends up past its sides, and everyone still faces it.</li>
- * <li><b>Ring</b>: evenly around the tile. Right for a crowd facing every which way.</li>
+ * <li><b>Row</b>: side by side in front of the thing everyone faces. Around an anvil, range or fire
+ * the row curves round it; along a bank counter it runs straight.</li>
+ * <li><b>Crowd</b>: rings around the tile, for players facing every which way.</li>
  * </ul>
- * {@link Layout#AUTO} picks the line when the group faces the same way, else the ring.
  */
 final class StackSpreader
 {
-	enum Layout
-	{
-		AUTO,
-		RING,
-		LINE
-	}
-
 	/** Orientation units in a full turn, as used by the game. 0 faces south, 512 west, 1024 north, 1536 east. */
 	static final int FULL_TURN = 2048;
 
@@ -46,15 +32,18 @@ final class StackSpreader
 	/** How far round a row may curve either side of straight ahead, in radians (70 degrees). */
 	static final double MAX_ARC = Math.toRadians(70);
 
-	/** Row spots, best first: either side of the middle, then further out, then the middle itself. */
-	private static final int[] ROW_STEPS = {1, -1, 2, -2, 0};
+	/** Most players in one row before the next row starts. */
+	static final int ROW_WIDTH = 6;
 	private static final int ROWS = 3;
 	/** Furthest a row stands behind the row in front, whatever the spacing: just under a tile. */
 	static final int ROW_DEPTH = 112;
+	/** Furthest a curved row reaches either side of the middle, in spacings. The curve is squeezed so this is at most {@link #MAX_ARC} round. */
+	static final double ARC_REACH = 2.5;
+	/** Furthest a straight row reaches either side of the middle, in spacings: a little further, so a row blocked on one side can grow along the other. */
+	static final double STRAIGHT_REACH = 3.5;
 	/** Crowd spots, best first: an inner ring, the middle, then an outer ring. Opposite sides alternate so any number looks balanced. */
 	private static final double[] INNER_RING = {0, 180, 120, 300, 60, 240};
 	private static final double[] OUTER_RING = {30, 210, 150, 330, 90, 270, 0, 180, 60, 240, 120, 300};
-	static final int ROW_PATTERN_SIZE = ROW_STEPS.length * ROWS;
 	static final int CROWD_PATTERN_SIZE = INNER_RING.length + 1 + OUTER_RING.length;
 
 	/** Where a spot can be, relative to the tile centre. */
@@ -65,16 +54,6 @@ final class StackSpreader
 
 	/** Furthest a player is placed from the tile centre along a line, in local units (three tiles). */
 	static final int MAX_LINE_EXTENT = 384;
-
-	/** Looks up where a player is currently headed. */
-	interface Targets
-	{
-		boolean has(int id);
-
-		int dx(int id);
-
-		int dz(int id);
-	}
 
 	/** One standing-still player on a tile. */
 	static final class Entry
@@ -120,156 +99,108 @@ final class StackSpreader
 	{
 	}
 
-	/** Ring layout for every tile; kept for callers and tests that don't care about facing. */
-	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int radius)
-	{
-		return place(entries, includeLocal, maxStack, radius, Layout.RING);
-	}
-
 	/**
-	 * @param entries      every standing-still player and the tile they stand on
-	 * @param includeLocal whether the local player takes a spot too, or stays put in the middle
-	 * @param maxStack     spread at most this many players per tile; the rest stay centred
-	 * @param spacing      ring radius, or the gap between neighbours in a line, in local units
-	 * @param layout       arrangement to use
-	 * @return one placement per player that should move; anyone not listed stays where they are
-	 */
-	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout)
-	{
-		return place(entries, includeLocal, maxStack, spacing, layout, java.util.Collections.emptySet(), null, null);
-	}
-
-	/**
-	 * As above, remembering which tiles were rows last time so a tile only switches between a row
-	 * and a circle when the facings clearly change.
+	 * The usable spots for a tile, best first, at most {@code capacity} of them. The pattern never
+	 * depends on how many players there are, so adding or removing a player never moves anyone
+	 * else's spot. Spots a player couldn't stand on (a booth, stall, anvil or wall) are skipped.
 	 *
-	 * @param wasRow tiles laid out as a row last time
-	 * @param isRow  filled with the tiles laid out as a row this time; may be null
+	 * <p>Rows: a front row, then a row behind it, then another, up to {@link #ROW_WIDTH} usable spots
+	 * each. The front row starts half a spacing either side of the middle, so two players share the
+	 * space in front of what they face evenly, and it grows outwards from there. When someone who
+	 * stays put stands in the middle, the front row leaves them a full spacing of room instead. Each
+	 * row behind stands in the gaps of the row in front. A row curves around what everyone faces,
+	 * except at a counter ({@code straight}), where it runs straight along it.
+	 *
+	 * <p>Crowds: an inner ring, the middle, then an outer ring.
 	 */
-	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout,
-		Set<Long> wasRow, Set<Long> isRow)
+	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity, SpotCheck check)
 	{
-		return place(entries, includeLocal, maxStack, spacing, layout, wasRow, isRow, null);
-	}
-
-	/**
-	 * As above, also filling {@code rowFacing} with the direction each row faces (radians, game
-	 * convention), so the crowd layout can keep rows in front of what they're using.
-	 */
-	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout,
-		Set<Long> wasRow, Set<Long> isRow, Map<Long, Double> rowFacing)
-	{
-		Map<Long, List<Entry>> byTile = new LinkedHashMap<>();
-		for (Entry e : entries)
+		List<int[]> out = new ArrayList<>(capacity);
+		if (!row)
 		{
-			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>(4)).add(e);
-		}
-
-		List<Placement> out = new ArrayList<>();
-		for (List<Entry> group : byTile.values())
-		{
-			if (group.size() < 2)
+			for (int i = 0; i < CROWD_PATTERN_SIZE && out.size() < capacity; i++)
 			{
-				continue; // nobody to be stacked with
-			}
-			group.sort(Comparator.comparingInt(e -> e.id));
-
-			List<Entry> movable = new ArrayList<>(group.size());
-			for (Entry e : group)
-			{
-				if (includeLocal || !e.local)
+				if (middleTaken && i == INNER_RING.length)
 				{
-					movable.add(e);
+					continue;
+				}
+				int[] spot = crowdSpot(i, spacing);
+				if (check == null || check.canStand(spot[0], spot[1]))
+				{
+					out.add(spot);
 				}
 			}
-			int n = Math.min(movable.size(), maxStack);
-			if (n == 0)
-			{
-				continue;
-			}
-			// Someone stays in the middle (you, when "move my character" is off, or anyone past the cap).
-			boolean centreTaken = movable.size() < group.size() || n < movable.size();
-
-			long tile = group.get(0).tile;
-			double needed = wasRow.contains(tile) ? STILL_SAME_FACING : SAME_FACING;
-			Double facing = layout == Layout.RING ? null : sharedFacing(group, needed);
-			boolean line = layout == Layout.LINE || (layout == Layout.AUTO && facing != null);
-			double angle = facing != null ? facing : 0.0;
-			if (line && isRow != null)
-			{
-				isRow.add(tile);
-			}
-			if (line && rowFacing != null)
-			{
-				rowFacing.put(tile, angle);
-			}
-
-			for (int i = 0; i < n; i++)
-			{
-				int[] off = line
-					? lineOffset(i, n, centreTaken, spacing, angle)
-					: ringOffset(i, n, ringRadius(n, centreTaken, spacing));
-				Entry e = movable.get(i);
-				out.add(new Placement(e.id, e.tile, off[0], off[1]));
-			}
+			return out;
 		}
-		return out;
-	}
 
-	/**
-	 * Keep each player's current spot unless the new one is clearly different. A crowd shifts a
-	 * little every time someone nearby arrives, leaves or turns; without this everyone would keep
-	 * shuffling by a few units.
-	 */
-	static List<Placement> keepCurrentSpots(List<Placement> fresh, Targets current, int tolerance)
-	{
-		List<Placement> out = new ArrayList<>(fresh.size());
-		for (Placement p : fresh)
+		double reach = straight ? STRAIGHT_REACH : ARC_REACH;
+		for (int rowNumber = 0; rowNumber < ROWS && out.size() < capacity; rowNumber++)
 		{
-			if (current.has(p.id) && Math.hypot(p.dx - current.dx(p.id), p.dz - current.dz(p.id)) < tolerance)
+			// Rows take turns between spots off the middle line and spots on it, so each row
+			// stands in the gaps of the one in front.
+			boolean offMiddle = (rowNumber % 2 == 0) != middleTaken;
+			int inRow = 0;
+			for (double step = offMiddle ? 0.5 : 0; step <= reach && inRow < ROW_WIDTH && out.size() < capacity; step++)
 			{
-				out.add(new Placement(p.id, p.tile, current.dx(p.id), current.dz(p.id)));
-			}
-			else
-			{
-				out.add(p);
+				for (int side = 0; side < (step == 0 ? 1 : 2) && inRow < ROW_WIDTH && out.size() < capacity; side++)
+				{
+					if (step == 0 && rowNumber == 0 && middleTaken)
+					{
+						continue;
+					}
+					int[] spot = rowSpot(rowNumber, side == 0 ? step : -step, straight, angle, spacing);
+					if (spot != null && (check == null || check.canStand(spot[0], spot[1])))
+					{
+						out.add(spot);
+						inRow++;
+					}
+				}
 			}
 		}
 		return out;
 	}
 
-	/** True if pattern spot {@code index} is the middle of the tile. */
-	static boolean isMiddleSpot(int index, boolean row)
-	{
-		return row ? index == ROW_STEPS.length - 1 : index == INNER_RING.length;
-	}
-
 	/**
-	 * Pattern spot {@code index}, relative to the tile centre. The pattern never depends on how many
-	 * players there are, so adding or removing a player never moves anyone else's spot.
+	 * The spot {@code step} spacings along row {@code rowNumber} (0 is the front row), relative to the
+	 * tile centre, or null if that is further out than a row may reach.
 	 *
-	 * <p>Rows curve around what everyone faces ({@link #LOOK_AHEAD} ahead): a front row, then a row
-	 * behind it, then another. Crowds fill an inner ring, the middle, then an outer ring.
+	 * <p>A curved row keeps everyone the same distance from what they face ({@link #LOOK_AHEAD}
+	 * ahead of the tile centre, plus a row depth for each row behind). Front-row neighbours are about
+	 * {@code spacing} apart along the curve, never further round than {@link #MAX_ARC}; rows behind
+	 * keep the same angle between neighbours, so their half-step offsets land in the gaps. A straight
+	 * row runs sideways across the facing, each row behind a row depth further back.
 	 */
-	static int[] spotOffset(int index, boolean row, double angle, int spacing)
+	static int[] rowSpot(int rowNumber, double step, boolean straight, double angle, int spacing)
 	{
-		if (row)
+		double fwdX = -Math.sin(angle);
+		double fwdZ = -Math.cos(angle);
+		double depth = rowNumber * (double) Math.min(spacing, ROW_DEPTH);
+		if (straight)
 		{
-			int rowNumber = index / ROW_STEPS.length;
-			int step = ROW_STEPS[index % ROW_STEPS.length];
-			double radius = LOOK_AHEAD + rowNumber * (double) Math.min(spacing, ROW_DEPTH);
-			double turn = Math.min(spacing / radius, MAX_ARC / 2);
-			double phi = step * turn;
-			double fwdX = -Math.sin(angle);
-			double fwdZ = -Math.cos(angle);
-			double focusX = fwdX * LOOK_AHEAD;
-			double focusZ = fwdZ * LOOK_AHEAD;
-			double backX = -fwdX * radius;
-			double backZ = -fwdZ * radius;
-			double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
-			double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
+			double along = step * spacing;
+			if (Math.abs(along) > MAX_LINE_EXTENT)
+			{
+				return null;
+			}
+			double x = fwdZ * along - fwdX * depth;
+			double z = -fwdX * along - fwdZ * depth;
 			return new int[]{(int) Math.round(x), (int) Math.round(z)};
 		}
+		double radius = LOOK_AHEAD + depth;
+		double turn = Math.min((double) spacing / LOOK_AHEAD, MAX_ARC / ARC_REACH);
+		double phi = step * turn;
+		double focusX = fwdX * LOOK_AHEAD;
+		double focusZ = fwdZ * LOOK_AHEAD;
+		double backX = -fwdX * radius;
+		double backZ = -fwdZ * radius;
+		double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
+		double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
+		return new int[]{(int) Math.round(x), (int) Math.round(z)};
+	}
+
+	/** Crowd spot {@code index}, relative to the tile centre: an inner ring, the middle, then an outer ring. */
+	private static int[] crowdSpot(int index, int spacing)
+	{
 		if (index < INNER_RING.length)
 		{
 			return polar(0.8 * spacing, INNER_RING[index]);
@@ -285,30 +216,6 @@ final class StackSpreader
 	{
 		double a = Math.toRadians(degrees);
 		return new int[]{(int) Math.round(radius * Math.cos(a)), (int) Math.round(radius * Math.sin(a))};
-	}
-
-	/**
-	 * The usable spots for a tile, best first: the pattern with the middle left out when someone who
-	 * stays put is standing there, and any spot a player couldn't stand on (a booth, stall, anvil or
-	 * wall) skipped. At most {@code capacity} spots.
-	 */
-	static List<int[]> spots(boolean row, double angle, boolean middleTaken, int spacing, int capacity, SpotCheck check)
-	{
-		List<int[]> out = new ArrayList<>(capacity);
-		int size = row ? ROW_PATTERN_SIZE : CROWD_PATTERN_SIZE;
-		for (int i = 0; i < size && out.size() < capacity; i++)
-		{
-			if (middleTaken && isMiddleSpot(i, row))
-			{
-				continue;
-			}
-			int[] spot = spotOffset(i, row, angle, spacing);
-			if (check == null || check.canStand(spot[0], spot[1]))
-			{
-				out.add(spot);
-			}
-		}
-		return out;
 	}
 
 	/** True for the names of fires people gather round: a fire someone lit, a campfire, a fire pit. Not fireplaces. */
@@ -339,13 +246,8 @@ final class StackSpreader
 
 	/**
 	 * The direction the whole group faces, in radians (game convention: 0 south, pi/2 west), or
-	 * null if their facings are unknown or don't agree closely enough.
+	 * null if their facings are unknown or don't agree to at least {@code needed} (1 is identical).
 	 */
-	static Double sharedFacing(List<Entry> group)
-	{
-		return sharedFacing(group, SAME_FACING);
-	}
-
 	static Double sharedFacing(List<Entry> group, double needed)
 	{
 		double sumX = 0;
@@ -389,77 +291,24 @@ final class StackSpreader
 		return OffsetTable.facing(lookX, lookZ);
 	}
 
+	/**
+	 * Which way a player drawn at (dx, dz) from the tile centre should face to look at the point
+	 * (focusX, focusZ), also relative to the tile centre; {@code orientation} if they're standing on it.
+	 */
+	static int faceTowards(int orientation, int dx, int dz, int focusX, int focusZ)
+	{
+		double lookX = focusX - dx;
+		double lookZ = focusZ - dz;
+		if (Math.hypot(lookX, lookZ) < 1)
+		{
+			return orientation;
+		}
+		return OffsetTable.facing(lookX, lookZ);
+	}
+
 	static double toRadians(int orientation)
 	{
 		return 2 * Math.PI * (((orientation % FULL_TURN) + FULL_TURN) % FULL_TURN) / FULL_TURN;
 	}
 
-	/**
-	 * Slot {@code slot} of {@code count} in a row facing {@code angle}, curved around what the row is
-	 * facing. Everyone stands the same distance ({@link #LOOK_AHEAD}) from that spot, neighbours about
-	 * {@code spacing} apart along the curve, and the curve never wraps further round than
-	 * {@link #MAX_ARC} either side, so a wide spacing can't push people off the anvil or booth.
-	 * With the centre free the row is centred on the tile; with the centre taken, players fill the
-	 * spots either side of it, nearest first.
-	 */
-	static int[] lineOffset(int slot, int count, boolean centreTaken, int spacing, double angle)
-	{
-		double step;
-		double furthest;
-		if (centreTaken)
-		{
-			int side = slot / 2 + 1;
-			step = slot % 2 == 0 ? side : -side;
-			furthest = (count + 1) / 2;
-		}
-		else
-		{
-			furthest = (count - 1) / 2.0;
-			step = slot - furthest;
-		}
-		double turn = furthest == 0 ? 0 : Math.min((double) spacing / LOOK_AHEAD, MAX_ARC / furthest);
-		double phi = step * turn;
-
-		// The spot everyone is facing, straight ahead of the tile centre.
-		double focusX = -Math.sin(angle) * LOOK_AHEAD;
-		double focusZ = -Math.cos(angle) * LOOK_AHEAD;
-		// Swing the line from that spot back to the tile centre round by phi.
-		double backX = -focusX;
-		double backZ = -focusZ;
-		double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
-		double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
-		return new int[]{(int) Math.round(x), (int) Math.round(z)};
-	}
-
-	/**
-	 * Ring radius that puts neighbours {@code spacing} apart, and also {@code spacing} away from
-	 * anyone standing in the middle.
-	 */
-	static int ringRadius(int count, boolean centreTaken, int spacing)
-	{
-		double r = count <= 1 ? spacing : spacing / (2 * Math.sin(Math.PI / count));
-		if (centreTaken)
-		{
-			r = Math.max(r, spacing);
-		}
-		return (int) Math.round(r);
-	}
-
-	/**
-	 * Slot {@code slot} of {@code count} on a ring of the given radius.
-	 * Slot 0 is due east and the rest go round anticlockwise, so two players end up
-	 * side by side (east/west), which reads best from the default north-facing camera.
-	 */
-	static int[] ringOffset(int slot, int count, int radius)
-	{
-		if (count <= 0)
-		{
-			return new int[]{0, 0};
-		}
-		double angle = 2 * Math.PI * slot / count;
-		return new int[]{
-			(int) Math.round(radius * Math.cos(angle)),
-			(int) Math.round(radius * Math.sin(angle))
-		};
-	}
 }

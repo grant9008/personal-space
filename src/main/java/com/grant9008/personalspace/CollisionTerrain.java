@@ -11,7 +11,7 @@ package com.grant9008.personalspace;
  * <p>Coordinates are scene local units: 128 per tile, x east, z north. Flags use the game's
  * CollisionDataFlag bits, copied here so this class stays free of RuneLite and unit testable.
  */
-final class CollisionTerrain implements CrowdLayout.Terrain
+final class CollisionTerrain
 {
 	static final int BLOCK_NORTH_WEST = 1;
 	static final int BLOCK_NORTH = 2;
@@ -37,8 +37,8 @@ final class CollisionTerrain implements CrowdLayout.Terrain
 		this.flags = flagsByPlane;
 	}
 
-	@Override
-	public boolean canStand(int plane, int fromX, int fromZ, int x, int z)
+	/** Whether a player standing at (fromX, fromZ) could be drawn at (x, z). */
+	boolean canStand(int plane, int fromX, int fromZ, int x, int z)
 	{
 		int[][] f = plane >= 0 && plane < flags.length ? flags[plane] : null;
 		if (f == null)
@@ -92,6 +92,22 @@ final class CollisionTerrain implements CrowdLayout.Terrain
 			return false;
 		}
 		return oz <= TILE - 1 - EDGE_MARGIN || canStep(f, tx, tz, 0, 1);
+	}
+
+	/**
+	 * True if a player on this tile, facing {@code angle}, is facing something: the next tile that
+	 * way can't be walked onto (an anvil, tree, booth, range or water) or there's a wall in between.
+	 */
+	boolean facesObstacle(int plane, int tileX, int tileY, double angle)
+	{
+		int[][] f = plane >= 0 && plane < flags.length ? flags[plane] : null;
+		if (f == null || !inside(f, tileX, tileY))
+		{
+			return false;
+		}
+		int aheadX = (int) Math.round(-Math.sin(angle));
+		int aheadZ = (int) Math.round(-Math.cos(angle));
+		return (aheadX != 0 || aheadZ != 0) && !canStep(f, tileX, tileY, aheadX, aheadZ);
 	}
 
 	/**

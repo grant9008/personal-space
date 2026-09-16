@@ -139,9 +139,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		if (dx != 0 || dz != 0)
 		{
 			Model drawModel = model;
-			int drawOrientation = stacks.isRow(StackRegistry.key(plane, x >> 7, z >> 7))
-				? StackSpreader.faceSameSpot(orientation, dx, dz)
-				: orientation;
+			int drawOrientation = stacks.drawOrientation(StackRegistry.key(plane, x >> 7, z >> 7), orientation, dx, dz);
 			if (offsets.isWalking(drawnId))
 			{
 				Model walk = walkModel(drawn, drawnId);
@@ -330,6 +328,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int ground = y + drawn.getAnimationHeightOffset();
 		int cycle = client.getGameCycle();
 		boolean touchedSharedModel = false;
+		// As in the game, only one player is drawn in the middle of a tile: anyone left without a spot
+		// (past the "players per tile" limit, or standing in the middle with you) stays hidden there.
+		// Players with a spot are always drawn, and so are you.
+		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0;
+		Player local = client.getLocalPlayer();
+		int localId = local == null ? -1 : local.getId();
 		int total = mates.length + heldCount;
 		for (int i = 0; i < total; i++)
 		{
@@ -351,6 +355,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				{
 					continue;
 				}
+				int mdx = offsets.dx(id);
+				int mdz = offsets.dz(id);
+				boolean inMiddle = mdx == 0 && mdz == 0 && !offsets.isWalking(id);
+				if (inMiddle && middleDrawn && id != localId && stacks.isUnplaced(id))
+				{
+					continue;
+				}
 				if (!probe.isConfirmed(id, mate, cycle))
 				{
 					continue; // the game hasn't shown this player recently, e.g. hidden by the server: never draw them
@@ -360,11 +371,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
 				touchedSharedModel = true;
-				int mdx = offsets.dx(id);
-				int mdz = offsets.dz(id);
-				int mateOrientation = stacks.isRow(tileKey)
-					? StackSpreader.faceSameSpot(mate.getCurrentOrientation(), mdx, mdz)
-					: mate.getCurrentOrientation();
+				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);
 				Model mateModel = null;
 				if (offsets.isWalking(id))
 				{
@@ -387,6 +394,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation, x + mdx, mateY, z + mdz);
 				revealedFrame[id] = frame;
 				revealedDraws++;
+				middleDrawn |= inMiddle;
 			}
 			catch (RuntimeException e)
 			{

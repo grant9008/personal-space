@@ -85,16 +85,77 @@ public class StackRegistryTest
 	}
 
 	@Test
-	public void spreaderPlacementsCarryTheirTileIntoTheRegistry()
+	public void playersRoundAFireFaceItAndCurvedRowsTurnIn()
+	{
+		long fireTile = StackRegistry.key(0, 2, 2);
+		long rowTile = StackRegistry.key(0, 3, 3);
+		StackRegistry r = new StackRegistry();
+		r.rebuild(new ArrayList<>(), java.util.Collections.singleton(rowTile), java.util.Collections.emptySet(),
+			java.util.Collections.singletonMap(fireTile, new int[]{128, 0}));
+		Assert.assertEquals("west of the fire, facing east", 1536, r.drawOrientation(fireTile, 0, -80, 0));
+		Assert.assertEquals(StackSpreader.faceSameSpot(1024, 60, 0), r.drawOrientation(rowTile, 1024, 60, 0));
+		Assert.assertEquals("anywhere else, their own facing", 700, r.drawOrientation(StackRegistry.key(0, 9, 9), 700, 60, 0));
+	}
+
+	@Test
+	public void playersWithoutASpotAreRemembered()
+	{
+		long tile = StackRegistry.key(0, 1, 1);
+		List<StackSpreader.Placement> members = new ArrayList<>();
+		members.add(new StackSpreader.Placement(1, tile, 40, 0));
+		members.add(new StackSpreader.Placement(2, tile, 0, 0));
+		StackRegistry r = new StackRegistry();
+		r.rebuild(members, java.util.Collections.emptySet(), java.util.Collections.singleton(2));
+		Assert.assertTrue(r.isUnplaced(2));
+		Assert.assertFalse(r.isUnplaced(1));
+		r.clear();
+		Assert.assertFalse(r.isUnplaced(2));
+	}
+
+	@Test
+	public void plannedPlayersCarryTheirTileIntoTheRegistry()
 	{
 		long tile = StackRegistry.key(0, 12, 34);
 		List<StackSpreader.Entry> entries = new ArrayList<>();
-		entries.add(new StackSpreader.Entry(1, tile, true));
-		entries.add(new StackSpreader.Entry(2, tile, false));
-		entries.add(new StackSpreader.Entry(3, tile, false));
+		entries.add(new StackSpreader.Entry(1, tile, true, 1024));
+		entries.add(new StackSpreader.Entry(2, tile, false, 0));
+		entries.add(new StackSpreader.Entry(3, tile, false, 512));
 
+		CrowdPlanner.Surroundings open = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long t, int dx, int dz)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesObstacle(long t, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean isCounter(long t, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long t, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long t)
+			{
+				return new ArrayList<>();
+			}
+		};
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(entries, id -> true, 32, 5, true, false, 1, open);
 		StackRegistry r = new StackRegistry();
-		r.rebuild(StackSpreader.place(entries, false, 5, 32));
-		Assert.assertArrayEquals("local player excluded, the other two are on the tile", new int[]{2, 3}, r.membersAt(tile));
+		r.rebuild(plan.placements);
+		Assert.assertArrayEquals("local player stays put, the other two are placed on the tile", new int[]{2, 3}, r.membersAt(tile));
 	}
 }
