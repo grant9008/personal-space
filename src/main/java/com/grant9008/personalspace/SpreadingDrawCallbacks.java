@@ -70,6 +70,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long revealErrors;
 	/** Player models drawn mid-step with their walk animation. */
 	long walkDraws;
+	/** Moving players drawn without walk frames because they were busy with an emote or action. */
+	long walkSkippedBusy;
+	/** Moving players drawn without walk frames because the animation couldn't be loaded (yet). */
+	long walkSkippedNoAnimation;
 
 	/** Walk animation timing by animation id, loaded once. */
 	private final Map<Integer, WalkTiming> walkTimings = new HashMap<>();
@@ -190,6 +194,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	{
 		if (player.getAnimation() != -1)
 		{
+			walkSkippedBusy++;
 			return null;
 		}
 		int walk = player.getWalkAnimation();
@@ -200,6 +205,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int frame = walkTiming(walk).frameAt(offsets.walkSeconds(id));
 		if (frame < 0)
 		{
+			walkSkippedNoAnimation++;
 			return null;
 		}
 		int pose = player.getPoseAnimation();
@@ -220,21 +226,28 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private WalkTiming walkTiming(int animationId)
 	{
 		WalkTiming timing = walkTimings.get(animationId);
-		if (timing == null)
+		if (timing == null || (timing.missing() && offsets.frame() - timing.loadedFrame > RETRY_FRAMES))
 		{
+			// A walk animation that couldn't be read is tried again a little later rather than
+			// given up on for good, so a player doesn't glide for the rest of the session.
 			timing = WalkTiming.load(client, animationId);
+			timing.loadedFrame = offsets.frame();
 			walkTimings.put(animationId, timing);
 		}
 		return timing;
 	}
 
+	/** How many frames to wait before trying to read a missing walk animation again (about a second). */
+	private static final int RETRY_FRAMES = 50;
+
 	/** How long each frame of a walk animation lasts, in game cycles (20 ms). */
 	static final class WalkTiming
 	{
-		private static final WalkTiming NONE = new WalkTiming(null, 0);
 
 		private final int[] frameLengths;
 		private final int duration;
+		/** Frame this was read on, for retrying a missing animation. */
+		int loadedFrame;
 
 		WalkTiming(int[] frameLengths, int duration)
 		{
@@ -249,19 +262,24 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				Animation animation = client.loadAnimation(animationId);
 				if (animation == null)
 				{
-					return NONE;
+					return new WalkTiming(null, 0);
 				}
 				if (animation.isMayaAnim())
 				{
 					return new WalkTiming(null, animation.getDuration());
 				}
 				int[] lengths = animation.getFrameLengths();
-				return lengths == null || lengths.length == 0 ? NONE : new WalkTiming(lengths, 0);
+				return lengths == null || lengths.length == 0 ? new WalkTiming(null, 0) : new WalkTiming(lengths, 0);
 			}
 			catch (RuntimeException e)
 			{
-				return NONE;
+				return new WalkTiming(null, 0);
 			}
+		}
+
+		boolean missing()
+		{
+			return frameLengths == null && duration <= 0;
 		}
 
 		/** Frame to show after walking this many seconds, looping; -1 if unknown. */

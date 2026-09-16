@@ -7,22 +7,15 @@ package com.grant9008.personalspace;
  * {@code outX}/{@code outZ} values are read from the renderer's drawTemp call. All three happen on
  * the client thread (checked against the RuneLite 1.12.38 client), so plain arrays are enough.
  *
- * <p>Movement styles:
- * <ul>
- * <li>{@link PersonalSpaceConfig.Movement#WALK}: straight line at walking pace. While a player is
- * on the way, {@link #isWalking} is true and {@link #walkSeconds}/{@link #walkOrientation} tell
- * the draw shim which walk frame to show and which way to face.</li>
- * <li>{@link PersonalSpaceConfig.Movement#GLIDE}: eases in quickly, then settles.</li>
- * <li>{@link PersonalSpaceConfig.Movement#INSTANT}: jumps straight there.</li>
- * </ul>
+ * <p>Players walk to their spot in a straight line at the game's walking pace. While a player is on
+ * the way, {@link #isWalking} is true and {@link #walkSeconds}/{@link #walkOrientation} tell the draw
+ * shim which walk frame to show and which way to face.
  */
 final class OffsetTable
 {
 	/** RuneScape never has more than this many players in the scene. */
 	static final int CAPACITY = 2048;
 
-	/** Glide time constant in seconds; about 95% of the way there after three of these. */
-	private static final float TAU = 0.10f;
 	/** Walking pace: the game's own, one tile (128 units) every 0.6 seconds. */
 	static final float WALK_SPEED = 128f / 0.6f;
 	/** Moves shorter than this just drift into place, with no walk animation, so small corrections don't look like shuffling. */
@@ -148,24 +141,13 @@ final class OffsetTable
 	}
 
 	/** Client thread, once per frame. Moves every active offset toward its target. */
-	void advance(float dtSeconds, PersonalSpaceConfig.Movement movement)
+	void advance(float dtSeconds)
 	{
 		frame++;
-		float k = movement == PersonalSpaceConfig.Movement.GLIDE ? 1f - (float) Math.exp(-dtSeconds / TAU) : 1f;
 		for (int i = activeCount - 1; i >= 0; i--)
 		{
 			int id = active[i];
-			if (movement == PersonalSpaceConfig.Movement.WALK)
-			{
-				walkTowardTarget(id, dtSeconds);
-			}
-			else
-			{
-				walking[id] = false;
-				walkTime[id] = 0f;
-				curX[id] = step(curX[id], tgtX[id], k);
-				curZ[id] = step(curZ[id], tgtZ[id], k);
-			}
+			walkTowardTarget(id, dtSeconds);
 			outX[id] = Math.round(curX[id]);
 			outZ[id] = Math.round(curZ[id]);
 			if (tgtX[id] == 0 && tgtZ[id] == 0 && curX[id] == 0f && curZ[id] == 0f)
@@ -215,11 +197,5 @@ final class OffsetTable
 		double angle = Math.atan2(-east, -north);
 		int o = (int) Math.round(angle * 1024 / Math.PI);
 		return ((o % 2048) + 2048) % 2048;
-	}
-
-	private static float step(float cur, int target, float k)
-	{
-		float next = cur + (target - cur) * k;
-		return Math.abs(next - target) < 0.5f ? target : next;
 	}
 }

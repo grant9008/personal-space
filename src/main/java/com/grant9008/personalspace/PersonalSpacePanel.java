@@ -43,8 +43,7 @@ import net.runelite.client.util.LinkBrowser;
 /**
  * The Personal Space sidebar.
  *
- * <p>Top to bottom: title with the on/off switch, a "Crowd" card and a "Movement" card with the
- * everyday settings, a folded-away Troubleshooting section (status, test mode, live checks and a
+ * <p>Top to bottom: title with the on/off switch, a "Crowd" card with the everyday settings, a folded-away Troubleshooting section (status, test mode, live checks and a
  * copyable report), and links to support the developer or report a problem.
  *
  * <p>Swing thread only. The plugin pushes a fresh {@link Snapshot} a couple of times a second via
@@ -78,8 +77,6 @@ final class PersonalSpacePanel extends PluginPanel
 	private final PillGroup<PersonalSpaceConfig.Arrangement> arrangementPills = new PillGroup<>(
 		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
 
-	private final PillGroup<PersonalSpaceConfig.Movement> movementPills = new PillGroup<>(
-		PersonalSpaceConfig.Movement.values(), labels(PersonalSpaceConfig.Movement.values()));
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
@@ -109,8 +106,6 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		add(buildCrowdCard(), c);
 
-		c.gridy++;
-		add(buildMovementCard(), c);
 
 		c.gridy++;
 		c.insets = new Insets(0, 0, 6, 0);
@@ -172,7 +167,6 @@ final class PersonalSpacePanel extends PluginPanel
 		setSliderQuietly(spacingSlider, clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING));
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
-		movementPills.select(config.movement());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
 		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
@@ -268,22 +262,11 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(fieldLabel("Arrangement"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		arrangementPills.setToolTipText("Smart: the crowd spreads into open space, stays out of booths, stalls, anvils and walls, and lines up at things people face. Circle: a simple ring on each tile.");
+		arrangementPills.setToolTipText("Smart: people line up around things they're facing, like an anvil or bank booth, and everyone else forms rings. Circle: always rings.");
 		card.add(arrangementPills, c);
-		return wrapCard(card);
-	}
-
-	private JPanel buildMovementCard()
-	{
-		JPanel card = card("Movement");
-		GridBagConstraints c = cardConstraints();
-
-		movementPills.setToolTipText("Walk: players take real steps into place. Glide: they slide. Instant: they appear in place.");
-		card.add(movementPills, c);
-
 
 		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
+		c.insets = new Insets(10, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
 			"Off: you stay where you are and others step around you."), c);
 		return wrapCard(card);
@@ -438,7 +421,6 @@ final class PersonalSpacePanel extends PluginPanel
 			}
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
-		movementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_MOVEMENT, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
@@ -467,7 +449,6 @@ final class PersonalSpacePanel extends PluginPanel
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
-		movementPills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
 	}
 

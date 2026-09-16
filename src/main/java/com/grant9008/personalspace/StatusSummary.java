@@ -167,7 +167,7 @@ final class StatusSummary
 			.append(", spacing ").append(s.spacing)
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
-			.append(", movement ").append(s.movement)
+
 			.append(", test offset ").append(s.testOffset).append('\n');
 		b.append("Safety: ").append(s.gate.label).append('\n');
 		b.append("Renderer: ").append(s.renderer == null ? "none" : s.renderer)
@@ -180,6 +180,8 @@ final class StatusSummary
 			.append(", off-thread draws (should be 0): ").append(s.offThreadDraws)
 			.append(", reveal errors: ").append(s.revealErrors)
 			.append(", walk frames drawn: ").append(s.walkDraws)
+			.append(", no walk (busy): ").append(s.walkSkippedBusy)
+			.append(", no walk (animation not loaded): ").append(s.walkSkippedNoAnimation)
 			.append(", held for confirmation: ").append(s.probeHeld)
 			.append(", never confirmed: ").append(s.probeGaveUp)
 			.append(", no draws sustained: ").append(yesNo(s.noPlayerDrawsSustained))

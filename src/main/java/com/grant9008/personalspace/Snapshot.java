@@ -31,11 +31,14 @@ final class Snapshot
 	PersonalSpaceConfig.Arrangement arrangement = PersonalSpaceConfig.Arrangement.AUTO;
 	PersonalSpaceConfig.Mode mode = PersonalSpaceConfig.Mode.SPREAD;
 	int spacing = PersonalSpaceConfig.SPACING_NORMAL;
-	PersonalSpaceConfig.Movement movement = PersonalSpaceConfig.Movement.WALK;
 	int maxStack;
 	boolean includeLocal;
 	/** Players drawn mid-step with their walk animation; total. */
 	long walkDraws;
+	/** Moving players drawn without a walk animation because they were busy with an emote or action; total. */
+	long walkSkippedBusy;
+	/** Moving players drawn without a walk animation because it couldn't be loaded; total. */
+	long walkSkippedNoAnimation;
 	int testOffset;
 
 	// safety

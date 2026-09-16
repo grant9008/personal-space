@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.5.0";
+	static final String VERSION = "1.5.1";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -195,7 +195,7 @@ public class PersonalSpacePlugin extends Plugin
 		long now = System.nanoTime();
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
 		lastFrameNanos = now;
-		offsets.advance(Math.min(dt, 0.25f), config.movement());
+		offsets.advance(Math.min(dt, 0.25f));
 
 		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
 		{
@@ -574,7 +574,6 @@ public class PersonalSpacePlugin extends Plugin
 		s.arrangement = config.arrangement();
 		s.mode = config.mode();
 		s.spacing = config.spacing();
-		s.movement = config.movement();
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.testOffset = config.testOffset();
@@ -602,6 +601,8 @@ public class PersonalSpacePlugin extends Plugin
 			s.offThreadDraws = w.offThreadDraws;
 			s.revealErrors = w.revealErrors;
 			s.walkDraws = w.walkDraws;
+			s.walkSkippedBusy = w.walkSkippedBusy;
+			s.walkSkippedNoAnimation = w.walkSkippedNoAnimation;
 		}
 		countedWrapper = w;
 		if (w != null)

@@ -216,11 +216,11 @@ public class CrowdLayoutTest
 	{
 		OffsetTable t = new OffsetTable();
 		t.setTarget(5, 128, 0);
-		t.advance(0.3f, PersonalSpaceConfig.Movement.WALK);
+		t.advance(0.3f);
 		Assert.assertTrue(t.isWalking(5));
 		Assert.assertEquals("half a tile in 0.3 s", 64, t.dx(5), 2);
 		Assert.assertEquals(1536, t.walkOrientation(5));
-		t.advance(0.4f, PersonalSpaceConfig.Movement.WALK);
+		t.advance(0.4f);
 		Assert.assertFalse("arrived", t.isWalking(5));
 		Assert.assertEquals(128, t.dx(5));
 	}
@@ -230,21 +230,10 @@ public class CrowdLayoutTest
 	{
 		OffsetTable t = new OffsetTable();
 		t.setTarget(5, 10, 0);
-		t.advance(0.016f, PersonalSpaceConfig.Movement.WALK);
+		t.advance(0.016f);
 		Assert.assertFalse("a 10-unit nudge shouldn't start a walk", t.isWalking(5));
 		t.setTarget(6, 90, 0);
-		t.advance(0.016f, PersonalSpaceConfig.Movement.WALK);
+		t.advance(0.016f);
 		Assert.assertTrue(t.isWalking(6));
-	}
-
-	@Test
-	public void instantJumpsStraightThere()
-	{
-		OffsetTable t = new OffsetTable();
-		t.setTarget(5, 100, -40);
-		t.advance(0.016f, PersonalSpaceConfig.Movement.INSTANT);
-		Assert.assertEquals(100, t.dx(5));
-		Assert.assertEquals(-40, t.dz(5));
-		Assert.assertFalse(t.isWalking(5));
 	}
 }

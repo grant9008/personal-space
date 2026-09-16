@@ -21,7 +21,6 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_SPACING = "spacingUnits";
 	String KEY_MAX_STACK = "maxStack";
 	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
-	String KEY_MOVEMENT = "movement";
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
@@ -64,26 +63,6 @@ public interface PersonalSpaceConfig extends Config
 		private final String label;
 
 		Arrangement(String label)
-		{
-			this.label = label;
-		}
-
-		@Override
-		public String toString()
-		{
-			return label;
-		}
-	}
-
-	enum Movement
-	{
-		WALK("Walk"),
-		GLIDE("Glide"),
-		INSTANT("Instant");
-
-		private final String label;
-
-		Movement(String label)
 		{
 			this.label = label;
 		}
@@ -158,17 +137,6 @@ public interface PersonalSpaceConfig extends Config
 	default boolean includeLocalPlayer()
 	{
 		return false;
-	}
-
-	@ConfigItem(
-		keyName = KEY_MOVEMENT,
-		name = "Movement",
-		description = "Walk: players take real steps into place. Glide: they slide smoothly. Instant: they appear in place.",
-		position = 5
-	)
-	default Movement movement()
-	{
-		return Movement.WALK;
 	}
 
 	@ConfigItem(
