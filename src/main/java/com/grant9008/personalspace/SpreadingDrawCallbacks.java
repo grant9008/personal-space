@@ -47,6 +47,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private final Client client;
 	private final OffsetTable offsets;
 	private final StackRegistry stacks;
+	private final StackProbe probe;
 	private final RenderCallbackManager renderCallbacks;
 	private final DrawCallbacks delegate;
 
@@ -69,11 +70,15 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private final int[] nativeFrame = new int[OffsetTable.CAPACITY];
 	private final int[] revealedFrame = new int[OffsetTable.CAPACITY];
 
-	SpreadingDrawCallbacks(Client client, OffsetTable offsets, StackRegistry stacks, RenderCallbackManager renderCallbacks, DrawCallbacks delegate)
+	/** Scratch list for the players held back on one tile this frame. */
+	private final int[] held = new int[64];
+
+	SpreadingDrawCallbacks(Client client, OffsetTable offsets, StackRegistry stacks, StackProbe probe, RenderCallbackManager renderCallbacks, DrawCallbacks delegate)
 	{
 		this.client = client;
 		this.offsets = offsets;
 		this.stacks = stacks;
+		this.probe = probe;
 		this.renderCallbacks = renderCallbacks;
 		this.delegate = delegate;
 	}
@@ -145,18 +150,23 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 */
 	private void drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z)
 	{
-		int[] mates = stacks.membersAt(StackRegistry.key(plane, x >> 7, z >> 7));
-		if (mates.length == 0)
+		long tileKey = StackRegistry.key(plane, x >> 7, z >> 7);
+		int[] mates = stacks.membersAt(tileKey);
+		int frame = offsets.frame();
+		int heldCount = probe.heldOn(tileKey, frame, held);
+		if (mates.length == 0 && heldCount == 0)
 		{
 			return;
 		}
 
 		// The y the game passed is ground height minus the drawn player's own animation lift.
 		int ground = y + drawn.getAnimationHeightOffset();
-		int frame = offsets.frame();
+		int cycle = client.getGameCycle();
 		boolean touchedSharedModel = false;
-		for (int id : mates)
+		int total = mates.length + heldCount;
+		for (int i = 0; i < total; i++)
 		{
+			int id = i < mates.length ? mates[i] : held[i - mates.length];
 			if (id == drawn.getId() || id < 0 || id >= OffsetTable.CAPACITY
 				|| nativeFrame[id] == frame || revealedFrame[id] == frame)
 			{
@@ -174,7 +184,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				{
 					continue;
 				}
-				if (renderCallbacks != null && !renderCallbacks.addEntity(mate, false))
+				if (!probe.isConfirmed(id, mate, cycle))
+				{
+					continue; // the game hasn't shown this player recently, e.g. hidden by the server: never draw them
+				}
+				if (!probe.othersAllow(renderCallbacks, mate))
 				{
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}

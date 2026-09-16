@@ -3,6 +3,7 @@ package com.grant9008.personalspace;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 /**
@@ -15,6 +16,7 @@ public interface PersonalSpaceConfig extends Config
 	String GROUP = "personalspace";
 
 	String KEY_ACTIVE = "active";
+	String KEY_ARRANGEMENT = "arrangement";
 	String KEY_MODE = "mode";
 	String KEY_SEPARATION = "separation";
 	String KEY_MAX_STACK = "maxStack";
@@ -46,11 +48,31 @@ public interface PersonalSpaceConfig extends Config
 		}
 	}
 
+	enum Arrangement
+	{
+		AUTO("Automatic"),
+		CIRCLE("Circle"),
+		SIDE_BY_SIDE("Side by side");
+
+		private final String label;
+
+		Arrangement(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
 	enum Separation
 	{
-		SMALL("Small", 20),
-		MEDIUM("Medium", 32),
-		LARGE("Large", 44);
+		SMALL("Close", 20),
+		MEDIUM("Normal", 32),
+		LARGE("Wide", 44);
 
 		private final String label;
 		private final int units;
@@ -74,10 +96,18 @@ public interface PersonalSpaceConfig extends Config
 		}
 	}
 
+	@ConfigSection(
+		name = "Troubleshooting",
+		description = "Test mode and settings for checking that Personal Space works.",
+		position = 10,
+		closedByDefault = true
+	)
+	String TROUBLESHOOTING = "troubleshooting";
+
 	@ConfigItem(
 		keyName = KEY_ACTIVE,
-		name = "Effect on",
-		description = "Untick to pause the effect without turning the plugin off. Everyone snaps back to where they really are.",
+		name = "Spread out crowds",
+		description = "Untick to pause without turning the plugin off. Everyone goes back to where they really stand.",
 		position = 0
 	)
 	default boolean active()
@@ -89,7 +119,8 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_MODE,
 		name = "Mode",
 		description = "Normal use is 'Spread stacked players'. The test mode ignores everyone else and just draws your own character a fixed distance east of where it really is, so you can check the basic effect on your own.",
-		position = 1
+		position = 11,
+		section = TROUBLESHOOTING
 	)
 	default Mode mode()
 	{
@@ -97,9 +128,20 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = KEY_ARRANGEMENT,
+		name = "Arrangement",
+		description = "Automatic: players facing the same way (at an anvil, bank booth, range or fire) stand side by side, everyone else forms a circle.",
+		position = 1
+	)
+	default Arrangement arrangement()
+	{
+		return Arrangement.AUTO;
+	}
+
+	@ConfigItem(
 		keyName = KEY_SEPARATION,
-		name = "Separation",
-		description = "How far apart stacked players are pushed. Large is still well inside a single tile.",
+		name = "Spacing",
+		description = "How far apart players on the same tile are drawn. Wide still stays inside the tile.",
 		position = 2
 	)
 	default Separation separation()
@@ -110,8 +152,8 @@ public interface PersonalSpaceConfig extends Config
 	@Range(min = MIN_STACK, max = MAX_STACK)
 	@ConfigItem(
 		keyName = KEY_MAX_STACK,
-		name = "Max players per tile",
-		description = "Spread at most this many players on one tile. Any extra players stay in the middle as normal.",
+		name = "Players per tile",
+		description = "Spread out at most this many players on one tile. Anyone past that stays hidden in the middle, as in the normal game.",
 		position = 3
 	)
 	default int maxStack()
@@ -146,7 +188,8 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_TEST_OFFSET,
 		name = "Test offset (units)",
 		description = "Only used by the test mode. Draws your own character this many local units east of its real spot. 128 units is one tile, so 32 is a quarter tile.",
-		position = 6
+		position = 12,
+		section = TROUBLESHOOTING
 	)
 	default int testOffset()
 	{

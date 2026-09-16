@@ -35,12 +35,12 @@ import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
 	name = "Personal Space",
-	description = "Spreads out players standing on the same tile so you can see everyone's outfit. Cosmetic only; off in the Wilderness and PvP.",
+	description = "See the whole crowd: players on the same tile are spread out so everyone is visible. Cosmetic only; off in PvP.",
 	tags = {"stack", "stacked", "crowd", "outfit", "fashionscape", "cosmetic", "players", "social", "fire", "bank", "star"}
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "0.2.0";
+	static final String VERSION = "1.0.0";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -69,6 +69,8 @@ public class PersonalSpacePlugin extends Plugin
 
 	private final OffsetTable offsets = new OffsetTable();
 	private final StackRegistry stacks = new StackRegistry();
+	/** Created in startUp, once the client is injected. */
+	private StackProbe probe;
 	private final StillnessTracker stillness = new StillnessTracker();
 	/** Tick number each player id was last counted on, to catch two players sharing an id. */
 	private final int[] idSeenTick = new int[OffsetTable.CAPACITY];
@@ -113,6 +115,9 @@ public class PersonalSpacePlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		probe = new StackProbe(client, offsets, stacks);
+		renderCallbackManager.register(probe);
+
 		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
 		BufferedImage icon = ImageUtil.loadImageResource(PersonalSpacePlugin.class, "panel_icon.png");
 		navButton = NavigationButton.builder()
@@ -134,6 +139,7 @@ public class PersonalSpacePlugin extends Plugin
 			noDrawsStreak = 0;
 			nothingMovedStreak = 0;
 			resetTickState();
+			probe.reset();
 			// The shim itself is installed on the next frame, see ensureInstalled().
 		});
 	}
@@ -141,6 +147,7 @@ public class PersonalSpacePlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		renderCallbackManager.unregister(probe);
 		panel = null;
 		if (navButton != null)
 		{
@@ -218,7 +225,7 @@ public class PersonalSpacePlugin extends Plugin
 			// Never stack shims (e.g. one left behind by an earlier instance of this plugin).
 			target = ((SpreadingDrawCallbacks) current).getDelegate();
 		}
-		wrapper = new SpreadingDrawCallbacks(client, offsets, stacks, renderCallbackManager, target);
+		wrapper = new SpreadingDrawCallbacks(client, offsets, stacks, probe, renderCallbackManager, target);
 		client.setDrawCallbacks(wrapper);
 		log.debug("Hooked draw callbacks in front of {}", target.getClass().getName());
 	}
@@ -241,6 +248,10 @@ public class PersonalSpacePlugin extends Plugin
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
 			resetTickState();
+		}
+		if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING)
+		{
+			probe.reset();
 		}
 	}
 
@@ -280,6 +291,7 @@ public class PersonalSpacePlugin extends Plugin
 
 		offsets.clearTargets();
 
+		probe.enabled = config.mode() == PersonalSpaceConfig.Mode.SPREAD;
 		if (config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME)
 		{
 			stacks.clear();
@@ -337,11 +349,11 @@ public class PersonalSpacePlugin extends Plugin
 				}
 				continue;
 			}
-			entries.add(new StackSpreader.Entry(id, tileKey, p == local));
+			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation()));
 		}
 
 		List<StackSpreader.Placement> placements = StackSpreader.place(
-			entries, config.includeLocalPlayer(), config.maxStack(), config.separation().getUnits());
+			entries, config.includeLocalPlayer(), config.maxStack(), config.separation().getUnits(), layoutFor(config.arrangement()));
 		for (StackSpreader.Placement pl : placements)
 		{
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
@@ -352,6 +364,7 @@ public class PersonalSpacePlugin extends Plugin
 			revealable.add(pl);
 		}
 		stacks.rebuild(revealable);
+		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
 		still = entries.size();
@@ -390,6 +403,10 @@ public class PersonalSpacePlugin extends Plugin
 	/** Everyone back to their real spot immediately and forget what the last tick found. Client thread. */
 	private void resetTickState()
 	{
+		if (probe != null)
+		{
+			probe.enabled = false;
+		}
 		offsets.snapAllToZero();
 		stacks.clear();
 		stillness.clear();
@@ -399,6 +416,20 @@ public class PersonalSpacePlugin extends Plugin
 		stackedTiles = 0;
 		moving = 0;
 		skippedIds = 0;
+	}
+
+	private static StackSpreader.Layout layoutFor(PersonalSpaceConfig.Arrangement arrangement)
+	{
+		switch (arrangement)
+		{
+			case CIRCLE:
+				return StackSpreader.Layout.RING;
+			case SIDE_BY_SIDE:
+				return StackSpreader.Layout.LINE;
+			case AUTO:
+			default:
+				return StackSpreader.Layout.AUTO;
+		}
 	}
 
 	private static int countPlayers(WorldView wv)
@@ -427,6 +458,7 @@ public class PersonalSpacePlugin extends Plugin
 
 		Snapshot s = new Snapshot();
 		s.active = config.active();
+		s.arrangement = config.arrangement();
 		s.mode = config.mode();
 		s.separation = config.separation();
 		s.maxStack = config.maxStack();
@@ -467,6 +499,12 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		lastPanelNanos = now;
 
+		StackProbe pr = probe;
+		if (pr != null)
+		{
+			s.probeHeld = pr.heldTotal;
+			s.probeGaveUp = pr.gaveUpTotal;
+		}
 		s.nearby = nearby;
 		s.still = still;
 		s.stackedTiles = stackedTiles;

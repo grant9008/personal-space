@@ -125,7 +125,7 @@ public class StatusSummaryTest
 		s.nudgedDrawsPerSec = 0;
 		StatusSummary.Headline h = headline(s);
 		Assert.assertEquals(StatusSummary.Level.WAITING, h.level);
-		Assert.assertEquals("No stacked players nearby", h.title);
+		Assert.assertEquals("No crowds here", h.title);
 	}
 
 	@Test
@@ -168,6 +168,7 @@ public class StatusSummaryTest
 		StatusSummary.Headline h = headline(s);
 		Assert.assertEquals(StatusSummary.Level.OK, h.level);
 		Assert.assertTrue(h.detail.contains("32 units"));
+		Assert.assertEquals("Test mode is on", h.title);
 	}
 
 	@Test

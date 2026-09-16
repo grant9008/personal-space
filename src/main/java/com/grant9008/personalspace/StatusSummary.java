@@ -54,70 +54,70 @@ final class StatusSummary
 	{
 		if (!s.active)
 		{
-			return new Headline(Level.PAUSED, "Paused",
-				"The effect is switched off. Tick \"Effect on\" below to start it again.");
+			return new Headline(Level.PAUSED, "Off",
+				"Flip the switch above to spread out crowds again.");
 		}
 		if (s.gate == Snapshot.Gate.NOT_LOGGED_IN)
 		{
-			return new Headline(Level.WAITING, "Not logged in", "Log in to a world to use Personal Space.");
+			return new Headline(Level.WAITING, "Waiting for you to log in", "Crowds are spread out once you're in game.");
 		}
 		if (s.gate != Snapshot.Gate.SAFE)
 		{
-			return new Headline(Level.PAUSED, "Switched off for safety",
-				s.gate.label + ". Everyone is shown where they really are until that changes.");
+			return new Headline(Level.PAUSED, "Paused for safety",
+				s.gate.label + ". Everyone is shown where they really stand until then.");
 		}
 		if (s.renderer == null)
 		{
-			return new Headline(Level.PROBLEM, "Turn on the GPU plugin",
-				"Personal Space only works with the GPU plugin (or 117 HD) switched on. Find \"GPU\" in the plugin list.");
+			return new Headline(Level.PROBLEM, "Needs the GPU plugin",
+				"Turn on the GPU plugin (or 117 HD) in RuneLite's plugin list.");
 		}
 		if (!s.hooked)
 		{
-			return new Headline(Level.PROBLEM, "Not connected to the renderer",
-				"It should connect within a second. If this stays, turn Personal Space off and on again.");
+			return new Headline(Level.PROBLEM, "Couldn't connect",
+				"Turn Personal Space off and on again in the plugin list.");
 		}
 		if (s.noPlayerDrawsSustained)
 		{
-			return new Headline(Level.PROBLEM, "Can't see players being drawn",
-				"The renderer isn't passing players through. Press \"Copy report\" and send it over.");
+			return new Headline(Level.PROBLEM, "Something's not right",
+				"Players aren't coming through. Open Troubleshooting below and press Copy report.");
 		}
 
 		if (s.mode == PersonalSpaceConfig.Mode.TEST_SHIFT_ME)
 		{
 			if (s.nudgedDrawsPerSec > 0)
 			{
-				return new Headline(Level.OK, "Test mode: you are shifted",
-					"Your character should be drawn " + s.testOffset + " units east of where you really stand. Walk around and turn the camera to check it.");
+				return new Headline(Level.OK, "Test mode is on",
+					"Your character is drawn " + s.testOffset + " units to the east. Turn test mode off in Troubleshooting when you're done.");
 			}
 			if (s.testOffset == 0)
 			{
-				return new Headline(Level.WAITING, "Test mode: offset is 0",
-					"Move the test offset slider above 0 to see your character shift.");
+				return new Headline(Level.WAITING, "Test mode is on",
+					"The test distance is 0. Drag the slider in Troubleshooting to see your character move.");
 			}
 			if (s.nothingMovedSustained)
 			{
-				return new Headline(Level.PROBLEM, "Test mode: nothing drawn shifted",
-					"Your character should be shifted but isn't. Press \"Copy report\" and send it over.");
+				return new Headline(Level.PROBLEM, "Test mode isn't moving you",
+					"Open Troubleshooting below and press Copy report.");
 			}
-			return new Headline(Level.WAITING, "Test mode: starting", "Shifting your character now.");
+			return new Headline(Level.WAITING, "Test mode is on", "Moving your character now.");
 		}
 
 		if (s.stackedTiles == 0)
 		{
-			return new Headline(Level.WAITING, "No stacked players nearby",
-				"Stand on the same tile as another player who is standing still, like at a bank or a fire.");
+			return new Headline(Level.WAITING, "No crowds here",
+				"When players stand on the same tile, they'll be spread out automatically.");
 		}
 		if (s.nudgedDrawsPerSec + s.revealedDrawsPerSec > 0)
 		{
 			return new Headline(Level.OK, "Spreading " + plural(s.moving, "player") + " on " + plural(s.stackedTiles, "tile"),
-				"Players the game was hiding in the stack are now drawn around their tile.");
+				"Crowded tiles are opened up so you can see everyone.");
 		}
 		if (s.nothingMovedSustained)
 		{
-			return new Headline(Level.PROBLEM, "Stacked players found, but none drawn moved",
-				"If they are on your screen and still stacked, press \"Copy report\" and send it over.");
+			return new Headline(Level.PROBLEM, "Something's not right",
+				"Crowds were found but nobody was spread out. Open Troubleshooting below and press Copy report.");
 		}
-		return new Headline(Level.WAITING, "Found " + plural(s.stackedTiles, "stacked tile"), "Spreading them out now.");
+		return new Headline(Level.WAITING, "Found " + plural(s.stackedTiles, "crowded tile"), "Spreading them out now.");
 	}
 
 	static List<Check> checks(Snapshot s)
@@ -163,7 +163,8 @@ final class StatusSummary
 		b.append("Status: ").append(h.level).append(" - ").append(h.title).append('\n');
 		b.append("Settings: effect ").append(s.active ? "on" : "paused")
 			.append(", mode ").append(s.mode)
-			.append(", separation ").append(s.separation)
+			.append(", arrangement ").append(s.arrangement)
+			.append(", spacing ").append(s.separation)
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
 			.append(", smooth ").append(yesNo(s.smoothing))
@@ -178,6 +179,8 @@ final class StatusSummary
 			.append(", players in other calls (should be 0): ").append(s.playersInOtherCalls)
 			.append(", off-thread draws (should be 0): ").append(s.offThreadDraws)
 			.append(", reveal errors: ").append(s.revealErrors)
+			.append(", held for confirmation: ").append(s.probeHeld)
+			.append(", never confirmed: ").append(s.probeGaveUp)
 			.append(", no draws sustained: ").append(yesNo(s.noPlayerDrawsSustained))
 			.append(", nothing moved sustained: ").append(yesNo(s.nothingMovedSustained)).append('\n');
 		b.append("Nearby: ").append(s.nearby)

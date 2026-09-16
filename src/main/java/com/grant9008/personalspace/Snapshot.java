@@ -28,6 +28,7 @@ final class Snapshot
 
 	// settings
 	boolean active;
+	PersonalSpaceConfig.Arrangement arrangement = PersonalSpaceConfig.Arrangement.AUTO;
 	PersonalSpaceConfig.Mode mode = PersonalSpaceConfig.Mode.SPREAD;
 	PersonalSpaceConfig.Separation separation = PersonalSpaceConfig.Separation.MEDIUM;
 	int maxStack;
@@ -54,6 +55,10 @@ final class Snapshot
 	long offThreadDraws;
 	/** Errors ever hit while drawing a hidden stackmate. */
 	long revealErrors;
+	/** Players briefly held back so the game confirms the rest of their tile; total. */
+	long probeHeld;
+	/** Players never confirmed by the game (e.g. hidden by the server), so never drawn; total. */
+	long probeGaveUp;
 	/** No player draws at all for over a second while connected and logged in. */
 	boolean noPlayerDrawsSustained;
 	/** Players (or you, in test mode) should be shifted but nothing was drawn shifted for over a second. */
