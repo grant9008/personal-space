@@ -311,6 +311,17 @@ final class StackSpreader
 		return out;
 	}
 
+	/** True for the names of fires people gather round: a fire someone lit, a campfire, a fire pit. Not fireplaces. */
+	static boolean isFireName(String name)
+	{
+		if (name == null)
+		{
+			return false;
+		}
+		String n = name.toLowerCase();
+		return n.contains("fire") && !n.contains("fireplace");
+	}
+
 	/** How many tiles have two or more of the given players on them. */
 	static int stackedTiles(List<Entry> entries)
 	{

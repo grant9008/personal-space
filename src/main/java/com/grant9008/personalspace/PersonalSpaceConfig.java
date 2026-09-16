@@ -37,6 +37,8 @@ public interface PersonalSpaceConfig extends Config
 	int SPACING_WIDE = 112;
 	/** Smart keeps people at a bank counter or row of booths at most this far apart, whatever the slider says. */
 	int COUNTER_SPACING = 42;
+	/** Smart keeps people around a fire at most this far apart, whatever the slider says. */
+	int FIRE_SPACING = 46;
 
 	enum Mode
 	{

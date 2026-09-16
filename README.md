@@ -19,8 +19,8 @@ every outfit can be seen.
 - **Players walk into place** with their own walk animation.
 - **At an anvil or range**, players form a curve around it and all face it, so nobody ends up
   hitting thin air. Extra players make a second row behind.
-- **At a bank counter**, players stay close together in front of the booths instead of forming a
-  queue, whatever the spacing slider says.
+- **At a bank counter or around a fire**, players stay close together, whatever the spacing slider
+  says, so a bank crowd doesn't look like a queue and a campfire doesn't look deserted.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
 - **Purely cosmetic.** Nobody's real position, clickbox, name, chat or minimap dot changes.

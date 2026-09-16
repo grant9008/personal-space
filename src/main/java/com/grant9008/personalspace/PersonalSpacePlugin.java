@@ -10,8 +10,12 @@ import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.CollisionData;
+import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
+import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
+import net.runelite.api.Scene;
+import net.runelite.api.Tile;
 import net.runelite.api.WorldType;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
@@ -41,7 +45,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.5.3";
+	static final String VERSION = "1.5.4";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -488,11 +492,17 @@ public class PersonalSpacePlugin extends Plugin
 			int sceneY = StackRegistry.sceneY(tile);
 			int ax = sceneX * 128 + 64;
 			int az = sceneY * 128 + 64;
-			// At a bank counter or row of booths, keep people close together: spread wide, they
-			// read as a queue rather than a crowd at the counter.
-			int tileSpacing = row && terrain.isCounter(plane, sceneX, sceneY, facing)
-				? Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING)
-				: spacing;
+			// At a bank counter or row of booths, and around a fire, keep people close together:
+			// spread wide, a bank crowd reads as a queue and a fire looks deserted.
+			int tileSpacing = spacing;
+			if (row && terrain.isCounter(plane, sceneX, sceneY, facing))
+			{
+				tileSpacing = Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING);
+			}
+			else if (row && facesFire(wv, plane, sceneX, sceneY, facing))
+			{
+				tileSpacing = Math.min(spacing, PersonalSpaceConfig.FIRE_SPACING);
+			}
 			spotsByTile.put(tile, StackSpreader.spots(row, facing, middleTaken, tileSpacing, capacity,
 				(dx, dz) -> t.canStand(plane, ax, az, ax + dx, az + dz)));
 			movableByTile.put(tile, movable);
@@ -514,6 +524,41 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		placements.sort(java.util.Comparator.comparingInt(p -> p.id));
 		return placements;
+	}
+
+	/** Client thread. True if the tile a row is facing has a fire on it. */
+	private boolean facesFire(WorldView wv, int plane, int sceneX, int sceneY, double angle)
+	{
+		Scene scene = wv.getScene();
+		if (scene == null)
+		{
+			return false;
+		}
+		Tile[][][] tiles = scene.getTiles();
+		int x = sceneX + (int) Math.round(-Math.sin(angle));
+		int y = sceneY + (int) Math.round(-Math.cos(angle));
+		if (tiles == null || plane < 0 || plane >= tiles.length || x < 0 || x >= tiles[plane].length
+			|| y < 0 || y >= tiles[plane][x].length || tiles[plane][x][y] == null)
+		{
+			return false;
+		}
+		for (GameObject object : tiles[plane][x][y].getGameObjects())
+		{
+			if (object == null)
+			{
+				continue;
+			}
+			ObjectComposition def = client.getObjectDefinition(object.getId());
+			if (def != null && def.getImpostorIds() != null)
+			{
+				def = def.getImpostor();
+			}
+			if (def != null && StackSpreader.isFireName(def.getName()))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static StackSpreader.Layout layoutFor(PersonalSpaceConfig.Arrangement arrangement)

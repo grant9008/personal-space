@@ -353,6 +353,17 @@ public class StackSpreaderTest
 	}
 
 	@Test
+	public void firesAreRecognisedByName()
+	{
+		Assert.assertTrue(StackSpreader.isFireName("Fire"));
+		Assert.assertTrue(StackSpreader.isFireName("Forester's Campfire"));
+		Assert.assertTrue(StackSpreader.isFireName("Fire pit"));
+		Assert.assertFalse(StackSpreader.isFireName("Fireplace"));
+		Assert.assertFalse(StackSpreader.isFireName("Anvil"));
+		Assert.assertFalse(StackSpreader.isFireName(null));
+	}
+
+	@Test
 	public void ringNeighboursAreOneSpacingApart()
 	{
 		for (int n = 3; n <= 5; n++)

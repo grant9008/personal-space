@@ -254,7 +254,7 @@ final class PersonalSpacePanel extends PluginPanel
 		spacingPills.setToolTipText("Quick picks. Fine-tune with the slider below.");
 		card.add(spacingPills, c);
 		c.gridy++;
-		spacingSlider.setToolTipText("Drag to set how far apart players are drawn. Changes show up live. At bank counters, Smart always keeps people close.");
+		spacingSlider.setToolTipText("Drag to set how far apart players are drawn. Changes show up live. At bank counters and around fires, Smart keeps people close.");
 		card.add(slider(spacingSlider), c);
 
 		c.gridy++;
