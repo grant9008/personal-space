@@ -32,6 +32,7 @@ final class Snapshot
 	PersonalSpaceConfig.Mode mode = PersonalSpaceConfig.Mode.SPREAD;
 	int spacing = PersonalSpaceConfig.SPACING_NORMAL;
 	PersonalSpaceConfig.Movement movement = PersonalSpaceConfig.Movement.WALK;
+	int walkSpeed = PersonalSpaceConfig.DEFAULT_WALK_SPEED;
 	int maxStack;
 	boolean includeLocal;
 	/** Players drawn mid-step with their walk animation; total. */

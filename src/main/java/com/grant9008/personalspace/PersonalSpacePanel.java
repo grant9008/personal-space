@@ -58,8 +58,8 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JLabel statusTitle = new JLabel();
 	private final JLabel statusDetail = new JLabel();
 
-	private final PillGroup<Integer> perTilePills = new PillGroup<>(
-		new Integer[]{2, 3, 4, 5}, new String[]{"2", "3", "4", "5"});
+	private final JSlider perTileSlider = new JSlider(PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK, PersonalSpaceConfig.DEFAULT_STACK);
+	private final JLabel perTileValue = new JLabel();
 	private final PillGroup<Integer> spacingPills = new PillGroup<>(
 		new Integer[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_NORMAL, PersonalSpaceConfig.SPACING_WIDE},
 		new String[]{"Close", "Normal", "Wide"});
@@ -69,6 +69,9 @@ final class PersonalSpacePanel extends PluginPanel
 		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
 	private final PillGroup<PersonalSpaceConfig.Movement> movementPills = new PillGroup<>(
 		PersonalSpaceConfig.Movement.values(), labels(PersonalSpaceConfig.Movement.values()));
+	private final JSlider walkSpeedSlider = new JSlider(PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED, PersonalSpaceConfig.DEFAULT_WALK_SPEED);
+	private final JLabel walkSpeedValue = new JLabel();
+	private final JPanel walkSpeedRow = new JPanel(new GridBagLayout());
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
@@ -153,7 +156,10 @@ final class PersonalSpacePanel extends PluginPanel
 	void refreshControls()
 	{
 		activeSwitch.setOn(config.active());
-		perTilePills.select(clamp(config.maxStack(), PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK));
+		setSliderQuietly(perTileSlider, clamp(config.maxStack(), PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK));
+		perTileValue.setText(perTileSlider.getValue() + " players");
+		setSliderQuietly(walkSpeedSlider, clamp(config.walkSpeed(), PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED));
+		walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
 		int spacing = clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING);
 		if (!spacingSlider.getValueIsAdjusting() && spacingSlider.getValue() != spacing)
 		{
@@ -171,6 +177,7 @@ final class PersonalSpacePanel extends PluginPanel
 		}
 		testOffsetValue.setText(testOffsetSlider.getValue() + " units");
 		setEverydayEnabled(config.active());
+		walkSpeedRow.setVisible(config.movement() == PersonalSpaceConfig.Movement.WALK);
 	}
 
 	// ---- building ----------------------------------------------------------------------
@@ -217,12 +224,12 @@ final class PersonalSpacePanel extends PluginPanel
 		p.setOpaque(false);
 		GridBagConstraints c = column();
 
-		c.insets = new Insets(8, 0, 4, 0);
-		p.add(sectionLabel("Players per tile"), c);
+		c.insets = new Insets(8, 0, 2, 0);
+		p.add(labelWithValue("Players per tile", perTileValue), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		perTilePills.setToolTipText("How many players on one tile get their own spot");
-		p.add(perTilePills, c);
+		perTileSlider.setToolTipText("How many players on one tile get their own spot. 5 is the sweet spot; up to 10 for drop-party chaos.");
+		p.add(slider(perTileSlider), c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 4, 0);
@@ -260,6 +267,18 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(0, 0, 0, 0);
 		movementPills.setToolTipText("Walk: players take real steps into place. Glide: they slide. Instant: they appear in place.");
 		p.add(movementPills, c);
+
+		c.gridy++;
+		c.insets = new Insets(6, 0, 0, 0);
+		walkSpeedRow.setOpaque(false);
+		GridBagConstraints w = column();
+		w.insets = new Insets(0, 0, 2, 0);
+		walkSpeedRow.add(labelWithValue("Walk speed", walkSpeedValue), w);
+		w.gridy++;
+		w.insets = new Insets(0, 0, 0, 0);
+		walkSpeedSlider.setToolTipText("How fast players walk into place. Slower looks calmer.");
+		walkSpeedRow.add(slider(walkSpeedSlider), w);
+		p.add(walkSpeedRow, c);
 
 		c.gridy++;
 		c.insets = new Insets(12, 0, 0, 0);
@@ -389,7 +408,22 @@ final class PersonalSpacePanel extends PluginPanel
 			write(PersonalSpaceConfig.KEY_ACTIVE, on);
 			setEverydayEnabled(on);
 		});
-		perTilePills.onSelect(n -> write(PersonalSpaceConfig.KEY_MAX_STACK, n));
+		perTileSlider.addChangeListener(e ->
+		{
+			perTileValue.setText(perTileSlider.getValue() + " players");
+			if (perTileSlider.getValue() != config.maxStack())
+			{
+				write(PersonalSpaceConfig.KEY_MAX_STACK, perTileSlider.getValue());
+			}
+		});
+		walkSpeedSlider.addChangeListener(e ->
+		{
+			walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
+			if (walkSpeedSlider.getValue() != config.walkSpeed())
+			{
+				write(PersonalSpaceConfig.KEY_WALK_SPEED, walkSpeedSlider.getValue());
+			}
+		});
 		spacingPills.onSelect(v ->
 		{
 			spacingSlider.setValue(v);
@@ -406,7 +440,12 @@ final class PersonalSpacePanel extends PluginPanel
 			}
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
-		movementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_MOVEMENT, v));
+		movementPills.onSelect(v ->
+		{
+			write(PersonalSpaceConfig.KEY_MOVEMENT, v);
+			walkSpeedRow.setVisible(v == PersonalSpaceConfig.Movement.WALK);
+			revalidate();
+		});
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
@@ -431,7 +470,8 @@ final class PersonalSpacePanel extends PluginPanel
 	/** Dim the everyday settings while the whole effect is switched off. */
 	private void setEverydayEnabled(boolean enabled)
 	{
-		perTilePills.setEnabled(enabled);
+		perTileSlider.setEnabled(enabled);
+		walkSpeedSlider.setEnabled(enabled);
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
@@ -461,6 +501,34 @@ final class PersonalSpacePanel extends PluginPanel
 	{
 		spacingValue.setText(Math.round(units * 100f / 128) + "% of a tile");
 		spacingPills.selectOrNone(units);
+	}
+
+	/** Move a slider to a value without fighting the user mid-drag. */
+	private static void setSliderQuietly(JSlider slider, int value)
+	{
+		if (!slider.getValueIsAdjusting() && slider.getValue() != value)
+		{
+			slider.setValue(value);
+		}
+	}
+
+	private static JSlider slider(JSlider s)
+	{
+		s.setOpaque(false);
+		s.setFocusable(false);
+		s.setPreferredSize(new Dimension(0, s.getPreferredSize().height));
+		return s;
+	}
+
+	private static JPanel labelWithValue(String text, JLabel value)
+	{
+		JPanel row = new JPanel(new BorderLayout());
+		row.setOpaque(false);
+		row.add(sectionLabel(text), BorderLayout.WEST);
+		value.setFont(FontManager.getRunescapeSmallFont());
+		value.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		row.add(value, BorderLayout.EAST);
+		return row;
 	}
 
 	private static GridBagConstraints column()

@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Pure layout logic: given who is standing on which tile, decide who gets nudged and by how much.
@@ -36,9 +37,21 @@ final class StackSpreader
 
 	/** How closely a group's facings must agree to count as "facing the same way" (about 25 degrees either side). */
 	static final double SAME_FACING = 0.9;
+	/** A tile already in a row stays a row until facings disagree by more than this (about 45 degrees), so it doesn't flip back and forth. */
+	static final double STILL_SAME_FACING = 0.7;
 
-	/** Furthest a player is placed from the tile centre along a line, in local units (two tiles). */
-	static final int MAX_LINE_EXTENT = 256;
+	/** Furthest a player is placed from the tile centre along a line, in local units (three tiles). */
+	static final int MAX_LINE_EXTENT = 384;
+
+	/** Looks up where a player is currently headed. */
+	interface Targets
+	{
+		boolean has(int id);
+
+		int dx(int id);
+
+		int dz(int id);
+	}
 
 	/** One standing-still player on a tile. */
 	static final class Entry
@@ -100,6 +113,19 @@ final class StackSpreader
 	 */
 	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout)
 	{
+		return place(entries, includeLocal, maxStack, spacing, layout, java.util.Collections.emptySet(), null);
+	}
+
+	/**
+	 * As above, remembering which tiles were rows last time so a tile only switches between a row
+	 * and a circle when the facings clearly change.
+	 *
+	 * @param wasRow tiles laid out as a row last time
+	 * @param isRow  filled with the tiles laid out as a row this time; may be null
+	 */
+	static List<Placement> place(List<Entry> entries, boolean includeLocal, int maxStack, int spacing, Layout layout,
+		Set<Long> wasRow, Set<Long> isRow)
+	{
 		Map<Long, List<Entry>> byTile = new LinkedHashMap<>();
 		for (Entry e : entries)
 		{
@@ -131,8 +157,14 @@ final class StackSpreader
 			// Someone stays in the middle (you, when "move my character" is off, or anyone past the cap).
 			boolean centreTaken = movable.size() < group.size() || n < movable.size();
 
-			Double facing = layout == Layout.RING ? null : sharedFacing(group);
+			long tile = group.get(0).tile;
+			double needed = wasRow.contains(tile) ? STILL_SAME_FACING : SAME_FACING;
+			Double facing = layout == Layout.RING ? null : sharedFacing(group, needed);
 			boolean line = layout == Layout.LINE || (layout == Layout.AUTO && facing != null);
+			if (line && isRow != null)
+			{
+				isRow.add(tile);
+			}
 			double angle = facing != null ? facing : 0.0;
 
 			for (int i = 0; i < n; i++)
@@ -142,6 +174,28 @@ final class StackSpreader
 					: ringOffset(i, n, ringRadius(n, centreTaken, spacing));
 				Entry e = movable.get(i);
 				out.add(new Placement(e.id, e.tile, off[0], off[1]));
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Keep each player's current spot unless the new one is clearly different. A crowd shifts a
+	 * little every time someone nearby arrives, leaves or turns; without this everyone would keep
+	 * shuffling by a few units.
+	 */
+	static List<Placement> keepCurrentSpots(List<Placement> fresh, Targets current, int tolerance)
+	{
+		List<Placement> out = new ArrayList<>(fresh.size());
+		for (Placement p : fresh)
+		{
+			if (current.has(p.id) && Math.hypot(p.dx - current.dx(p.id), p.dz - current.dz(p.id)) < tolerance)
+			{
+				out.add(new Placement(p.id, p.tile, current.dx(p.id), current.dz(p.id)));
+			}
+			else
+			{
+				out.add(p);
 			}
 		}
 		return out;
@@ -168,6 +222,11 @@ final class StackSpreader
 	 */
 	static Double sharedFacing(List<Entry> group)
 	{
+		return sharedFacing(group, SAME_FACING);
+	}
+
+	static Double sharedFacing(List<Entry> group, double needed)
+	{
 		double sumX = 0;
 		double sumZ = 0;
 		for (Entry e : group)
@@ -181,7 +240,7 @@ final class StackSpreader
 			sumZ += -Math.cos(a);
 		}
 		double agreement = Math.hypot(sumX, sumZ) / group.size();
-		if (agreement < SAME_FACING)
+		if (agreement < needed)
 		{
 			return null;
 		}

@@ -46,6 +46,8 @@ final class CrowdLayout
 	}
 
 	static final int ITERATIONS = 16;
+	/** Nobody is drawn further than this from their real spot, in local units (three tiles). */
+	static final int MAX_REACH = 384;
 	private static final double PULL_TO_START = 0.12;
 	private static final double GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
@@ -96,7 +98,7 @@ final class CrowdLayout
 			ax[i] = StackRegistry.sceneX(p.tile) * 128 + 64;
 			az[i] = StackRegistry.sceneY(p.tile) * 128 + 64;
 			int size = groupSize.getOrDefault(p.tile, 1);
-			maxR[i] = spacing * Math.max(1.0, (size - 1) / 2.0) + 1;
+			maxR[i] = Math.min(MAX_REACH, spacing * Math.max(1.0, (size - 1) / 2.0) + 1);
 			double[] start = pullInside(terrain, plane[i], ax[i], az[i], ax[i] + p.dx, az[i] + p.dz);
 			sx[i] = start[0];
 			sz[i] = start[1];

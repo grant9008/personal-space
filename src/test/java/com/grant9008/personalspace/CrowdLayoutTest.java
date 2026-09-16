@@ -180,6 +180,32 @@ public class CrowdLayoutTest
 	}
 
 	@Test
+	public void smallCorrectionsDriftWithoutWalking()
+	{
+		OffsetTable t = new OffsetTable();
+		t.setTarget(5, 10, 0);
+		t.advance(0.016f, PersonalSpaceConfig.Movement.WALK);
+		Assert.assertFalse("a 10-unit nudge shouldn't start a walk", t.isWalking(5));
+		t.setTarget(6, 90, 0);
+		t.advance(0.016f, PersonalSpaceConfig.Movement.WALK);
+		Assert.assertTrue(t.isWalking(6));
+	}
+
+	@Test
+	public void slowerWalkSpeedMovesLessPerFrame()
+	{
+		OffsetTable full = new OffsetTable();
+		OffsetTable slow = new OffsetTable();
+		full.setTarget(5, 128, 0);
+		slow.setTarget(5, 128, 0);
+		full.advance(0.3f, PersonalSpaceConfig.Movement.WALK, 1f);
+		slow.advance(0.3f, PersonalSpaceConfig.Movement.WALK, 0.5f);
+		Assert.assertEquals(64, full.dx(5), 2);
+		Assert.assertEquals(32, slow.dx(5), 2);
+		Assert.assertEquals("animation slows down too", full.walkSeconds(5) / 2, slow.walkSeconds(5), 0.01);
+	}
+
+	@Test
 	public void instantJumpsStraightThere()
 	{
 		OffsetTable t = new OffsetTable();

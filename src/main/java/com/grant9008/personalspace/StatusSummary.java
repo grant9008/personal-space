@@ -168,6 +168,7 @@ final class StatusSummary
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
 			.append(", movement ").append(s.movement)
+			.append(", walk speed ").append(s.walkSpeed).append('%')
 			.append(", test offset ").append(s.testOffset).append('\n');
 		b.append("Safety: ").append(s.gate.label).append('\n');
 		b.append("Renderer: ").append(s.renderer == null ? "none" : s.renderer)

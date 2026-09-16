@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.1.0";
+	static final String VERSION = "1.2.0";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -70,6 +70,8 @@ public class PersonalSpacePlugin extends Plugin
 
 	private final OffsetTable offsets = new OffsetTable();
 	private final StackRegistry stacks = new StackRegistry();
+	/** Tiles laid out as a row last tick, so a tile doesn't flip between row and circle. */
+	private java.util.Set<Long> rowTiles = new java.util.HashSet<>();
 	/** Created in startUp, once the client is injected. */
 	private StackProbe probe;
 	private final StillnessTracker stillness = new StillnessTracker();
@@ -191,7 +193,7 @@ public class PersonalSpacePlugin extends Plugin
 		long now = System.nanoTime();
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
 		lastFrameNanos = now;
-		offsets.advance(Math.min(dt, 0.25f), config.movement());
+		offsets.advance(Math.min(dt, 0.25f), config.movement(), config.walkSpeed() / 100f);
 
 		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
 		{
@@ -290,11 +292,10 @@ public class PersonalSpacePlugin extends Plugin
 				"<col=ff8c00>Personal Space</col>: turn on the GPU plugin (or 117 HD) for this plugin to have any effect.", null);
 		}
 
-		offsets.clearTargets();
-
 		probe.enabled = config.mode() == PersonalSpaceConfig.Mode.SPREAD;
 		if (config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME)
 		{
+			offsets.clearTargets();
 			stacks.clear();
 			offsets.setTarget(local.getId(), config.testOffset(), 0);
 			nearby = countPlayers(wv);
@@ -354,12 +355,36 @@ public class PersonalSpacePlugin extends Plugin
 		}
 
 		int spacing = config.spacing();
+		java.util.Set<Long> newRowTiles = new java.util.HashSet<>();
 		List<StackSpreader.Placement> placements = StackSpreader.place(
-			entries, config.includeLocalPlayer(), config.maxStack(), spacing, layoutFor(config.arrangement()));
+			entries, config.includeLocalPlayer(), config.maxStack(), spacing, layoutFor(config.arrangement()),
+			rowTiles, newRowTiles);
+		rowTiles = newRowTiles;
 		if (config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO && !placements.isEmpty())
 		{
 			placements = CrowdLayout.settle(placements, obstacles(entries, placements), terrain(wv), spacing);
 		}
+		placements = StackSpreader.keepCurrentSpots(placements, new StackSpreader.Targets()
+		{
+			@Override
+			public boolean has(int id)
+			{
+				return offsets.hasTarget(id);
+			}
+
+			@Override
+			public int dx(int id)
+			{
+				return offsets.targetX(id);
+			}
+
+			@Override
+			public int dz(int id)
+			{
+				return offsets.targetZ(id);
+			}
+		}, Math.max(14, spacing / 4));
+		offsets.clearTargets();
 		for (StackSpreader.Placement pl : placements)
 		{
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
@@ -415,6 +440,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		offsets.snapAllToZero();
 		stacks.clear();
+		rowTiles.clear();
 		stillness.clear();
 		gate = client.getGameState() == GameState.LOGGED_IN ? gate : Snapshot.Gate.NOT_LOGGED_IN;
 		nearby = 0;
@@ -494,6 +520,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.mode = config.mode();
 		s.spacing = config.spacing();
 		s.movement = config.movement();
+		s.walkSpeed = config.walkSpeed();
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.testOffset = config.testOffset();

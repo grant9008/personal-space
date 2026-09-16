@@ -21,10 +21,10 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar (three colo
 | Control | What it does |
 | --- | --- |
 | On/off switch | Spread out crowds, or show the game as normal. |
-| Players per tile | How many players on one tile get their own spot (2 to 5). |
-| Spacing | Close, Normal or Wide, or drag the slider (up to more than a tile apart). Changes show live. |
+| Players per tile | How many players on one tile get their own spot: 2 to 10, with 5 as the default sweet spot. |
+| Spacing | Close, Normal or Wide, or drag the slider (up to two tiles apart). Changes show live. |
 | Arrangement | **Smart** spreads the whole crowd around obstacles and neighbours. **Circle** is a simple ring per tile. |
-| Movement | **Walk** (real steps), **Glide** or **Instant**. |
+| Movement | **Walk** (real steps, with a walk speed slider), **Glide** or **Instant**. Players keep their spot through small changes in the crowd, so they don't shuffle. |
 | Move my character too | Off: you stay put and others step around you. |
 | Troubleshooting | Test mode, live checks and a **Copy report** button for bug reports. |
 

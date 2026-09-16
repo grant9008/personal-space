@@ -180,6 +180,58 @@ public class StackSpreaderTest
 	}
 
 	@Test
+	public void aRowStaysARowWhenOneFacingWobbles()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		in.add(new StackSpreader.Entry(1, TILE_A, false, 1024));
+		in.add(new StackSpreader.Entry(2, TILE_A, false, 1024));
+		in.add(new StackSpreader.Entry(3, TILE_A, false, 1024 + 380)); // one player turned about 65 degrees
+		java.util.Set<Long> none = java.util.Collections.emptySet();
+		java.util.Set<Long> rows = new java.util.HashSet<>();
+		StackSpreader.place(in, true, 5, 60, StackSpreader.Layout.AUTO, none, rows);
+		Assert.assertFalse("a fresh tile with that much disagreement is a circle", rows.contains(TILE_A));
+
+		java.util.Set<Long> wasRow = new java.util.HashSet<>();
+		wasRow.add(TILE_A);
+		rows.clear();
+		StackSpreader.place(in, true, 5, 60, StackSpreader.Layout.AUTO, wasRow, rows);
+		Assert.assertTrue("a tile that was already a row stays one", rows.contains(TILE_A));
+	}
+
+	@Test
+	public void currentSpotsAreKeptUnlessTheNewOneIsClearlyDifferent()
+	{
+		List<StackSpreader.Placement> fresh = new ArrayList<>();
+		fresh.add(new StackSpreader.Placement(1, TILE_A, 50, 0));
+		fresh.add(new StackSpreader.Placement(2, TILE_A, -50, 0));
+		fresh.add(new StackSpreader.Placement(3, TILE_A, 0, 60));
+		StackSpreader.Targets current = new StackSpreader.Targets()
+		{
+			@Override
+			public boolean has(int id)
+			{
+				return id != 3;
+			}
+
+			@Override
+			public int dx(int id)
+			{
+				return id == 1 ? 44 : 20;
+			}
+
+			@Override
+			public int dz(int id)
+			{
+				return 0;
+			}
+		};
+		Map<Integer, int[]> out = byId(StackSpreader.keepCurrentSpots(fresh, current, 16));
+		Assert.assertArrayEquals("6 units off: keep the old spot", new int[]{44, 0}, out.get(1));
+		Assert.assertArrayEquals("70 units off: move", new int[]{-50, 0}, out.get(2));
+		Assert.assertArrayEquals("new player: take the new spot", new int[]{0, 60}, out.get(3));
+	}
+
+	@Test
 	public void ringNeighboursAreOneSpacingApart()
 	{
 		for (int n = 3; n <= 5; n++)

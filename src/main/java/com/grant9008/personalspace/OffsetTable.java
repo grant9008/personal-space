@@ -25,6 +25,8 @@ final class OffsetTable
 	private static final float TAU = 0.10f;
 	/** Walking pace: the game's own, one tile (128 units) every 0.6 seconds. */
 	static final float WALK_SPEED = 128f / 0.6f;
+	/** Moves shorter than this just drift into place, with no walk animation, so small corrections don't look like shuffling. */
+	static final float MIN_WALK_DISTANCE = 28f;
 
 	private final float[] curX = new float[CAPACITY];
 	private final float[] curZ = new float[CAPACITY];
@@ -75,6 +77,22 @@ final class OffsetTable
 	int walkOrientation(int id)
 	{
 		return id >= 0 && id < CAPACITY ? walkFacing[id] : 0;
+	}
+
+	/** True if this player currently has somewhere other than their real spot to be. */
+	boolean hasTarget(int id)
+	{
+		return id >= 0 && id < CAPACITY && isActive[id] && (tgtX[id] != 0 || tgtZ[id] != 0);
+	}
+
+	int targetX(int id)
+	{
+		return id >= 0 && id < CAPACITY ? tgtX[id] : 0;
+	}
+
+	int targetZ(int id)
+	{
+		return id >= 0 && id < CAPACITY ? tgtZ[id] : 0;
 	}
 
 	/** Counts frames; used to tell draws in the same frame apart. */
@@ -129,8 +147,14 @@ final class OffsetTable
 		activeCount = 0;
 	}
 
-	/** Client thread, once per frame. Moves every active offset toward its target. */
+	/** Client thread, once per frame, at normal walking pace. */
 	void advance(float dtSeconds, PersonalSpaceConfig.Movement movement)
+	{
+		advance(dtSeconds, movement, 1f);
+	}
+
+	/** Client thread, once per frame. Moves every active offset toward its target. */
+	void advance(float dtSeconds, PersonalSpaceConfig.Movement movement, float walkSpeed)
 	{
 		frame++;
 		float k = movement == PersonalSpaceConfig.Movement.GLIDE ? 1f - (float) Math.exp(-dtSeconds / TAU) : 1f;
@@ -139,7 +163,7 @@ final class OffsetTable
 			int id = active[i];
 			if (movement == PersonalSpaceConfig.Movement.WALK)
 			{
-				walkTowardTarget(id, dtSeconds);
+				walkTowardTarget(id, dtSeconds, walkSpeed);
 			}
 			else
 			{
@@ -162,12 +186,12 @@ final class OffsetTable
 		}
 	}
 
-	private void walkTowardTarget(int id, float dt)
+	private void walkTowardTarget(int id, float dt, float speed)
 	{
 		float ex = tgtX[id] - curX[id];
 		float ez = tgtZ[id] - curZ[id];
 		float dist = (float) Math.hypot(ex, ez);
-		float stride = WALK_SPEED * dt;
+		float stride = WALK_SPEED * speed * dt;
 		if (dist <= Math.max(stride, 0.5f))
 		{
 			curX[id] = tgtX[id];
@@ -180,10 +204,15 @@ final class OffsetTable
 		curZ[id] += ez / dist * stride;
 		if (!walking[id])
 		{
+			if (dist < MIN_WALK_DISTANCE)
+			{
+				return; // a small correction: drift, don't start a walk
+			}
 			walking[id] = true;
 			walkTime[id] = 0f;
 		}
-		walkTime[id] += dt;
+		// The animation plays at the same speed as the movement, so feet don't slide.
+		walkTime[id] += dt * speed;
 		walkFacing[id] = facing(ex, ez);
 	}
 
