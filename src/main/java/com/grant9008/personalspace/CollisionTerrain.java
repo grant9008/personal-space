@@ -94,6 +94,41 @@ final class CollisionTerrain implements CrowdLayout.Terrain
 		return oz <= TILE - 1 - EDGE_MARGIN || canStep(f, tx, tz, 0, 1);
 	}
 
+	/**
+	 * True if a player on this tile, facing {@code angle}, is up against something long: the way
+	 * ahead is blocked (by a booth, counter or wall) for their tile and for the tiles either side.
+	 * That's a bank counter or a row of booths, as opposed to a single anvil or range.
+	 */
+	boolean isCounter(int plane, int tileX, int tileY, double angle)
+	{
+		int[][] f = plane >= 0 && plane < flags.length ? flags[plane] : null;
+		if (f == null)
+		{
+			return false;
+		}
+		int aheadX = (int) Math.round(-Math.sin(angle));
+		int aheadZ = (int) Math.round(-Math.cos(angle));
+		if ((aheadX != 0) == (aheadZ != 0))
+		{
+			return false; // facing diagonally: counters run along tile edges
+		}
+		int sideX = aheadZ != 0 ? 1 : 0;
+		int sideZ = aheadX != 0 ? 1 : 0;
+		return !canStep(f, tileX, tileY, aheadX, aheadZ)
+			&& blockedAheadOf(f, tileX + sideX, tileY + sideZ, aheadX, aheadZ)
+			&& blockedAheadOf(f, tileX - sideX, tileY - sideZ, aheadX, aheadZ);
+	}
+
+	/** The way ahead from this tile is blocked, or this tile itself can't be stood on. */
+	private static boolean blockedAheadOf(int[][] f, int x, int z, int aheadX, int aheadZ)
+	{
+		if (!inside(f, x, z) || (f[x][z] & BLOCK_FULL) != 0)
+		{
+			return true;
+		}
+		return !canStep(f, x, z, aheadX, aheadZ);
+	}
+
 	/** Whether the game would let a player take one step from (x, z) by (sx, sz), each -1, 0 or 1. */
 	static boolean canStep(int[][] f, int x, int z, int sx, int sz)
 	{

@@ -188,6 +188,38 @@ public class CrowdLayoutTest
 	}
 
 	@Test
+	public void aRowOfBoothsIsACounterButASingleAnvilIsNot()
+	{
+		// Facing north (pi) from the tile at (TX, TZ).
+		int[][][] booths = openGround();
+		for (int x = TX - 2; x <= TX + 2; x++)
+		{
+			booths[0][x][TZ + 1] = CollisionTerrain.BLOCK_FULL;
+		}
+		Assert.assertTrue(new CollisionTerrain(booths).isCounter(0, TX, TZ, Math.PI));
+
+		int[][][] anvil = openGround();
+		anvil[0][TX][TZ + 1] = CollisionTerrain.BLOCK_FULL;
+		Assert.assertFalse(new CollisionTerrain(anvil).isCounter(0, TX, TZ, Math.PI));
+
+		Assert.assertFalse("open floor", new CollisionTerrain(openGround()).isCounter(0, TX, TZ, Math.PI));
+		Assert.assertFalse("facing along the counter, not at it", new CollisionTerrain(booths).isCounter(0, TX, TZ, Math.PI / 2));
+	}
+
+	@Test
+	public void aCounterWallCountsToo()
+	{
+		// A wall along the north edge of three tiles in a row.
+		int[][][] flags = openGround();
+		for (int x = TX - 1; x <= TX + 1; x++)
+		{
+			flags[0][x][TZ] |= CollisionTerrain.BLOCK_NORTH;
+			flags[0][x][TZ + 1] |= CollisionTerrain.BLOCK_SOUTH;
+		}
+		Assert.assertTrue(new CollisionTerrain(flags).isCounter(0, TX, TZ, Math.PI));
+	}
+
+	@Test
 	public void terrainStepRules()
 	{
 		int[][] f = new int[3][3];

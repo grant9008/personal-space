@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.5.1";
+	static final String VERSION = "1.5.2";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -480,9 +480,16 @@ public class PersonalSpacePlugin extends Plugin
 			}
 			final CollisionTerrain t = terrain;
 			int plane = StackRegistry.plane(tile);
-			int ax = StackRegistry.sceneX(tile) * 128 + 64;
-			int az = StackRegistry.sceneY(tile) * 128 + 64;
-			spotsByTile.put(tile, StackSpreader.spots(row, row ? facing : 0.0, middleTaken, spacing, capacity,
+			int sceneX = StackRegistry.sceneX(tile);
+			int sceneY = StackRegistry.sceneY(tile);
+			int ax = sceneX * 128 + 64;
+			int az = sceneY * 128 + 64;
+			// At a bank counter or row of booths, keep people close together: spread wide, they
+			// read as a queue rather than a crowd at the counter.
+			int tileSpacing = row && terrain.isCounter(plane, sceneX, sceneY, facing)
+				? Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING)
+				: spacing;
+			spotsByTile.put(tile, StackSpreader.spots(row, row ? facing : 0.0, middleTaken, tileSpacing, capacity,
 				(dx, dz) -> t.canStand(plane, ax, az, ax + dx, az + dz)));
 			movableByTile.put(tile, movable);
 		}

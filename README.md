@@ -17,8 +17,10 @@ every outfit can be seen.
 - **Smart arrangement.** Crowds spread out around their tile, never into a bank booth, stall, anvil
   or wall, and line up side by side at things people face.
 - **Players walk into place** with their own walk animation.
-- **At an anvil, bank booth or range**, players form a curve around it and all face it, so nobody
-  ends up hitting thin air. Extra players make a second row behind.
+- **At an anvil or range**, players form a curve around it and all face it, so nobody ends up
+  hitting thin air. Extra players make a second row behind.
+- **At a bank counter**, players stay close together in front of the booths instead of forming a
+  queue, whatever the spacing slider says.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
 - **Purely cosmetic.** Nobody's real position, clickbox, name, chat or minimap dot changes.
