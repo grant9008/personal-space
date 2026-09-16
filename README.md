@@ -14,8 +14,8 @@ every outfit can be seen.
 ## What it does
 
 - **Shows the players the game hides.** Stacked players are drawn again, spread out around their tile.
-- **Smart arrangement.** Crowds spread into open space, never into a bank booth, stall, anvil or
-  wall, give room to people on the next tile, and line up side by side at things people face.
+- **Smart arrangement.** Crowds spread out around their tile, never into a bank booth, stall, anvil
+  or wall, and line up side by side at things people face.
 - **Players walk into place** with their own walk animation. They glide or appear instantly if you prefer.
 - **At an anvil, bank booth or range**, players form a curve around it and all face it, so nobody
   ends up hitting thin air. Extra players make a second row behind.
@@ -38,7 +38,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | On/off switch | Spread out crowds, or show the game as normal. |
 | Players per tile | How many players on one tile get their own spot: 2 to 10, with 5 as the sweet spot. |
 | Spacing | Close, Normal or Wide, or drag the slider up to two tiles apart. Changes show live. |
-| Arrangement | **Smart** spreads the whole crowd around obstacles and neighbours. **Circle** is a simple ring per tile. |
+| Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |
 | Movement | **Walk**, **Glide** or **Instant**. |
 | Move my character too | Off: you stay put and others step around you. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
