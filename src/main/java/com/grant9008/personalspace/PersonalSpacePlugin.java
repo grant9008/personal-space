@@ -1,16 +1,19 @@
 package com.grant9008.personalspace;
 
 import com.google.inject.Provides;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.WorldType;
 import net.runelite.api.WorldView;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.GameStateChanged;
@@ -18,10 +21,15 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.callback.RenderCallbackManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.util.ImageUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +40,14 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
+	static final String VERSION = "0.2.0";
+
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
+
+	/** How often the sidebar is refreshed. */
+	private static final long PANEL_REFRESH_NANOS = 500_000_000L;
+	/** A problem has to last this many sidebar refreshes in a row before the status goes red. */
+	private static final int SUSTAINED_REFRESHES = 3;
 
 	@Inject
 	private Client client;
@@ -43,14 +58,51 @@ public class PersonalSpacePlugin extends Plugin
 	@Inject
 	private PersonalSpaceConfig config;
 
-	private final OffsetTable offsets = new OffsetTable();
+	@Inject
+	private ConfigManager configManager;
 
-	/** Our shim, while it is the client's installed draw callback. Null when nothing is hooked. */
+	@Inject
+	private ClientToolbar clientToolbar;
+
+	@Inject
+	private RenderCallbackManager renderCallbackManager;
+
+	private final OffsetTable offsets = new OffsetTable();
+	private final StackRegistry stacks = new StackRegistry();
+	private final StillnessTracker stillness = new StillnessTracker();
+	/** Tick number each player id was last counted on, to catch two players sharing an id. */
+	private final int[] idSeenTick = new int[OffsetTable.CAPACITY];
+
+	/** Our shim, while it is the client's installed draw callback. Null when nothing is hooked. Client thread. */
 	private SpreadingDrawCallbacks wrapper;
+
+	private volatile PersonalSpacePanel panel;
+	private NavigationButton navButton;
+
+	// ---- client-thread state -----------------------------------------------------------
 
 	private long lastFrameNanos;
 	private boolean warnedNoRenderer;
 	private boolean warnedBadIds;
+	private int tick;
+
+	/** What the last game tick found, for the sidebar. */
+	private Snapshot.Gate gate = Snapshot.Gate.NOT_LOGGED_IN;
+	private int nearby;
+	private int still;
+	private int stackedTiles;
+	private int moving;
+	private int skippedIds;
+
+	/** Sidebar rate bookkeeping. */
+	private long lastPanelNanos;
+	private SpreadingDrawCallbacks countedWrapper;
+	private long lastPlayerDraws;
+	private long lastNudgedDraws;
+	private long lastRevealedDraws;
+	private long lastSceneMismatches;
+	private int noDrawsStreak;
+	private int nothingMovedStreak;
 
 	@Provides
 	PersonalSpaceConfig provideConfig(ConfigManager configManager)
@@ -61,21 +113,64 @@ public class PersonalSpacePlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		lastFrameNanos = 0;
-		warnedNoRenderer = false;
-		warnedBadIds = false;
-		clientThread.invoke(offsets::snapAllToZero);
-		// The shim itself is installed lazily on the first frame, see ensureInstalled().
+		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
+		BufferedImage icon = ImageUtil.loadImageResource(PersonalSpacePlugin.class, "panel_icon.png");
+		navButton = NavigationButton.builder()
+			.tooltip("Personal Space")
+			.icon(icon)
+			.priority(7)
+			.panel(newPanel)
+			.build();
+		clientToolbar.addNavigation(navButton);
+		panel = newPanel;
+
+		clientThread.invoke(() ->
+		{
+			lastFrameNanos = 0;
+			lastPanelNanos = 0;
+			warnedNoRenderer = false;
+			warnedBadIds = false;
+			countedWrapper = null;
+			noDrawsStreak = 0;
+			nothingMovedStreak = 0;
+			resetTickState();
+			// The shim itself is installed on the next frame, see ensureInstalled().
+		});
 	}
 
 	@Override
 	protected void shutDown()
 	{
+		panel = null;
+		if (navButton != null)
+		{
+			clientToolbar.removeNavigation(navButton);
+			navButton = null;
+		}
 		clientThread.invoke(() ->
 		{
 			uninstall();
-			offsets.snapAllToZero();
+			resetTickState();
 		});
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!PersonalSpaceConfig.GROUP.equals(event.getGroup()))
+		{
+			return;
+		}
+		PersonalSpacePanel p = panel;
+		if (p != null)
+		{
+			SwingUtilities.invokeLater(p::refreshControls);
+		}
+		if (PersonalSpaceConfig.KEY_ACTIVE.equals(event.getKey()) && !config.active())
+		{
+			// Pausing takes effect immediately, not on the next game tick.
+			clientThread.invoke(this::resetTickState);
+		}
 	}
 
 	// ---- per frame ---------------------------------------------------------------------
@@ -89,14 +184,19 @@ public class PersonalSpacePlugin extends Plugin
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
 		lastFrameNanos = now;
 		offsets.advance(Math.min(dt, 0.25f), config.smoothing());
+
+		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
+		{
+			pushSnapshot(now);
+		}
 	}
 
 	/**
 	 * Keep our shim in front of whichever renderer is active. Renderers install themselves with
 	 * setDrawCallbacks when they start and set it to null when they stop, so this is re-checked
 	 * every frame rather than once at start-up. Cheap: one getter and a reference compare.
-	 * Actually swapping the callback makes the client hand the renderer the scene again (the
-	 * same brief hitch as toggling the GPU plugin), so it is only ever done when needed.
+	 * Swapping is instant, except that if it lands while the game is part-way through loading a
+	 * new area, the game restarts that load once; so it is only ever done when actually needed.
 	 */
 	private void ensureInstalled()
 	{
@@ -118,7 +218,7 @@ public class PersonalSpacePlugin extends Plugin
 			// Never stack shims (e.g. one left behind by an earlier instance of this plugin).
 			target = ((SpreadingDrawCallbacks) current).getDelegate();
 		}
-		wrapper = new SpreadingDrawCallbacks(client, offsets, target);
+		wrapper = new SpreadingDrawCallbacks(client, offsets, stacks, renderCallbackManager, target);
 		client.setDrawCallbacks(wrapper);
 		log.debug("Hooked draw callbacks in front of {}", target.getClass().getName());
 	}
@@ -140,25 +240,36 @@ public class PersonalSpacePlugin extends Plugin
 	{
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
-			offsets.snapAllToZero();
+			resetTickState();
 		}
 	}
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		tick++;
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
-			offsets.snapAllToZero();
+			resetTickState();
 			return;
 		}
 		Player local = client.getLocalPlayer();
-		if (local == null || isUnsafe(local))
+		WorldView wv = client.getTopLevelWorldView();
+		if (local == null || wv == null)
 		{
-			// Hard off: straight back to real positions, no easing, no exceptions.
-			offsets.snapAllToZero();
+			resetTickState();
 			return;
 		}
+
+		Snapshot.Gate newGate = safetyGate(local);
+		if (newGate != Snapshot.Gate.SAFE || !config.active())
+		{
+			// Hard off: straight back to real positions, no easing, no exceptions.
+			resetTickState();
+			gate = newGate;
+			return;
+		}
+		gate = newGate;
 
 		if (wrapper == null && !warnedNoRenderer && client.getDrawCallbacks() == null)
 		{
@@ -167,39 +278,66 @@ public class PersonalSpacePlugin extends Plugin
 				"<col=ff8c00>Personal Space</col>: turn on the GPU plugin (or 117 HD) for this plugin to have any effect.", null);
 		}
 
-		WorldView wv = client.getTopLevelWorldView();
-		offsets.setScene(wv.getScene());
 		offsets.clearTargets();
 
 		if (config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME)
 		{
+			stacks.clear();
 			offsets.setTarget(local.getId(), config.testOffset(), 0);
+			nearby = countPlayers(wv);
+			still = 0;
+			stackedTiles = 0;
+			moving = config.testOffset() > 0 ? 1 : 0;
+			skippedIds = 0;
 			return;
 		}
 
 		List<StackSpreader.Entry> entries = new ArrayList<>();
+		List<StackSpreader.Placement> easingBack = new ArrayList<>();
+		int nearbyCount = 0;
+		int skipped = 0;
 		for (Player p : wv.players())
 		{
-			if (p == null || !isStandingStill(p))
+			if (p == null)
 			{
 				continue;
 			}
+			nearbyCount++;
 			int id = p.getId();
-			if (id < 0 || id >= OffsetTable.CAPACITY || wv.players().byIndex(id) != p)
+			if (id < 0 || id >= OffsetTable.CAPACITY || idSeenTick[id] == tick)
 			{
+				// Out of range, or a second player with the same id this tick: offsets are keyed
+				// by id, so such a player can't be moved safely. Should never happen.
+				skipped++;
 				if (!warnedBadIds)
 				{
 					warnedBadIds = true;
-					log.warn("Player id {} does not index the player list; skipping such players", id);
+					log.warn("Skipping player with unusable id {}", id);
 				}
 				continue;
 			}
+			idSeenTick[id] = tick;
+
+			LocalPoint lp = p.getLocalLocation();
 			WorldPoint wp = p.getWorldLocation();
-			if (wp == null)
+			if (lp == null || wp == null)
 			{
 				continue;
 			}
-			entries.add(new StackSpreader.Entry(id, tileKey(wp), p == local));
+			long tileKey = StackRegistry.key(wp.getPlane(), lp.getSceneX(), lp.getSceneY());
+			boolean centred = StillnessTracker.isCentred(lp.getX(), lp.getY());
+			boolean standingStill = stillness.observe(id, tileKey, centred, tick);
+			if (!standingStill || p.isDead())
+			{
+				if (centred && offsets.isOffset(id))
+				{
+					// Dropped out of a ring but still on the tile: keep drawing them while they
+					// ease back to the middle, instead of vanishing on the spot.
+					easingBack.add(new StackSpreader.Placement(id, tileKey, 0, 0));
+				}
+				continue;
+			}
+			entries.add(new StackSpreader.Entry(id, tileKey, p == local));
 		}
 
 		List<StackSpreader.Placement> placements = StackSpreader.place(
@@ -208,26 +346,30 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
 		}
+		List<StackSpreader.Placement> revealable = new ArrayList<>(placements);
+		for (StackSpreader.Placement pl : easingBack)
+		{
+			revealable.add(pl);
+		}
+		stacks.rebuild(revealable);
+
+		nearby = nearbyCount;
+		still = entries.size();
+		stackedTiles = StackSpreader.stackedTiles(entries);
+		moving = placements.size();
+		skippedIds = skipped;
 	}
 
-	/** Only players who are standing still get nudged; walking, dead or fighting players are left alone. */
-	private static boolean isStandingStill(Player p)
-	{
-		return !p.isDead()
-			&& p.getPoseAnimation() == p.getIdlePoseAnimation()
-			&& p.getHealthRatio() == -1; // -1 means no health bar is showing
-	}
-
-	/** Wilderness, any PvP world or area, or the local player being in combat. */
-	private boolean isUnsafe(Player local)
+	/** Why the effect must be off right now, or SAFE. */
+	private Snapshot.Gate safetyGate(Player local)
 	{
 		if (client.getVarbitValue(VarbitID.INSIDE_WILDERNESS) == 1)
 		{
-			return true;
+			return Snapshot.Gate.WILDERNESS;
 		}
 		if (client.getVarbitValue(VarbitID.PVP_AREA_CLIENT) == 1)
 		{
-			return true;
+			return Snapshot.Gate.PVP_AREA;
 		}
 		EnumSet<WorldType> types = client.getWorldType();
 		if (WorldType.isPvpWorld(types)
@@ -236,13 +378,126 @@ public class PersonalSpacePlugin extends Plugin
 			|| types.contains(WorldType.TOURNAMENT_WORLD)
 			|| types.contains(WorldType.BOUNTY))
 		{
-			return true;
+			return Snapshot.Gate.PVP_WORLD;
 		}
-		return local.getHealthRatio() != -1; // our own health bar is showing: we are in combat
+		if (local.getHealthRatio() != -1)
+		{
+			return Snapshot.Gate.IN_COMBAT; // our own health bar is showing
+		}
+		return Snapshot.Gate.SAFE;
 	}
 
-	private static long tileKey(WorldPoint wp)
+	/** Everyone back to their real spot immediately and forget what the last tick found. Client thread. */
+	private void resetTickState()
 	{
-		return ((long) wp.getPlane() << 32) | ((long) (wp.getX() & 0xFFFF) << 16) | (wp.getY() & 0xFFFF);
+		offsets.snapAllToZero();
+		stacks.clear();
+		stillness.clear();
+		gate = client.getGameState() == GameState.LOGGED_IN ? gate : Snapshot.Gate.NOT_LOGGED_IN;
+		nearby = 0;
+		still = 0;
+		stackedTiles = 0;
+		moving = 0;
+		skippedIds = 0;
+	}
+
+	private static int countPlayers(WorldView wv)
+	{
+		int n = 0;
+		for (Player p : wv.players())
+		{
+			if (p != null)
+			{
+				n++;
+			}
+		}
+		return n;
+	}
+
+	// ---- sidebar -----------------------------------------------------------------------
+
+	/** Client thread. Capture the current state and hand it to the sidebar. */
+	private void pushSnapshot(long now)
+	{
+		PersonalSpacePanel p = panel;
+		if (p == null)
+		{
+			return;
+		}
+
+		Snapshot s = new Snapshot();
+		s.active = config.active();
+		s.mode = config.mode();
+		s.separation = config.separation();
+		s.maxStack = config.maxStack();
+		s.includeLocal = config.includeLocalPlayer();
+		s.smoothing = config.smoothing();
+		s.testOffset = config.testOffset();
+
+		boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
+		s.gate = loggedIn ? gate : Snapshot.Gate.NOT_LOGGED_IN;
+
+		DrawCallbacks current = client.getDrawCallbacks();
+		SpreadingDrawCallbacks w = wrapper;
+		s.hooked = w != null && current == w;
+		s.renderer = current == null ? null : rendererName(s.hooked ? w.getDelegate() : current);
+
+		double seconds = lastPanelNanos == 0 ? 0 : (now - lastPanelNanos) / 1_000_000_000.0;
+		boolean ratesKnown = w != null && w == countedWrapper && seconds > 0;
+		if (ratesKnown)
+		{
+			s.playerDrawsPerSec = perSecond(w.playerDraws - lastPlayerDraws, seconds);
+			s.nudgedDrawsPerSec = perSecond(w.nudgedDraws - lastNudgedDraws, seconds);
+			s.revealedDrawsPerSec = perSecond(w.revealedDraws - lastRevealedDraws, seconds);
+			s.sceneMismatchesPerSec = perSecond(w.sceneMismatches - lastSceneMismatches, seconds);
+		}
+		if (w != null)
+		{
+			s.playersInOtherCalls = w.playersInOtherCalls;
+			s.offThreadDraws = w.offThreadDraws;
+			s.revealErrors = w.revealErrors;
+		}
+		countedWrapper = w;
+		if (w != null)
+		{
+			lastPlayerDraws = w.playerDraws;
+			lastNudgedDraws = w.nudgedDraws;
+			lastRevealedDraws = w.revealedDraws;
+			lastSceneMismatches = w.sceneMismatches;
+		}
+		lastPanelNanos = now;
+
+		s.nearby = nearby;
+		s.still = still;
+		s.stackedTiles = stackedTiles;
+		s.moving = moving;
+		s.skippedIds = skippedIds;
+
+		boolean effectShouldRun = s.active && loggedIn && s.gate == Snapshot.Gate.SAFE && s.hooked && ratesKnown;
+		noDrawsStreak = effectShouldRun && s.playerDrawsPerSec == 0 ? noDrawsStreak + 1 : 0;
+		nothingMovedStreak = effectShouldRun && s.moving > 0 && s.nudgedDrawsPerSec + s.revealedDrawsPerSec == 0 ? nothingMovedStreak + 1 : 0;
+		s.noPlayerDrawsSustained = noDrawsStreak >= SUSTAINED_REFRESHES;
+		s.nothingMovedSustained = nothingMovedStreak >= SUSTAINED_REFRESHES;
+
+		SwingUtilities.invokeLater(() -> p.update(s));
+	}
+
+	private static int perSecond(long count, double seconds)
+	{
+		return count <= 0 ? 0 : (int) Math.round(count / seconds);
+	}
+
+	private static String rendererName(DrawCallbacks callbacks)
+	{
+		String name = callbacks.getClass().getSimpleName();
+		if (name.equals("GpuPlugin"))
+		{
+			return "GPU plugin";
+		}
+		if (name.toLowerCase().contains("hd"))
+		{
+			return "117 HD";
+		}
+		return name;
 	}
 }

@@ -34,12 +34,14 @@ final class StackSpreader
 	static final class Placement
 	{
 		final int id;
+		final long tile;
 		final int dx;
 		final int dz;
 
-		Placement(int id, int dx, int dz)
+		Placement(int id, long tile, int dx, int dz)
 		{
 			this.id = id;
+			this.tile = tile;
 			this.dx = dx;
 			this.dz = dz;
 		}
@@ -86,10 +88,26 @@ final class StackSpreader
 			for (int i = 0; i < n; i++)
 			{
 				int[] off = ringOffset(i, n, radius);
-				out.add(new Placement(movable.get(i).id, off[0], off[1]));
+				Entry e = movable.get(i);
+				out.add(new Placement(e.id, e.tile, off[0], off[1]));
 			}
 		}
 		return out;
+	}
+
+	/** How many tiles have two or more of the given players on them. */
+	static int stackedTiles(List<Entry> entries)
+	{
+		Map<Long, Integer> counts = new LinkedHashMap<>();
+		int stacked = 0;
+		for (Entry e : entries)
+		{
+			if (counts.merge(e.tile, 1, Integer::sum) == 2)
+			{
+				stacked++;
+			}
+		}
+		return stacked;
 	}
 
 	/**

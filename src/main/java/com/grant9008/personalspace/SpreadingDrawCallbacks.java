@@ -16,28 +16,65 @@ import net.runelite.api.TileObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.hooks.DrawCallbacks;
+import net.runelite.client.callback.RenderCallbackManager;
 
 /**
  * A thin shim installed in front of whatever renderer is active (the GPU plugin or 117 HD).
  *
- * <p>Every call is forwarded untouched, except the one the client makes to draw a player:
- * there the x/z it is about to draw at get this player's current offset added, and the
- * height is re-sampled from the ground at the new spot so feet stay planted on slopes.
- * The player object itself, its tile, its overhead text and its chat bubble are never touched.
+ * <p>How the game draws players, checked against the RuneLite 1.12.38 client:
+ * <ul>
+ * <li>Players, NPCs and projectiles are "temporary" scene entities re-added every frame and drawn
+ * through {@link #drawTemp}. {@code drawDynamic} only ever carries animated scenery and ground
+ * items. (Version 0.1.0 hooked {@code drawDynamic} by mistake, so nothing moved.)</li>
+ * <li>When several players stand still in the exact middle of one tile, the game adds only the
+ * first of them to the scene each frame and skips the rest. That is why a stack looks like one
+ * person, and why nudging draw calls alone can never reveal anyone.</li>
+ * </ul>
  *
- * <p>Every method of {@link DrawCallbacks} is overridden, including the ones with default
- * bodies, because a default body would silently swallow the call instead of forwarding it.
+ * <p>So for a player draw on a stacked tile this shim does two things: it draws that player at its
+ * own ring slot (if it has one), and then draws each hidden stackmate's model at that mate's slot,
+ * reusing the same renderer call. Every other call is forwarded untouched. The real players, their
+ * tiles, clickboxes, overhead text and chat bubbles are never modified. Hidden stackmates drawn
+ * this way have no clickbox of their own, exactly as when the game hides them.
+ *
+ * <p>Every method of {@link DrawCallbacks} is overridden, including the ones with default bodies,
+ * because a default body would silently swallow the call instead of forwarding it.
+ *
+ * <p>The counters are plain fields read by the plugin for the sidebar diagnostics.
  */
 final class SpreadingDrawCallbacks implements DrawCallbacks
 {
 	private final Client client;
 	private final OffsetTable offsets;
+	private final StackRegistry stacks;
+	private final RenderCallbackManager renderCallbacks;
 	private final DrawCallbacks delegate;
 
-	SpreadingDrawCallbacks(Client client, OffsetTable offsets, DrawCallbacks delegate)
+	/** Players the renderer was asked to draw. */
+	long playerDraws;
+	/** Of those, how many we drew at a ring slot instead of their real spot. */
+	long nudgedDraws;
+	/** Hidden stackmates we drew ourselves. */
+	long revealedDraws;
+	/** Player draws for a scene other than the main one (e.g. on a boat); left alone. */
+	long sceneMismatches;
+	/** Players arriving through drawDynamic or the legacy draw call. Expected to stay 0. */
+	long playersInOtherCalls;
+	/** drawTemp calls made off the client thread. Expected to stay 0; such calls are passed through untouched. */
+	long offThreadDraws;
+	/** Errors while drawing a hidden stackmate (that mate is skipped for the frame). */
+	long revealErrors;
+
+	/** Frame each player id was last drawn by the game itself, and by us, so nobody is drawn twice in a frame. */
+	private final int[] nativeFrame = new int[OffsetTable.CAPACITY];
+	private final int[] revealedFrame = new int[OffsetTable.CAPACITY];
+
+	SpreadingDrawCallbacks(Client client, OffsetTable offsets, StackRegistry stacks, RenderCallbackManager renderCallbacks, DrawCallbacks delegate)
 	{
 		this.client = client;
 		this.offsets = offsets;
+		this.stacks = stacks;
+		this.renderCallbacks = renderCallbacks;
 		this.delegate = delegate;
 	}
 
@@ -46,47 +83,157 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		return delegate;
 	}
 
-	// ---- the one call we care about ----------------------------------------------------
+	// ---- the call players are drawn through --------------------------------------------
 
 	@Override
-	public void drawDynamic(int thread, Projection projection, Scene scene, TileObject tileObject, Renderable renderable, Model model, int orientation, int x, int y, int z)
+	public void drawTemp(Projection projection, Scene scene, GameObject gameObject, Model model, int orientation, int x, int y, int z)
 	{
-		if (renderable instanceof Player && scene == offsets.scene())
+		Renderable renderable = gameObject == null ? null : gameObject.getRenderable();
+		if (!(renderable instanceof Player))
 		{
-			Player player = (Player) renderable;
-			int id = player.getId();
-			int dx = offsets.dx(id);
-			int dz = offsets.dz(id);
-			if (dx != 0 || dz != 0)
-			{
-				int nx = x + dx;
-				int nz = z + dz;
-				y += groundDelta(player, x, z, nx, nz);
-				x = nx;
-				z = nz;
-			}
+			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			return;
 		}
-		delegate.drawDynamic(thread, projection, scene, tileObject, renderable, model, orientation, x, y, z);
+		playerDraws++;
+		if (!client.isClientThread())
+		{
+			offThreadDraws++;
+			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			return;
+		}
+		WorldView wv = client.getTopLevelWorldView();
+		if (wv == null || scene != wv.getScene())
+		{
+			sceneMismatches++;
+			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			return;
+		}
+
+		Player drawn = (Player) renderable;
+		int drawnId = drawn.getId();
+		if (drawnId >= 0 && drawnId < OffsetTable.CAPACITY)
+		{
+			nativeFrame[drawnId] = offsets.frame();
+		}
+		int plane = gameObject.getPlane();
+		int dx = offsets.dx(drawn.getId());
+		int dz = offsets.dz(drawn.getId());
+		if (dx != 0 || dz != 0)
+		{
+			delegate.drawTemp(projection, scene, gameObject, model, orientation,
+				x + dx, y + groundDelta(wv, plane, x, z, x + dx, z + dz), z + dz);
+			nudgedDraws++;
+		}
+		else
+		{
+			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+		}
+
+		// Only a player standing exactly in the middle of its tile hides others there.
+		if (!stacks.isEmpty() && StillnessTracker.isCentred(x, z))
+		{
+			drawHiddenStackmates(projection, scene, gameObject, drawn, wv, plane, x, y, z);
+		}
 	}
 
-	/** Height difference between the ground at the real spot and at the drawn spot. */
-	private int groundDelta(Player player, int x, int z, int nx, int nz)
+	/**
+	 * Draw the players the game skipped on the drawn player's tile.
+	 *
+	 * <p>A mate still standing exactly where the drawn player is was certainly skipped, because the
+	 * game draws only one centred player per tile. A mate that has since stepped off-centre is
+	 * drawn by the game itself, so it is left alone to avoid drawing anyone twice.
+	 */
+	private void drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z)
 	{
+		int[] mates = stacks.membersAt(StackRegistry.key(plane, x >> 7, z >> 7));
+		if (mates.length == 0)
+		{
+			return;
+		}
+
+		// The y the game passed is ground height minus the drawn player's own animation lift.
+		int ground = y + drawn.getAnimationHeightOffset();
+		int frame = offsets.frame();
+		boolean touchedSharedModel = false;
+		for (int id : mates)
+		{
+			if (id == drawn.getId() || id < 0 || id >= OffsetTable.CAPACITY
+				|| nativeFrame[id] == frame || revealedFrame[id] == frame)
+			{
+				continue; // already drawn this frame, by the game or by us
+			}
+			try
+			{
+				Player mate = wv.players().byIndex(id);
+				if (mate == null)
+				{
+					continue;
+				}
+				LocalPoint lp = mate.getLocalLocation();
+				if (lp == null || lp.getX() != x || lp.getY() != z)
+				{
+					continue;
+				}
+				if (renderCallbacks != null && !renderCallbacks.addEntity(mate, false))
+				{
+					continue; // hidden by another plugin, e.g. Entity Hider: respect that
+				}
+				touchedSharedModel = true;
+				Model mateModel = mate.getModel();
+				if (mateModel == null)
+				{
+					continue;
+				}
+				int mdx = offsets.dx(id);
+				int mdz = offsets.dz(id);
+				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
+				delegate.drawTemp(projection, scene, gameObject, mateModel, mate.getCurrentOrientation(), x + mdx, mateY, z + mdz);
+				revealedFrame[id] = frame;
+				revealedDraws++;
+			}
+			catch (RuntimeException e)
+			{
+				revealErrors++;
+			}
+		}
+
+		if (touchedSharedModel)
+		{
+			// Animated models share one buffer inside the game. Building the mates' models may have
+			// overwritten the drawn player's, which the game uses for its click test right after this
+			// call returns, so rebuild the drawn player's model to put it back.
+			try
+			{
+				drawn.getModel();
+			}
+			catch (RuntimeException e)
+			{
+				revealErrors++;
+			}
+		}
+	}
+
+	/** Height difference between the ground at the real spot and at the drawn spot, or 0 if unknown. */
+	private int groundDelta(WorldView wv, int plane, int x, int z, int nx, int nz)
+	{
+		if (nx == x && nz == z)
+		{
+			return 0;
+		}
+		int maxX = wv.getSizeX() * Perspective.LOCAL_TILE_SIZE;
+		int maxZ = wv.getSizeY() * Perspective.LOCAL_TILE_SIZE;
+		if (x < 0 || z < 0 || nx < 0 || nz < 0 || x >= maxX || nx >= maxX || z >= maxZ || nz >= maxZ)
+		{
+			return 0;
+		}
 		try
 		{
-			WorldView wv = player.getWorldView();
-			if (wv == null)
-			{
-				return 0;
-			}
-			int plane = wv.getPlane();
 			int before = Perspective.getTileHeight(client, new LocalPoint(x, z, wv), plane);
 			int after = Perspective.getTileHeight(client, new LocalPoint(nx, nz, wv), plane);
 			return after - before;
 		}
 		catch (RuntimeException e)
 		{
-			// Never let a bad lookup take the whole frame down; a flat offset is fine for one frame.
 			return 0;
 		}
 	}
@@ -94,20 +241,32 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	// ---- everything below is a straight pass-through -----------------------------------
 
 	@Override
-	public void drawDynamic(Projection projection, Scene scene, TileObject tileObject, Renderable renderable, Model model, int orientation, int x, int y, int z)
+	public void drawDynamic(int thread, Projection projection, Scene scene, TileObject tileObject, Renderable renderable, Model model, int orientation, int x, int y, int z)
 	{
-		delegate.drawDynamic(projection, scene, tileObject, renderable, model, orientation, x, y, z);
+		if (renderable instanceof Player)
+		{
+			playersInOtherCalls++;
+		}
+		delegate.drawDynamic(thread, projection, scene, tileObject, renderable, model, orientation, x, y, z);
 	}
 
 	@Override
-	public void drawTemp(Projection projection, Scene scene, GameObject gameObject, Model model, int orientation, int x, int y, int z)
+	public void drawDynamic(Projection projection, Scene scene, TileObject tileObject, Renderable renderable, Model model, int orientation, int x, int y, int z)
 	{
-		delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+		if (renderable instanceof Player)
+		{
+			playersInOtherCalls++;
+		}
+		delegate.drawDynamic(projection, scene, tileObject, renderable, model, orientation, x, y, z);
 	}
 
 	@Override
 	public void draw(Projection projection, Scene scene, Renderable renderable, int orientation, int x, int y, int z, long hash)
 	{
+		if (renderable instanceof Player)
+		{
+			playersInOtherCalls++;
+		}
 		delegate.draw(projection, scene, renderable, orientation, x, y, z, hash);
 	}
 

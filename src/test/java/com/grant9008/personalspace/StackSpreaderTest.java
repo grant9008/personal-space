@@ -98,6 +98,22 @@ public class StackSpreaderTest
 	}
 
 	@Test
+	public void stackedTilesCountsOnlyTilesWithTwoOrMore()
+	{
+		List<StackSpreader.Entry> in = new ArrayList<>();
+		Assert.assertEquals(0, StackSpreader.stackedTiles(in));
+		in.add(new StackSpreader.Entry(1, TILE_A, false));
+		in.add(new StackSpreader.Entry(2, TILE_B, false));
+		Assert.assertEquals(0, StackSpreader.stackedTiles(in));
+		in.add(new StackSpreader.Entry(3, TILE_A, false));
+		Assert.assertEquals(1, StackSpreader.stackedTiles(in));
+		in.add(new StackSpreader.Entry(4, TILE_A, false));
+		Assert.assertEquals("a third player on the same tile is still one stacked tile", 1, StackSpreader.stackedTiles(in));
+		in.add(new StackSpreader.Entry(5, TILE_B, false));
+		Assert.assertEquals(2, StackSpreader.stackedTiles(in));
+	}
+
+	@Test
 	public void ringSlotsSitOnTheCircleAndSpreadEvenly()
 	{
 		for (int n = 1; n <= 5; n++)

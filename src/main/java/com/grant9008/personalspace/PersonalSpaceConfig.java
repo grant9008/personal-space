@@ -5,10 +5,27 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
+/**
+ * Settings. Everything here can also be changed from the Personal Space sidebar panel, which
+ * writes through the same config keys, so the two always agree.
+ */
 @ConfigGroup(PersonalSpaceConfig.GROUP)
 public interface PersonalSpaceConfig extends Config
 {
 	String GROUP = "personalspace";
+
+	String KEY_ACTIVE = "active";
+	String KEY_MODE = "mode";
+	String KEY_SEPARATION = "separation";
+	String KEY_MAX_STACK = "maxStack";
+	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
+	String KEY_SMOOTHING = "smoothing";
+	String KEY_TEST_OFFSET = "testOffset";
+
+	int MIN_STACK = 2;
+	int MAX_STACK = 5;
+	int MIN_TEST_OFFSET = 0;
+	int MAX_TEST_OFFSET = 64;
 
 	enum Mode
 	{
@@ -58,10 +75,21 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "mode",
+		keyName = KEY_ACTIVE,
+		name = "Effect on",
+		description = "Untick to pause the effect without turning the plugin off. Everyone snaps back to where they really are.",
+		position = 0
+	)
+	default boolean active()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = KEY_MODE,
 		name = "Mode",
 		description = "Normal use is 'Spread stacked players'. The test mode ignores everyone else and just draws your own character a fixed distance east of where it really is, so you can check the basic effect on your own.",
-		position = 0
+		position = 1
 	)
 	default Mode mode()
 	{
@@ -69,33 +97,33 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "separation",
+		keyName = KEY_SEPARATION,
 		name = "Separation",
 		description = "How far apart stacked players are pushed. Large is still well inside a single tile.",
-		position = 1
+		position = 2
 	)
 	default Separation separation()
 	{
 		return Separation.MEDIUM;
 	}
 
-	@Range(min = 2, max = 5)
+	@Range(min = MIN_STACK, max = MAX_STACK)
 	@ConfigItem(
-		keyName = "maxStack",
+		keyName = KEY_MAX_STACK,
 		name = "Max players per tile",
 		description = "Spread at most this many players on one tile. Any extra players stay in the middle as normal.",
-		position = 2
+		position = 3
 	)
 	default int maxStack()
 	{
-		return 5;
+		return MAX_STACK;
 	}
 
 	@ConfigItem(
-		keyName = "includeLocalPlayer",
+		keyName = KEY_INCLUDE_LOCAL,
 		name = "Move my character too",
 		description = "Off: your own character always stays exactly where it really is and other players step around you. On: you take a slot in the ring like everyone else.",
-		position = 3
+		position = 4
 	)
 	default boolean includeLocalPlayer()
 	{
@@ -103,22 +131,22 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "smoothing",
+		keyName = KEY_SMOOTHING,
 		name = "Smooth movement",
 		description = "Ease players into their slot over a fraction of a second instead of snapping there.",
-		position = 4
+		position = 5
 	)
 	default boolean smoothing()
 	{
 		return true;
 	}
 
-	@Range(min = 0, max = 64)
+	@Range(min = MIN_TEST_OFFSET, max = MAX_TEST_OFFSET)
 	@ConfigItem(
-		keyName = "testOffset",
+		keyName = KEY_TEST_OFFSET,
 		name = "Test offset (units)",
 		description = "Only used by the test mode. Draws your own character this many local units east of its real spot. 128 units is one tile, so 32 is a quarter tile.",
-		position = 5
+		position = 6
 	)
 	default int testOffset()
 	{

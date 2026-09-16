@@ -1,14 +1,11 @@
 package com.grant9008.personalspace;
 
-import net.runelite.api.Scene;
-
 /**
  * Per-player draw offsets in local units, indexed by player id.
  *
- * <p>Targets are set once per game tick and eased toward once per frame, both on the client
- * thread. The published {@code outX}/{@code outZ} values are read from inside the renderer's
- * draw callback, which with the GPU plugin's multi-threaded rendering may be another thread.
- * They are plain ints on purpose: the worst a racy read can do is use last frame's value.
+ * <p>Targets are set once per game tick and eased toward once per frame, and the published
+ * {@code outX}/{@code outZ} values are read from the renderer's drawTemp call. All three happen on
+ * the client thread (checked against the RuneLite 1.12.38 client), so plain arrays are enough.
  */
 final class OffsetTable
 {
@@ -29,9 +26,7 @@ final class OffsetTable
 	private final int[] active = new int[CAPACITY];
 	private final boolean[] isActive = new boolean[CAPACITY];
 	private int activeCount;
-
-	/** The scene the offsets were computed for; players drawn in any other scene are left alone. */
-	private volatile Scene scene;
+	private int frame;
 
 	int dx(int id)
 	{
@@ -43,14 +38,16 @@ final class OffsetTable
 		return id >= 0 && id < CAPACITY ? outZ[id] : 0;
 	}
 
-	Scene scene()
+	/** True while this player is drawn away from their real spot, including while easing back. */
+	boolean isOffset(int id)
 	{
-		return scene;
+		return id >= 0 && id < CAPACITY && (outX[id] != 0 || outZ[id] != 0);
 	}
 
-	void setScene(Scene scene)
+	/** Counts frames; used to tell draws in the same frame apart. */
+	int frame()
 	{
-		this.scene = scene;
+		return frame;
 	}
 
 	/** Client thread. Zero every target before this tick's placements are applied. */
@@ -100,6 +97,7 @@ final class OffsetTable
 	/** Client thread, once per frame. Moves every active offset toward its target. */
 	void advance(float dtSeconds, boolean smooth)
 	{
+		frame++;
 		float k = smooth ? 1f - (float) Math.exp(-dtSeconds / TAU) : 1f;
 		for (int i = activeCount - 1; i >= 0; i--)
 		{
