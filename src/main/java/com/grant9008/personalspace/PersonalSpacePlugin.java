@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.4.1";
+	static final String VERSION = "1.5.0";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -70,6 +70,8 @@ public class PersonalSpacePlugin extends Plugin
 
 	private final OffsetTable offsets = new OffsetTable();
 	private final StackRegistry stacks = new StackRegistry();
+	/** Who has which spot on each crowded tile, so crowds don't reshuffle. */
+	private final SlotBook slots = new SlotBook();
 	/** Tiles laid out as a row last tick, so a tile doesn't flip between row and circle. */
 	private java.util.Set<Long> rowTiles = new java.util.HashSet<>();
 	/** Created in startUp, once the client is injected. */
@@ -354,40 +356,7 @@ public class PersonalSpacePlugin extends Plugin
 			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation()));
 		}
 
-		int spacing = config.spacing();
-		java.util.Set<Long> newRowTiles = new java.util.HashSet<>();
-		java.util.Map<Long, Double> rowFacing = new java.util.HashMap<>();
-		List<StackSpreader.Placement> placements = StackSpreader.place(
-			entries, config.includeLocalPlayer(), config.maxStack(), spacing, layoutFor(config.arrangement()),
-			rowTiles, newRowTiles, rowFacing);
-		rowTiles = newRowTiles;
-		if (!placements.isEmpty())
-		{
-			CrowdLayout.Terrain terrain = terrain(wv);
-			placements = config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO
-				? CrowdLayout.settle(placements, obstacles(entries, placements), terrain, spacing, rowFacing)
-				: CrowdLayout.keepStandable(placements, terrain);
-		}
-		placements = StackSpreader.keepCurrentSpots(placements, new StackSpreader.Targets()
-		{
-			@Override
-			public boolean has(int id)
-			{
-				return offsets.hasTarget(id);
-			}
-
-			@Override
-			public int dx(int id)
-			{
-				return offsets.targetX(id);
-			}
-
-			@Override
-			public int dz(int id)
-			{
-				return offsets.targetZ(id);
-			}
-		}, Math.max(14, spacing / 4));
+		List<StackSpreader.Placement> placements = layOut(entries, wv);
 		offsets.clearTargets();
 		for (StackSpreader.Placement pl : placements)
 		{
@@ -444,6 +413,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		offsets.snapAllToZero();
 		stacks.clear();
+		slots.clear();
 		rowTiles.clear();
 		stillness.clear();
 		gate = client.getGameState() == GameState.LOGGED_IN ? gate : Snapshot.Gate.NOT_LOGGED_IN;
@@ -452,6 +422,87 @@ public class PersonalSpacePlugin extends Plugin
 		stackedTiles = 0;
 		moving = 0;
 		skippedIds = 0;
+	}
+
+	/**
+	 * Client thread. Give every crowded tile its spots and hand them out, keeping everyone's spot from
+	 * last tick where possible (see {@link SlotBook}).
+	 */
+	private List<StackSpreader.Placement> layOut(List<StackSpreader.Entry> entries, WorldView wv)
+	{
+		int spacing = config.spacing();
+		int capacity = config.maxStack();
+		boolean smart = config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO;
+		boolean includeLocal = config.includeLocalPlayer();
+
+		java.util.Map<Long, List<StackSpreader.Entry>> byTile = new java.util.LinkedHashMap<>();
+		for (StackSpreader.Entry e : entries)
+		{
+			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>(4)).add(e);
+		}
+
+		java.util.Set<Long> newRowTiles = new java.util.HashSet<>();
+		java.util.Map<Long, List<Integer>> movableByTile = new java.util.HashMap<>();
+		java.util.Map<Long, List<int[]>> spotsByTile = new java.util.HashMap<>();
+		CollisionTerrain terrain = null;
+		for (java.util.Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			long tile = e.getKey();
+			List<StackSpreader.Entry> group = e.getValue();
+			if (group.size() < 2 && !slots.isHolding(tile, tick))
+			{
+				continue;
+			}
+			List<Integer> movable = new ArrayList<>(group.size());
+			for (StackSpreader.Entry en : group)
+			{
+				if (includeLocal || !en.local)
+				{
+					movable.add(en.id);
+				}
+			}
+			if (movable.isEmpty())
+			{
+				continue;
+			}
+			boolean middleTaken = movable.size() < group.size() || movable.size() > capacity;
+			double needed = rowTiles.contains(tile) ? StackSpreader.STILL_SAME_FACING : StackSpreader.SAME_FACING;
+			Double facing = smart ? StackSpreader.sharedFacing(group, needed) : null;
+			boolean row = facing != null;
+			if (row)
+			{
+				newRowTiles.add(tile);
+			}
+
+			if (terrain == null)
+			{
+				terrain = terrain(wv);
+			}
+			final CollisionTerrain t = terrain;
+			int plane = StackRegistry.plane(tile);
+			int ax = StackRegistry.sceneX(tile) * 128 + 64;
+			int az = StackRegistry.sceneY(tile) * 128 + 64;
+			spotsByTile.put(tile, StackSpreader.spots(row, row ? facing : 0.0, middleTaken, spacing, capacity,
+				(dx, dz) -> t.canStand(plane, ax, az, ax + dx, az + dz)));
+			movableByTile.put(tile, movable);
+		}
+		rowTiles = newRowTiles;
+
+		java.util.Map<Long, java.util.Map<Integer, Integer>> assigned =
+			slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
+
+		List<StackSpreader.Placement> placements = new ArrayList<>();
+		for (java.util.Map.Entry<Long, java.util.Map<Integer, Integer>> e : assigned.entrySet())
+		{
+			List<int[]> spots = spotsByTile.get(e.getKey());
+			for (java.util.Map.Entry<Integer, Integer> a : e.getValue().entrySet())
+			{
+				int[] spot = spots.get(a.getValue());
+				placements.add(new StackSpreader.Placement(a.getKey(), e.getKey(), spot[0], spot[1]));
+			}
+		}
+		placements.sort(java.util.Comparator.comparingInt(p -> p.id));
+		return placements;
 	}
 
 	private static StackSpreader.Layout layoutFor(PersonalSpaceConfig.Arrangement arrangement)
@@ -480,7 +531,7 @@ public class PersonalSpacePlugin extends Plugin
 	}
 
 	/** The game's walkability map for the current area, so nobody is drawn inside a booth or wall. */
-	private static CrowdLayout.Terrain terrain(WorldView wv)
+	private static CollisionTerrain terrain(WorldView wv)
 	{
 		CollisionData[] maps = wv.getCollisionMaps();
 		int[][][] flags = new int[4][][];

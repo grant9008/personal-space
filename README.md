@@ -18,7 +18,9 @@ every outfit can be seen.
   wall, give room to people on the next tile, and line up side by side at things people face.
 - **Players walk into place** with their own walk animation. They glide or appear instantly if you prefer.
 - **At an anvil, bank booth or range**, players form a curve around it and all face it, so nobody
-  ends up hitting thin air.
+  ends up hitting thin air. Extra players make a second row behind.
+- **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
+  seconds for someone who steps away, and only players at the back move forward to fill a gap.
 - **Purely cosmetic.** Nobody's real position, clickbox, name, chat or minimap dot changes.
 - **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds and
   while you're in combat, and never shows players the game itself keeps hidden.

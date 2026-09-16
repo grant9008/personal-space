@@ -46,6 +46,23 @@ final class StackSpreader
 	/** How far round a row may curve either side of straight ahead, in radians (70 degrees). */
 	static final double MAX_ARC = Math.toRadians(70);
 
+	/** Row spots, best first: either side of the middle, then further out, then the middle itself. */
+	private static final int[] ROW_STEPS = {1, -1, 2, -2, 0};
+	private static final int ROWS = 3;
+	/** Furthest a row stands behind the row in front, whatever the spacing: just under a tile. */
+	static final int ROW_DEPTH = 112;
+	/** Crowd spots, best first: an inner ring, the middle, then an outer ring. Opposite sides alternate so any number looks balanced. */
+	private static final double[] INNER_RING = {0, 180, 120, 300, 60, 240};
+	private static final double[] OUTER_RING = {30, 210, 150, 330, 90, 270, 0, 180, 60, 240, 120, 300};
+	static final int ROW_PATTERN_SIZE = ROW_STEPS.length * ROWS;
+	static final int CROWD_PATTERN_SIZE = INNER_RING.length + 1 + OUTER_RING.length;
+
+	/** Where a spot can be, relative to the tile centre. */
+	interface SpotCheck
+	{
+		boolean canStand(int dx, int dz);
+	}
+
 	/** Furthest a player is placed from the tile centre along a line, in local units (three tiles). */
 	static final int MAX_LINE_EXTENT = 384;
 
@@ -216,6 +233,79 @@ final class StackSpreader
 			else
 			{
 				out.add(p);
+			}
+		}
+		return out;
+	}
+
+	/** True if pattern spot {@code index} is the middle of the tile. */
+	static boolean isMiddleSpot(int index, boolean row)
+	{
+		return row ? index == ROW_STEPS.length - 1 : index == INNER_RING.length;
+	}
+
+	/**
+	 * Pattern spot {@code index}, relative to the tile centre. The pattern never depends on how many
+	 * players there are, so adding or removing a player never moves anyone else's spot.
+	 *
+	 * <p>Rows curve around what everyone faces ({@link #LOOK_AHEAD} ahead): a front row, then a row
+	 * behind it, then another. Crowds fill an inner ring, the middle, then an outer ring.
+	 */
+	static int[] spotOffset(int index, boolean row, double angle, int spacing)
+	{
+		if (row)
+		{
+			int rowNumber = index / ROW_STEPS.length;
+			int step = ROW_STEPS[index % ROW_STEPS.length];
+			double radius = LOOK_AHEAD + rowNumber * (double) Math.min(spacing, ROW_DEPTH);
+			double turn = Math.min(spacing / radius, MAX_ARC / 2);
+			double phi = step * turn;
+			double fwdX = -Math.sin(angle);
+			double fwdZ = -Math.cos(angle);
+			double focusX = fwdX * LOOK_AHEAD;
+			double focusZ = fwdZ * LOOK_AHEAD;
+			double backX = -fwdX * radius;
+			double backZ = -fwdZ * radius;
+			double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
+			double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
+			return new int[]{(int) Math.round(x), (int) Math.round(z)};
+		}
+		if (index < INNER_RING.length)
+		{
+			return polar(0.8 * spacing, INNER_RING[index]);
+		}
+		if (index == INNER_RING.length)
+		{
+			return new int[]{0, 0};
+		}
+		return polar(Math.min(1.6 * spacing, MAX_LINE_EXTENT), OUTER_RING[index - INNER_RING.length - 1]);
+	}
+
+	private static int[] polar(double radius, double degrees)
+	{
+		double a = Math.toRadians(degrees);
+		return new int[]{(int) Math.round(radius * Math.cos(a)), (int) Math.round(radius * Math.sin(a))};
+	}
+
+	/**
+	 * The usable spots for a tile, best first: the pattern with the middle left out when someone who
+	 * stays put is standing there, and any spot a player couldn't stand on (a booth, stall, anvil or
+	 * wall) skipped. At most {@code capacity} spots.
+	 */
+	static List<int[]> spots(boolean row, double angle, boolean middleTaken, int spacing, int capacity, SpotCheck check)
+	{
+		List<int[]> out = new ArrayList<>(capacity);
+		int size = row ? ROW_PATTERN_SIZE : CROWD_PATTERN_SIZE;
+		for (int i = 0; i < size && out.size() < capacity; i++)
+		{
+			if (middleTaken && isMiddleSpot(i, row))
+			{
+				continue;
+			}
+			int[] spot = spotOffset(i, row, angle, spacing);
+			if (check == null || check.canStand(spot[0], spot[1]))
+			{
+				out.add(spot);
 			}
 		}
 		return out;

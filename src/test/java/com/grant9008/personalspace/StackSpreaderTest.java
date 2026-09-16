@@ -290,6 +290,69 @@ public class StackSpreaderTest
 	}
 
 	@Test
+	public void twoPlayersInACrowdStandEitherSideOfTheMiddle()
+	{
+		List<int[]> spots = StackSpreader.spots(false, 0, false, 60, 5, null);
+		Assert.assertEquals(5, spots.size());
+		Assert.assertEquals("first spot east", 0, spots.get(0)[1]);
+		Assert.assertTrue(spots.get(0)[0] > 0);
+		Assert.assertEquals("second spot straight across", -spots.get(0)[0], spots.get(1)[0]);
+		Assert.assertEquals(0, spots.get(1)[1]);
+	}
+
+	@Test
+	public void theSpotPatternDoesNotDependOnHowManyPlayersThereAre()
+	{
+		List<int[]> small = StackSpreader.spots(true, Math.PI, false, 80, 3, null);
+		List<int[]> big = StackSpreader.spots(true, Math.PI, false, 80, 10, null);
+		for (int i = 0; i < small.size(); i++)
+		{
+			Assert.assertArrayEquals("spot " + i + " must not move when the tile gets bigger", small.get(i), big.get(i));
+		}
+	}
+
+	@Test
+	public void theMiddleIsLeftForWhoeverStaysPut()
+	{
+		for (boolean row : new boolean[]{false, true})
+		{
+			List<int[]> spots = StackSpreader.spots(row, Math.PI, true, 80, 10, null);
+			for (int[] s : spots)
+			{
+				Assert.assertFalse("row=" + row + ": nobody may be put in the middle", s[0] == 0 && s[1] == 0);
+			}
+		}
+	}
+
+	@Test
+	public void blockedSpotsAreSkippedAndTheNextOneIsUsed()
+	{
+		// Anything to the north (into a booth) is off limits.
+		List<int[]> spots = StackSpreader.spots(false, 0, false, 80, 6, (dx, dz) -> dz <= 20);
+		Assert.assertEquals(6, spots.size());
+		for (int[] s : spots)
+		{
+			Assert.assertTrue("spot in the booth: " + s[1], s[1] <= 20);
+		}
+	}
+
+	@Test
+	public void wideSpacingDoesNotFlingRowsFarBack()
+	{
+		int[] third = StackSpreader.spotOffset(10, true, Math.PI, PersonalSpaceConfig.MAX_SPACING);
+		Assert.assertTrue("third row is at most two row-depths back: " + third[1], third[1] >= -2 * StackSpreader.ROW_DEPTH - 2);
+	}
+
+	@Test
+	public void backRowsStandBehindTheFrontRow()
+	{
+		// Facing north: the front row is nearer the thing, row two is a spacing further back.
+		int[] front = StackSpreader.spotOffset(0, true, Math.PI, 80);
+		int[] back = StackSpreader.spotOffset(5, true, Math.PI, 80);
+		Assert.assertTrue("back row is further south: " + front[1] + " vs " + back[1], back[1] < front[1] - 40);
+	}
+
+	@Test
 	public void ringNeighboursAreOneSpacingApart()
 	{
 		for (int n = 3; n <= 5; n++)
