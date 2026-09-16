@@ -24,6 +24,8 @@ final class StackRegistry
 	private static final int[] NONE = new int[0];
 
 	private volatile Map<Long, int[]> byTile = Collections.emptyMap();
+	/** Tiles laid out as a side-by-side row this tick. */
+	private volatile java.util.Set<Long> rows = Collections.emptySet();
 
 	static long key(int plane, int sceneX, int sceneY)
 	{
@@ -46,6 +48,18 @@ final class StackRegistry
 	}
 
 	/** Replace the table with the tiles and members in these placements (placement order is kept). */
+	void rebuild(List<StackSpreader.Placement> placements, java.util.Set<Long> rowTiles)
+	{
+		rows = rowTiles == null ? Collections.emptySet() : new java.util.HashSet<>(rowTiles);
+		rebuild(placements);
+	}
+
+	/** True if this tile is a side-by-side row, where everyone faces the same thing. */
+	boolean isRow(long tileKey)
+	{
+		return rows.contains(tileKey);
+	}
+
 	void rebuild(List<StackSpreader.Placement> placements)
 	{
 		if (placements.isEmpty())
@@ -74,6 +88,7 @@ final class StackRegistry
 
 	void clear()
 	{
+		rows = Collections.emptySet();
 		byTile = Collections.emptyMap();
 	}
 

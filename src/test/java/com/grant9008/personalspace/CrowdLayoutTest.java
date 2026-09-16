@@ -192,20 +192,6 @@ public class CrowdLayoutTest
 	}
 
 	@Test
-	public void slowerWalkSpeedMovesLessPerFrame()
-	{
-		OffsetTable full = new OffsetTable();
-		OffsetTable slow = new OffsetTable();
-		full.setTarget(5, 128, 0);
-		slow.setTarget(5, 128, 0);
-		full.advance(0.3f, PersonalSpaceConfig.Movement.WALK, 1f);
-		slow.advance(0.3f, PersonalSpaceConfig.Movement.WALK, 0.5f);
-		Assert.assertEquals(64, full.dx(5), 2);
-		Assert.assertEquals(32, slow.dx(5), 2);
-		Assert.assertEquals("animation slows down too", full.walkSeconds(5) / 2, slow.walkSeconds(5), 0.01);
-	}
-
-	@Test
 	public void instantJumpsStraightThere()
 	{
 		OffsetTable t = new OffsetTable();

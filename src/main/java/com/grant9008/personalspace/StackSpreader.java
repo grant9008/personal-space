@@ -16,9 +16,9 @@ import java.util.Set;
  *
  * <p>Two arrangements:
  * <ul>
- * <li><b>Line</b>: shoulder to shoulder, across the direction the group is facing. Right when
- * everyone faces the same thing (an anvil, bank booth, range, furnace or fire), because nobody is
- * put inside the thing they're using.</li>
+ * <li><b>Row</b>: shoulder to shoulder in a curve around the thing the group is facing. Right when
+ * everyone faces the same thing (an anvil, bank booth, range, furnace or fire): nobody is put inside
+ * it, nobody ends up past its sides, and everyone still faces it.</li>
  * <li><b>Ring</b>: evenly around the tile. Right for a crowd facing every which way.</li>
  * </ul>
  * {@link Layout#AUTO} picks the line when the group faces the same way, else the ring.
@@ -39,6 +39,12 @@ final class StackSpreader
 	static final double SAME_FACING = 0.9;
 	/** A tile already in a row stays a row until facings disagree by more than this (about 45 degrees), so it doesn't flip back and forth. */
 	static final double STILL_SAME_FACING = 0.7;
+
+	/** How far ahead of a player the thing they're facing is assumed to be: the next tile over. */
+	static final int LOOK_AHEAD = 128;
+
+	/** How far round a row may curve either side of straight ahead, in radians (70 degrees). */
+	static final double MAX_ARC = Math.toRadians(70);
 
 	/** Furthest a player is placed from the tile centre along a line, in local units (three tiles). */
 	static final int MAX_LINE_EXTENT = 384;
@@ -247,40 +253,67 @@ final class StackSpreader
 		return Math.atan2(-sumX, -sumZ);
 	}
 
+	/**
+	 * Which way a player moved by (dx, dz) should face to keep looking at the same spot they were
+	 * looking at from their real position, {@link #LOOK_AHEAD} in front of them. So the players at
+	 * the ends of a row at an anvil turn in towards the anvil instead of staring past it.
+	 */
+	static int faceSameSpot(int orientation, int dx, int dz)
+	{
+		if (dx == 0 && dz == 0)
+		{
+			return orientation;
+		}
+		double a = toRadians(orientation);
+		double lookX = -Math.sin(a) * LOOK_AHEAD - dx;
+		double lookZ = -Math.cos(a) * LOOK_AHEAD - dz;
+		if (Math.hypot(lookX, lookZ) < 1)
+		{
+			return orientation;
+		}
+		return OffsetTable.facing(lookX, lookZ);
+	}
+
 	static double toRadians(int orientation)
 	{
 		return 2 * Math.PI * (((orientation % FULL_TURN) + FULL_TURN) % FULL_TURN) / FULL_TURN;
 	}
 
 	/**
-	 * Slot {@code slot} of {@code count} in a line across the facing direction {@code angle}.
-	 * With the centre free the line is centred on the tile; with the centre taken the players fill
-	 * the spots either side of it, nearest first.
+	 * Slot {@code slot} of {@code count} in a row facing {@code angle}, curved around what the row is
+	 * facing. Everyone stands the same distance ({@link #LOOK_AHEAD}) from that spot, neighbours about
+	 * {@code spacing} apart along the curve, and the curve never wraps further round than
+	 * {@link #MAX_ARC} either side, so a wide spacing can't push people off the anvil or booth.
+	 * With the centre free the row is centred on the tile; with the centre taken, players fill the
+	 * spots either side of it, nearest first.
 	 */
 	static int[] lineOffset(int slot, int count, boolean centreTaken, int spacing, double angle)
 	{
 		double step;
-		double gap;
+		double furthest;
 		if (centreTaken)
 		{
 			int side = slot / 2 + 1;
 			step = slot % 2 == 0 ? side : -side;
-			int furthest = (count + 1) / 2;
-			gap = Math.min(spacing, (double) MAX_LINE_EXTENT / furthest);
+			furthest = (count + 1) / 2;
 		}
 		else
 		{
-			double furthest = (count - 1) / 2.0;
+			furthest = (count - 1) / 2.0;
 			step = slot - furthest;
-			gap = furthest == 0 ? 0 : Math.min(spacing, MAX_LINE_EXTENT / furthest);
 		}
-		// Across the facing: facing south (angle 0) gives an east-west line.
-		double acrossX = Math.cos(angle);
-		double acrossZ = -Math.sin(angle);
-		return new int[]{
-			(int) Math.round(step * gap * acrossX),
-			(int) Math.round(step * gap * acrossZ)
-		};
+		double turn = furthest == 0 ? 0 : Math.min((double) spacing / LOOK_AHEAD, MAX_ARC / furthest);
+		double phi = step * turn;
+
+		// The spot everyone is facing, straight ahead of the tile centre.
+		double focusX = -Math.sin(angle) * LOOK_AHEAD;
+		double focusZ = -Math.cos(angle) * LOOK_AHEAD;
+		// Swing the line from that spot back to the tile centre round by phi.
+		double backX = -focusX;
+		double backZ = -focusZ;
+		double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
+		double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
+		return new int[]{(int) Math.round(x), (int) Math.round(z)};
 	}
 
 	/**

@@ -80,9 +80,6 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private final PillGroup<PersonalSpaceConfig.Movement> movementPills = new PillGroup<>(
 		PersonalSpaceConfig.Movement.values(), labels(PersonalSpaceConfig.Movement.values()));
-	private final JSlider walkSpeedSlider = new JSlider(PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED, PersonalSpaceConfig.DEFAULT_WALK_SPEED);
-	private final JLabel walkSpeedValue = new JLabel();
-	private final JPanel walkSpeedRow = new JPanel(new GridBagLayout());
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
@@ -176,9 +173,6 @@ final class PersonalSpacePanel extends PluginPanel
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
 		movementPills.select(config.movement());
-		setSliderQuietly(walkSpeedSlider, clamp(config.walkSpeed(), PersonalSpaceConfig.MIN_WALK_SPEED, PersonalSpaceConfig.MAX_WALK_SPEED));
-		walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
-		walkSpeedRow.setVisible(config.movement() == PersonalSpaceConfig.Movement.WALK);
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
 		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
@@ -287,15 +281,6 @@ final class PersonalSpacePanel extends PluginPanel
 		movementPills.setToolTipText("Walk: players take real steps into place. Glide: they slide. Instant: they appear in place.");
 		card.add(movementPills, c);
 
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		walkSpeedRow.setOpaque(false);
-		GridBagConstraints w = column();
-		walkSpeedRow.add(labelWithValue("Walk speed", walkSpeedValue), w);
-		w.gridy++;
-		walkSpeedSlider.setToolTipText("How fast players walk into place. Slower looks calmer.");
-		walkSpeedRow.add(slider(walkSpeedSlider), w);
-		card.add(walkSpeedRow, c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -453,20 +438,7 @@ final class PersonalSpacePanel extends PluginPanel
 			}
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
-		movementPills.onSelect(v ->
-		{
-			write(PersonalSpaceConfig.KEY_MOVEMENT, v);
-			walkSpeedRow.setVisible(v == PersonalSpaceConfig.Movement.WALK);
-			revalidate();
-		});
-		walkSpeedSlider.addChangeListener(e ->
-		{
-			walkSpeedValue.setText(walkSpeedSlider.getValue() + "%");
-			if (walkSpeedSlider.getValue() != config.walkSpeed())
-			{
-				write(PersonalSpaceConfig.KEY_WALK_SPEED, walkSpeedSlider.getValue());
-			}
-		});
+		movementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_MOVEMENT, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
@@ -496,7 +468,6 @@ final class PersonalSpacePanel extends PluginPanel
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
 		movementPills.setEnabled(enabled);
-		walkSpeedSlider.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
 	}
 

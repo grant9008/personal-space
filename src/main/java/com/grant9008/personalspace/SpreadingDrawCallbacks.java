@@ -135,7 +135,9 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		if (dx != 0 || dz != 0)
 		{
 			Model drawModel = model;
-			int drawOrientation = orientation;
+			int drawOrientation = stacks.isRow(StackRegistry.key(plane, x >> 7, z >> 7))
+				? StackSpreader.faceSameSpot(orientation, dx, dz)
+				: orientation;
 			if (offsets.isWalking(drawnId))
 			{
 				Model walk = walkModel(drawn, drawnId);
@@ -340,7 +342,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
 				touchedSharedModel = true;
-				int mateOrientation = mate.getCurrentOrientation();
+				int mdx = offsets.dx(id);
+				int mdz = offsets.dz(id);
+				int mateOrientation = stacks.isRow(tileKey)
+					? StackSpreader.faceSameSpot(mate.getCurrentOrientation(), mdx, mdz)
+					: mate.getCurrentOrientation();
 				Model mateModel = null;
 				if (offsets.isWalking(id))
 				{
@@ -359,8 +365,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				{
 					continue;
 				}
-				int mdx = offsets.dx(id);
-				int mdz = offsets.dz(id);
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
 				delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation, x + mdx, mateY, z + mdz);
 				revealedFrame[id] = frame;

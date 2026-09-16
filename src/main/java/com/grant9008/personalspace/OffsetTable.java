@@ -147,14 +147,8 @@ final class OffsetTable
 		activeCount = 0;
 	}
 
-	/** Client thread, once per frame, at normal walking pace. */
-	void advance(float dtSeconds, PersonalSpaceConfig.Movement movement)
-	{
-		advance(dtSeconds, movement, 1f);
-	}
-
 	/** Client thread, once per frame. Moves every active offset toward its target. */
-	void advance(float dtSeconds, PersonalSpaceConfig.Movement movement, float walkSpeed)
+	void advance(float dtSeconds, PersonalSpaceConfig.Movement movement)
 	{
 		frame++;
 		float k = movement == PersonalSpaceConfig.Movement.GLIDE ? 1f - (float) Math.exp(-dtSeconds / TAU) : 1f;
@@ -163,7 +157,7 @@ final class OffsetTable
 			int id = active[i];
 			if (movement == PersonalSpaceConfig.Movement.WALK)
 			{
-				walkTowardTarget(id, dtSeconds, walkSpeed);
+				walkTowardTarget(id, dtSeconds);
 			}
 			else
 			{
@@ -186,12 +180,12 @@ final class OffsetTable
 		}
 	}
 
-	private void walkTowardTarget(int id, float dt, float speed)
+	private void walkTowardTarget(int id, float dt)
 	{
 		float ex = tgtX[id] - curX[id];
 		float ez = tgtZ[id] - curZ[id];
 		float dist = (float) Math.hypot(ex, ez);
-		float stride = WALK_SPEED * speed * dt;
+		float stride = WALK_SPEED * dt;
 		if (dist <= Math.max(stride, 0.5f))
 		{
 			curX[id] = tgtX[id];
@@ -211,8 +205,7 @@ final class OffsetTable
 			walking[id] = true;
 			walkTime[id] = 0f;
 		}
-		// The animation plays at the same speed as the movement, so feet don't slide.
-		walkTime[id] += dt * speed;
+		walkTime[id] += dt;
 		walkFacing[id] = facing(ex, ez);
 	}
 

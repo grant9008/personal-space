@@ -5,7 +5,6 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
-import net.runelite.client.config.Units;
 
 /**
  * Settings. Everything here can also be changed from the Personal Space sidebar panel, which
@@ -23,15 +22,11 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_MAX_STACK = "maxStack";
 	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
 	String KEY_MOVEMENT = "movement";
-	String KEY_WALK_SPEED = "walkSpeed";
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
 	int MAX_STACK = 10;
 	int DEFAULT_STACK = 5;
-	int MIN_WALK_SPEED = 30;
-	int MAX_WALK_SPEED = 100;
-	int DEFAULT_WALK_SPEED = 65;
 	int MIN_TEST_OFFSET = 0;
 	int MAX_TEST_OFFSET = 64;
 
@@ -174,19 +169,6 @@ public interface PersonalSpaceConfig extends Config
 	default Movement movement()
 	{
 		return Movement.WALK;
-	}
-
-	@Range(min = MIN_WALK_SPEED, max = MAX_WALK_SPEED)
-	@Units(Units.PERCENT)
-	@ConfigItem(
-		keyName = KEY_WALK_SPEED,
-		name = "Walk speed",
-		description = "How fast players walk into place, compared with the game's normal walking pace. Slower looks calmer.",
-		position = 6
-	)
-	default int walkSpeed()
-	{
-		return DEFAULT_WALK_SPEED;
 	}
 
 	@ConfigItem(

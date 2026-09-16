@@ -122,9 +122,9 @@ public class StackSpreaderTest
 		in.add(new StackSpreader.Entry(1, TILE_A, false, 1024));
 		in.add(new StackSpreader.Entry(2, TILE_A, false, 1030));
 		Map<Integer, int[]> out = byId(StackSpreader.place(in, true, 5, 32, StackSpreader.Layout.AUTO));
-		Assert.assertEquals("no north-south offset", 0, out.get(1)[1]);
-		Assert.assertEquals(0, out.get(2)[1]);
-		Assert.assertEquals("neighbours are one spacing apart", 32, Math.abs(out.get(1)[0] - out.get(2)[0]));
+		Assert.assertTrue("barely any north-south offset", Math.abs(out.get(1)[1]) <= 3);
+		Assert.assertTrue(Math.abs(out.get(2)[1]) <= 3);
+		Assert.assertEquals("neighbours are about one spacing apart", 32, Math.abs(out.get(1)[0] - out.get(2)[0]), 2);
 	}
 
 	@Test
@@ -137,9 +137,10 @@ public class StackSpreaderTest
 		Map<Integer, int[]> out = byId(StackSpreader.place(in, true, 5, 32, StackSpreader.Layout.AUTO));
 		for (int[] o : out.values())
 		{
-			Assert.assertEquals("no east-west offset when facing west", 0, o[0]);
+			Assert.assertTrue("hardly any east-west offset when facing west: " + o[0], Math.abs(o[0]) <= 5);
 		}
 		Assert.assertEquals("middle player stays centred", 0, out.get(2)[1]);
+		Assert.assertEquals(0, out.get(2)[0]);
 	}
 
 	@Test
@@ -229,6 +230,63 @@ public class StackSpreaderTest
 		Assert.assertArrayEquals("6 units off: keep the old spot", new int[]{44, 0}, out.get(1));
 		Assert.assertArrayEquals("70 units off: move", new int[]{-50, 0}, out.get(2));
 		Assert.assertArrayEquals("new player: take the new spot", new int[]{0, 60}, out.get(3));
+	}
+
+	@Test
+	public void aWideRowCurvesRoundTheThingInsteadOfRunningPastIt()
+	{
+		// Five players facing north at an anvil, widest spacing: nobody drifts further than a
+		// tile and a bit from the anvil spot, and the ends don't go past its sides.
+		double focusX = 0;
+		double focusZ = StackSpreader.LOOK_AHEAD;
+		for (int i = 0; i < 5; i++)
+		{
+			int[] o = StackSpreader.lineOffset(i, 5, false, PersonalSpaceConfig.MAX_SPACING, Math.PI);
+			double fromAnvil = Math.hypot(o[0] - focusX, o[1] - focusZ);
+			Assert.assertEquals("everyone is the same distance from the anvil", StackSpreader.LOOK_AHEAD, fromAnvil, 2);
+			Assert.assertTrue("slot " + i + " went past the anvil: z " + o[1], o[1] < focusZ - 30);
+		}
+		// Everyone faces the anvil.
+		for (int i = 0; i < 5; i++)
+		{
+			int[] o = StackSpreader.lineOffset(i, 5, false, 112, Math.PI);
+			int facing = StackSpreader.faceSameSpot(1024, o[0], o[1]);
+			double lookX = -Math.sin(StackSpreader.toRadians(facing));
+			double lookZ = -Math.cos(StackSpreader.toRadians(facing));
+			double toAnvilX = focusX - o[0];
+			double toAnvilZ = focusZ - o[1];
+			double cos = (lookX * toAnvilX + lookZ * toAnvilZ) / Math.hypot(toAnvilX, toAnvilZ);
+			Assert.assertTrue("slot " + i + " isn't facing the anvil", cos > 0.99);
+		}
+	}
+
+	@Test
+	public void endsOfARowTurnInTowardsWhatEveryoneIsFacing()
+	{
+		// Facing north (1024) at an anvil. Pushed east, you turn to the north-west to still face it.
+		int east = StackSpreader.faceSameSpot(1024, 88, 0);
+		Assert.assertTrue("turned towards the west: " + east, east > 512 && east < 1024);
+		// Pushed west, you turn to the north-east.
+		int west = StackSpreader.faceSameSpot(1024, -88, 0);
+		Assert.assertTrue("turned towards the east: " + west, west > 1024 && west < 1536);
+		// The further out, the more you turn.
+		Assert.assertTrue(StackSpreader.faceSameSpot(1024, 120, 0) < StackSpreader.faceSameSpot(1024, 40, 0));
+		// Not moved sideways: keep facing straight ahead.
+		Assert.assertEquals(1024, StackSpreader.faceSameSpot(1024, 0, 0));
+		Assert.assertEquals(1024, StackSpreader.faceSameSpot(1024, 0, -30));
+	}
+
+	@Test
+	public void rowTilesAreRememberedForDrawing()
+	{
+		StackRegistry r = new StackRegistry();
+		java.util.Set<Long> rows = new java.util.HashSet<>();
+		rows.add(TILE_A);
+		r.rebuild(new ArrayList<>(), rows);
+		Assert.assertTrue(r.isRow(TILE_A));
+		Assert.assertFalse(r.isRow(TILE_B));
+		r.clear();
+		Assert.assertFalse(r.isRow(TILE_A));
 	}
 
 	@Test

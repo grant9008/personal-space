@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.3.1";
+	static final String VERSION = "1.4.0";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -193,7 +193,7 @@ public class PersonalSpacePlugin extends Plugin
 		long now = System.nanoTime();
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
 		lastFrameNanos = now;
-		offsets.advance(Math.min(dt, 0.25f), config.movement(), config.walkSpeed() / 100f);
+		offsets.advance(Math.min(dt, 0.25f), config.movement());
 
 		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
 		{
@@ -394,7 +394,7 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			revealable.add(pl);
 		}
-		stacks.rebuild(revealable);
+		stacks.rebuild(revealable, rowTiles);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
@@ -520,7 +520,6 @@ public class PersonalSpacePlugin extends Plugin
 		s.mode = config.mode();
 		s.spacing = config.spacing();
 		s.movement = config.movement();
-		s.walkSpeed = config.walkSpeed();
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.testOffset = config.testOffset();
