@@ -12,7 +12,7 @@ public class StatusSummaryTest
 		Snapshot s = new Snapshot();
 		s.active = true;
 		s.mode = PersonalSpaceConfig.Mode.SPREAD;
-		s.separation = PersonalSpaceConfig.Separation.MEDIUM;
+		s.spacing = PersonalSpaceConfig.SPACING_NORMAL;
 		s.maxStack = 5;
 		s.testOffset = 32;
 		s.gate = Snapshot.Gate.SAFE;

@@ -30,6 +30,21 @@ final class StackRegistry
 		return ((long) (plane & 0xFF) << 40) | ((long) (sceneX & 0xFFFFF) << 20) | (sceneY & 0xFFFFF);
 	}
 
+	static int plane(long key)
+	{
+		return (int) ((key >> 40) & 0xFF);
+	}
+
+	static int sceneX(long key)
+	{
+		return (int) ((key >> 20) & 0xFFFFF);
+	}
+
+	static int sceneY(long key)
+	{
+		return (int) (key & 0xFFFFF);
+	}
+
 	/** Replace the table with the tiles and members in these placements (placement order is kept). */
 	void rebuild(List<StackSpreader.Placement> placements)
 	{

@@ -18,16 +18,23 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_ACTIVE = "active";
 	String KEY_ARRANGEMENT = "arrangement";
 	String KEY_MODE = "mode";
-	String KEY_SEPARATION = "separation";
+	String KEY_SPACING = "spacingUnits";
 	String KEY_MAX_STACK = "maxStack";
 	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
-	String KEY_SMOOTHING = "smoothing";
+	String KEY_MOVEMENT = "movement";
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
 	int MAX_STACK = 5;
 	int MIN_TEST_OFFSET = 0;
 	int MAX_TEST_OFFSET = 64;
+
+	/** Spacing between players, in local units (128 is one tile). */
+	int MIN_SPACING = 16;
+	int MAX_SPACING = 160;
+	int SPACING_CLOSE = 40;
+	int SPACING_NORMAL = 72;
+	int SPACING_WIDE = 112;
 
 	enum Mode
 	{
@@ -50,9 +57,8 @@ public interface PersonalSpaceConfig extends Config
 
 	enum Arrangement
 	{
-		AUTO("Automatic"),
-		CIRCLE("Circle"),
-		SIDE_BY_SIDE("Side by side");
+		AUTO("Smart"),
+		CIRCLE("Circle");
 
 		private final String label;
 
@@ -68,25 +74,17 @@ public interface PersonalSpaceConfig extends Config
 		}
 	}
 
-	enum Separation
+	enum Movement
 	{
-		SMALL("Close", 20),
-		MEDIUM("Normal", 32),
-		LARGE("Wide", 44);
+		WALK("Walk"),
+		GLIDE("Glide"),
+		INSTANT("Instant");
 
 		private final String label;
-		private final int units;
 
-		Separation(String label, int units)
+		Movement(String label)
 		{
 			this.label = label;
-			this.units = units;
-		}
-
-		/** Ring radius in local units. One tile is 128 units, so even Large stays inside the tile. */
-		public int getUnits()
-		{
-			return units;
 		}
 
 		@Override
@@ -116,21 +114,9 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = KEY_MODE,
-		name = "Mode",
-		description = "Normal use is 'Spread stacked players'. The test mode ignores everyone else and just draws your own character a fixed distance east of where it really is, so you can check the basic effect on your own.",
-		position = 11,
-		section = TROUBLESHOOTING
-	)
-	default Mode mode()
-	{
-		return Mode.SPREAD;
-	}
-
-	@ConfigItem(
 		keyName = KEY_ARRANGEMENT,
 		name = "Arrangement",
-		description = "Automatic: players facing the same way (at an anvil, bank booth, range or fire) stand side by side, everyone else forms a circle.",
+		description = "Smart: the crowd spreads into open space, stays out of booths, stalls, anvils and walls, and lines up at things people face. Circle: a simple ring on each tile.",
 		position = 1
 	)
 	default Arrangement arrangement()
@@ -138,15 +124,16 @@ public interface PersonalSpaceConfig extends Config
 		return Arrangement.AUTO;
 	}
 
+	@Range(min = MIN_SPACING, max = MAX_SPACING)
 	@ConfigItem(
-		keyName = KEY_SEPARATION,
+		keyName = KEY_SPACING,
 		name = "Spacing",
-		description = "How far apart players on the same tile are drawn. Wide still stays inside the tile.",
+		description = "How far apart players are drawn, in game units. 128 is one tile.",
 		position = 2
 	)
-	default Separation separation()
+	default int spacing()
 	{
-		return Separation.MEDIUM;
+		return SPACING_NORMAL;
 	}
 
 	@Range(min = MIN_STACK, max = MAX_STACK)
@@ -164,7 +151,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_INCLUDE_LOCAL,
 		name = "Move my character too",
-		description = "Off: your own character always stays exactly where it really is and other players step around you. On: you take a slot in the ring like everyone else.",
+		description = "Off: your own character always stays exactly where it really is and other players step around you. On: you take a spot like everyone else.",
 		position = 4
 	)
 	default boolean includeLocalPlayer()
@@ -173,14 +160,26 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = KEY_SMOOTHING,
-		name = "Smooth movement",
-		description = "Ease players into their slot over a fraction of a second instead of snapping there.",
+		keyName = KEY_MOVEMENT,
+		name = "Movement",
+		description = "Walk: players take real steps into place. Glide: they slide smoothly. Instant: they appear in place.",
 		position = 5
 	)
-	default boolean smoothing()
+	default Movement movement()
 	{
-		return true;
+		return Movement.WALK;
+	}
+
+	@ConfigItem(
+		keyName = KEY_MODE,
+		name = "Mode",
+		description = "Normal use is 'Spread stacked players'. The test mode ignores everyone else and just draws your own character a fixed distance east of where it really is, so you can check the basic effect on your own.",
+		position = 11,
+		section = TROUBLESHOOTING
+	)
+	default Mode mode()
+	{
+		return Mode.SPREAD;
 	}
 
 	@Range(min = MIN_TEST_OFFSET, max = MAX_TEST_OFFSET)

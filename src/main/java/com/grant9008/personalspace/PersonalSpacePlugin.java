@@ -9,6 +9,7 @@ import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.CollisionData;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.WorldType;
@@ -40,7 +41,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.0.0";
+	static final String VERSION = "1.1.0";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -190,7 +191,7 @@ public class PersonalSpacePlugin extends Plugin
 		long now = System.nanoTime();
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
 		lastFrameNanos = now;
-		offsets.advance(Math.min(dt, 0.25f), config.smoothing());
+		offsets.advance(Math.min(dt, 0.25f), config.movement());
 
 		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
 		{
@@ -352,8 +353,13 @@ public class PersonalSpacePlugin extends Plugin
 			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation()));
 		}
 
+		int spacing = config.spacing();
 		List<StackSpreader.Placement> placements = StackSpreader.place(
-			entries, config.includeLocalPlayer(), config.maxStack(), config.separation().getUnits(), layoutFor(config.arrangement()));
+			entries, config.includeLocalPlayer(), config.maxStack(), spacing, layoutFor(config.arrangement()));
+		if (config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO && !placements.isEmpty())
+		{
+			placements = CrowdLayout.settle(placements, obstacles(entries, placements), terrain(wv), spacing);
+		}
 		for (StackSpreader.Placement pl : placements)
 		{
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
@@ -420,16 +426,42 @@ public class PersonalSpacePlugin extends Plugin
 
 	private static StackSpreader.Layout layoutFor(PersonalSpaceConfig.Arrangement arrangement)
 	{
-		switch (arrangement)
+		return arrangement == PersonalSpaceConfig.Arrangement.CIRCLE ? StackSpreader.Layout.RING : StackSpreader.Layout.AUTO;
+	}
+
+	/** Still players who aren't being moved (you, when you stay put, and anyone on a tile by themselves). */
+	private static List<CrowdLayout.Obstacle> obstacles(List<StackSpreader.Entry> entries, List<StackSpreader.Placement> placements)
+	{
+		java.util.Set<Integer> moving = new java.util.HashSet<>();
+		for (StackSpreader.Placement p : placements)
 		{
-			case CIRCLE:
-				return StackSpreader.Layout.RING;
-			case SIDE_BY_SIDE:
-				return StackSpreader.Layout.LINE;
-			case AUTO:
-			default:
-				return StackSpreader.Layout.AUTO;
+			moving.add(p.id);
 		}
+		List<CrowdLayout.Obstacle> out = new ArrayList<>();
+		for (StackSpreader.Entry e : entries)
+		{
+			if (!moving.contains(e.id))
+			{
+				out.add(new CrowdLayout.Obstacle(StackRegistry.plane(e.tile),
+					StackRegistry.sceneX(e.tile) * 128 + 64, StackRegistry.sceneY(e.tile) * 128 + 64));
+			}
+		}
+		return out;
+	}
+
+	/** The game's walkability map for the current area, so nobody is drawn inside a booth or wall. */
+	private static CrowdLayout.Terrain terrain(WorldView wv)
+	{
+		CollisionData[] maps = wv.getCollisionMaps();
+		int[][][] flags = new int[4][][];
+		if (maps != null)
+		{
+			for (int plane = 0; plane < Math.min(4, maps.length); plane++)
+			{
+				flags[plane] = maps[plane] == null ? null : maps[plane].getFlags();
+			}
+		}
+		return new CollisionTerrain(flags);
 	}
 
 	private static int countPlayers(WorldView wv)
@@ -460,10 +492,10 @@ public class PersonalSpacePlugin extends Plugin
 		s.active = config.active();
 		s.arrangement = config.arrangement();
 		s.mode = config.mode();
-		s.separation = config.separation();
+		s.spacing = config.spacing();
+		s.movement = config.movement();
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
-		s.smoothing = config.smoothing();
 		s.testOffset = config.testOffset();
 
 		boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
@@ -488,6 +520,7 @@ public class PersonalSpacePlugin extends Plugin
 			s.playersInOtherCalls = w.playersInOtherCalls;
 			s.offThreadDraws = w.offThreadDraws;
 			s.revealErrors = w.revealErrors;
+			s.walkDraws = w.walkDraws;
 		}
 		countedWrapper = w;
 		if (w != null)

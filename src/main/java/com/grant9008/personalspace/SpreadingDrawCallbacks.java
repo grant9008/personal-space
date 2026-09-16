@@ -1,6 +1,9 @@
 package com.grant9008.personalspace;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
+import net.runelite.api.Animation;
 import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.Model;
@@ -65,6 +68,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long offThreadDraws;
 	/** Errors while drawing a hidden stackmate (that mate is skipped for the frame). */
 	long revealErrors;
+	/** Player models drawn mid-step with their walk animation. */
+	long walkDraws;
+
+	/** Walk animation timing by animation id, loaded once. */
+	private final Map<Integer, WalkTiming> walkTimings = new HashMap<>();
 
 	/** Frame each player id was last drawn by the game itself, and by us, so nobody is drawn twice in a frame. */
 	private final int[] nativeFrame = new int[OffsetTable.CAPACITY];
@@ -121,11 +129,25 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			nativeFrame[drawnId] = offsets.frame();
 		}
 		int plane = gameObject.getPlane();
-		int dx = offsets.dx(drawn.getId());
-		int dz = offsets.dz(drawn.getId());
+		int dx = offsets.dx(drawnId);
+		int dz = offsets.dz(drawnId);
+		boolean touchedSharedModel = false;
 		if (dx != 0 || dz != 0)
 		{
-			delegate.drawTemp(projection, scene, gameObject, model, orientation,
+			Model drawModel = model;
+			int drawOrientation = orientation;
+			if (offsets.isWalking(drawnId))
+			{
+				Model walk = walkModel(drawn, drawnId);
+				touchedSharedModel = true;
+				if (walk != null)
+				{
+					drawModel = walk;
+					drawOrientation = offsets.walkOrientation(drawnId);
+					walkDraws++;
+				}
+			}
+			delegate.drawTemp(projection, scene, gameObject, drawModel, drawOrientation,
 				x + dx, y + groundDelta(wv, plane, x, z, x + dx, z + dz), z + dz);
 			nudgedDraws++;
 		}
@@ -137,7 +159,132 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// Only a player standing exactly in the middle of its tile hides others there.
 		if (!stacks.isEmpty() && StillnessTracker.isCentred(x, z))
 		{
-			drawHiddenStackmates(projection, scene, gameObject, drawn, wv, plane, x, y, z);
+			touchedSharedModel |= drawHiddenStackmates(projection, scene, gameObject, drawn, wv, plane, x, y, z);
+		}
+
+		if (touchedSharedModel)
+		{
+			// Animated models share one buffer inside the game. Building other models (or this
+			// player's walking model) overwrote the one the game uses for its click test right
+			// after this call returns, so rebuild it to put it back.
+			try
+			{
+				drawn.getModel();
+			}
+			catch (RuntimeException e)
+			{
+				revealErrors++;
+			}
+		}
+	}
+
+	/**
+	 * This player's model mid-step: their own walk animation at the frame matching how long they've
+	 * been walking. Returns null (draw them as the game did) if they're busy with an action such as
+	 * sitting or smithing, or the animation can't be read. Their real animation state is restored
+	 * before returning; the model stays valid until the next model is built.
+	 */
+	private Model walkModel(Player player, int id)
+	{
+		if (player.getAnimation() != -1)
+		{
+			return null;
+		}
+		int walk = player.getWalkAnimation();
+		if (walk < 0)
+		{
+			return null;
+		}
+		int frame = walkTiming(walk).frameAt(offsets.walkSeconds(id));
+		if (frame < 0)
+		{
+			return null;
+		}
+		int pose = player.getPoseAnimation();
+		int poseFrame = player.getPoseAnimationFrame();
+		try
+		{
+			player.setPoseAnimation(walk);
+			player.setPoseAnimationFrame(frame);
+			return player.getModel();
+		}
+		finally
+		{
+			player.setPoseAnimation(pose);
+			player.setPoseAnimationFrame(poseFrame);
+		}
+	}
+
+	private WalkTiming walkTiming(int animationId)
+	{
+		WalkTiming timing = walkTimings.get(animationId);
+		if (timing == null)
+		{
+			timing = WalkTiming.load(client, animationId);
+			walkTimings.put(animationId, timing);
+		}
+		return timing;
+	}
+
+	/** How long each frame of a walk animation lasts, in game cycles (20 ms). */
+	static final class WalkTiming
+	{
+		private static final WalkTiming NONE = new WalkTiming(null, 0);
+
+		private final int[] frameLengths;
+		private final int duration;
+
+		WalkTiming(int[] frameLengths, int duration)
+		{
+			this.frameLengths = frameLengths;
+			this.duration = duration;
+		}
+
+		static WalkTiming load(Client client, int animationId)
+		{
+			try
+			{
+				Animation animation = client.loadAnimation(animationId);
+				if (animation == null)
+				{
+					return NONE;
+				}
+				if (animation.isMayaAnim())
+				{
+					return new WalkTiming(null, animation.getDuration());
+				}
+				int[] lengths = animation.getFrameLengths();
+				return lengths == null || lengths.length == 0 ? NONE : new WalkTiming(lengths, 0);
+			}
+			catch (RuntimeException e)
+			{
+				return NONE;
+			}
+		}
+
+		/** Frame to show after walking this many seconds, looping; -1 if unknown. */
+		int frameAt(float seconds)
+		{
+			int cycles = (int) (seconds / 0.02f);
+			if (frameLengths == null)
+			{
+				return duration > 0 ? cycles % duration : -1;
+			}
+			int total = 0;
+			for (int length : frameLengths)
+			{
+				total += Math.max(1, length);
+			}
+			int t = cycles % total;
+			for (int i = 0; i < frameLengths.length; i++)
+			{
+				t -= Math.max(1, frameLengths[i]);
+				if (t < 0)
+				{
+					return i;
+				}
+			}
+			return frameLengths.length - 1;
 		}
 	}
 
@@ -148,7 +295,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * game draws only one centred player per tile. A mate that has since stepped off-centre is
 	 * drawn by the game itself, so it is left alone to avoid drawing anyone twice.
 	 */
-	private void drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z)
+	private boolean drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z)
 	{
 		long tileKey = StackRegistry.key(plane, x >> 7, z >> 7);
 		int[] mates = stacks.membersAt(tileKey);
@@ -156,7 +303,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int heldCount = probe.heldOn(tileKey, frame, held);
 		if (mates.length == 0 && heldCount == 0)
 		{
-			return;
+			return false;
 		}
 
 		// The y the game passed is ground height minus the drawn player's own animation lift.
@@ -193,7 +340,21 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
 				touchedSharedModel = true;
-				Model mateModel = mate.getModel();
+				int mateOrientation = mate.getCurrentOrientation();
+				Model mateModel = null;
+				if (offsets.isWalking(id))
+				{
+					mateModel = walkModel(mate, id);
+					if (mateModel != null)
+					{
+						mateOrientation = offsets.walkOrientation(id);
+						walkDraws++;
+					}
+				}
+				if (mateModel == null)
+				{
+					mateModel = mate.getModel();
+				}
 				if (mateModel == null)
 				{
 					continue;
@@ -201,7 +362,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				int mdx = offsets.dx(id);
 				int mdz = offsets.dz(id);
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
-				delegate.drawTemp(projection, scene, gameObject, mateModel, mate.getCurrentOrientation(), x + mdx, mateY, z + mdz);
+				delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation, x + mdx, mateY, z + mdz);
 				revealedFrame[id] = frame;
 				revealedDraws++;
 			}
@@ -211,20 +372,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			}
 		}
 
-		if (touchedSharedModel)
-		{
-			// Animated models share one buffer inside the game. Building the mates' models may have
-			// overwritten the drawn player's, which the game uses for its click test right after this
-			// call returns, so rebuild the drawn player's model to put it back.
-			try
-			{
-				drawn.getModel();
-			}
-			catch (RuntimeException e)
-			{
-				revealErrors++;
-			}
-		}
+		return touchedSharedModel;
 	}
 
 	/** Height difference between the ground at the real spot and at the drawn spot, or 0 if unknown. */

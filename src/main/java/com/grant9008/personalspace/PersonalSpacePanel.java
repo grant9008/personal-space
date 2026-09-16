@@ -60,12 +60,16 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private final PillGroup<Integer> perTilePills = new PillGroup<>(
 		new Integer[]{2, 3, 4, 5}, new String[]{"2", "3", "4", "5"});
-	private final PillGroup<PersonalSpaceConfig.Separation> spacingPills = new PillGroup<>(
-		PersonalSpaceConfig.Separation.values(), labels(PersonalSpaceConfig.Separation.values()));
+	private final PillGroup<Integer> spacingPills = new PillGroup<>(
+		new Integer[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_NORMAL, PersonalSpaceConfig.SPACING_WIDE},
+		new String[]{"Close", "Normal", "Wide"});
+	private final JSlider spacingSlider = new JSlider(PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING, PersonalSpaceConfig.SPACING_NORMAL);
+	private final JLabel spacingValue = new JLabel();
 	private final PillGroup<PersonalSpaceConfig.Arrangement> arrangementPills = new PillGroup<>(
-		PersonalSpaceConfig.Arrangement.values(), new String[]{"Auto", "Circle", "Side by side"});
+		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
+	private final PillGroup<PersonalSpaceConfig.Movement> movementPills = new PillGroup<>(
+		PersonalSpaceConfig.Movement.values(), labels(PersonalSpaceConfig.Movement.values()));
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
-	private final ToggleSwitch smoothSwitch = new ToggleSwitch();
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
@@ -150,10 +154,15 @@ final class PersonalSpacePanel extends PluginPanel
 	{
 		activeSwitch.setOn(config.active());
 		perTilePills.select(clamp(config.maxStack(), PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK));
-		spacingPills.select(config.separation());
+		int spacing = clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING);
+		if (!spacingSlider.getValueIsAdjusting() && spacingSlider.getValue() != spacing)
+		{
+			spacingSlider.setValue(spacing);
+		}
+		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
+		movementPills.select(config.movement());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
-		smoothSwitch.setOn(config.smoothing());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
 		int offset = clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET);
 		if (!testOffsetSlider.getValueIsAdjusting() && testOffsetSlider.getValue() != offset)
@@ -217,28 +226,45 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 4, 0);
-		p.add(sectionLabel("Spacing"), c);
+		JPanel spacingHeader = new JPanel(new BorderLayout());
+		spacingHeader.setOpaque(false);
+		spacingHeader.add(sectionLabel("Spacing"), BorderLayout.WEST);
+		spacingValue.setFont(FontManager.getRunescapeSmallFont());
+		spacingValue.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		spacingHeader.add(spacingValue, BorderLayout.EAST);
+		p.add(spacingHeader, c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		spacingPills.setToolTipText("How far apart players are drawn. Wide still stays inside the tile.");
+		spacingPills.setToolTipText("Quick picks. Fine-tune with the slider below.");
 		p.add(spacingPills, c);
+		c.gridy++;
+		c.insets = new Insets(2, 0, 0, 0);
+		spacingSlider.setOpaque(false);
+		spacingSlider.setFocusable(false);
+		spacingSlider.setToolTipText("Drag to set how far apart players are drawn. Changes show up live.");
+		spacingSlider.setPreferredSize(new Dimension(0, spacingSlider.getPreferredSize().height));
+		p.add(spacingSlider, c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 4, 0);
 		p.add(sectionLabel("Arrangement"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		arrangementPills.setToolTipText("Auto: players facing the same way (anvil, bank booth, range, fire) stand side by side; everyone else forms a circle.");
+		arrangementPills.setToolTipText("Smart: the crowd spreads into open space, stays out of booths, stalls, anvils and walls, and lines up at things people face. Circle: a simple ring on each tile.");
 		p.add(arrangementPills, c);
+
+		c.gridy++;
+		c.insets = new Insets(10, 0, 4, 0);
+		p.add(sectionLabel("Movement"), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		movementPills.setToolTipText("Walk: players take real steps into place. Glide: they slide. Instant: they appear in place.");
+		p.add(movementPills, c);
 
 		c.gridy++;
 		c.insets = new Insets(12, 0, 0, 0);
 		p.add(switchRow("Move my character too", includeMeSwitch,
 			"Off: you stay where you are and others step around you."), c);
-		c.gridy++;
-		c.insets = new Insets(6, 0, 0, 0);
-		p.add(switchRow("Smooth movement", smoothSwitch,
-			"Players glide into place instead of jumping."), c);
 		return p;
 	}
 
@@ -364,10 +390,24 @@ final class PersonalSpacePanel extends PluginPanel
 			setEverydayEnabled(on);
 		});
 		perTilePills.onSelect(n -> write(PersonalSpaceConfig.KEY_MAX_STACK, n));
-		spacingPills.onSelect(v -> write(PersonalSpaceConfig.KEY_SEPARATION, v));
+		spacingPills.onSelect(v ->
+		{
+			spacingSlider.setValue(v);
+			write(PersonalSpaceConfig.KEY_SPACING, v);
+		});
+		spacingSlider.addChangeListener(e ->
+		{
+			int v = spacingSlider.getValue();
+			showSpacing(v);
+			// Written while dragging too, so players move live as the slider moves.
+			if (v != config.spacing())
+			{
+				write(PersonalSpaceConfig.KEY_SPACING, v);
+			}
+		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
+		movementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_MOVEMENT, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
-		smoothSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMOOTHING, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
 		testOffsetSlider.addChangeListener(e ->
@@ -393,9 +433,10 @@ final class PersonalSpacePanel extends PluginPanel
 	{
 		perTilePills.setEnabled(enabled);
 		spacingPills.setEnabled(enabled);
+		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
+		movementPills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
-		smoothSwitch.setEnabled(enabled);
 	}
 
 	private void copyReport()
@@ -414,6 +455,13 @@ final class PersonalSpacePanel extends PluginPanel
 	}
 
 	// ---- small helpers -----------------------------------------------------------------
+
+	/** Show the spacing as a share of a tile, and light up the matching quick pick if there is one. */
+	private void showSpacing(int units)
+	{
+		spacingValue.setText(Math.round(units * 100f / 128) + "% of a tile");
+		spacingPills.selectOrNone(units);
+	}
 
 	private static GridBagConstraints column()
 	{
@@ -607,7 +655,7 @@ final class PersonalSpacePanel extends PluginPanel
 					@Override
 					public void mouseClicked(MouseEvent e)
 					{
-						if (!PillGroup.this.isEnabled() || index == selected)
+						if (!PillGroup.this.isEnabled())
 						{
 							return;
 						}
@@ -650,6 +698,13 @@ final class PersonalSpacePanel extends PluginPanel
 				}
 			}
 			restyle();
+		}
+
+		/** Like {@link #select}, but highlights nothing if the value isn't one of the buttons. */
+		void selectOrNone(T value)
+		{
+			selected = -1;
+			select(value);
 		}
 
 		@Override

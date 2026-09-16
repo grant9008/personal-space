@@ -5,8 +5,10 @@ draws one of them, so a busy bank, the Grand Exchange, an anvil or a cooking fir
 empty. Personal Space spreads everyone on a crowded tile out a little so every player and every
 outfit is visible.
 
-- Players facing the same way (at an anvil, bank booth, range, furnace or fire) stand **side by
-  side**. A crowd facing every which way forms a small **circle**.
+- **Smart** arrangement: the crowd spreads into open space, never into a bank booth, stall,
+  anvil or wall, gives room to people on neighbouring tiles, and lines up side by side at things
+  people face.
+- Players **walk** into place with their own walk animation (or glide, or appear instantly).
 - Purely cosmetic. Nobody's real position, clickbox, name, chat or minimap dot changes.
 - Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds and while you're in combat.
 - Never shows players the game itself keeps hidden.
@@ -20,10 +22,10 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar (three colo
 | --- | --- |
 | On/off switch | Spread out crowds, or show the game as normal. |
 | Players per tile | How many players on one tile get their own spot (2 to 5). |
-| Spacing | Close, Normal or Wide. Wide still stays inside the tile. |
-| Arrangement | **Auto** picks side by side or circle for each tile. Or force one. |
+| Spacing | Close, Normal or Wide, or drag the slider (up to more than a tile apart). Changes show live. |
+| Arrangement | **Smart** spreads the whole crowd around obstacles and neighbours. **Circle** is a simple ring per tile. |
+| Movement | **Walk** (real steps), **Glide** or **Instant**. |
 | Move my character too | Off: you stay put and others step around you. |
-| Smooth movement | Players glide into place instead of jumping. |
 | Troubleshooting | Test mode, live checks and a **Copy report** button for bug reports. |
 
 The status line at the top says what's happening: green is working, grey is waiting (for example
@@ -47,6 +49,7 @@ anywhere.
 ### Known limits
 
 - **Spell and emote graphics** (for example High Alchemy) still appear at the middle of the tile.
+- Players busy with an action (sitting, smithing) glide instead of walking, so their action isn't interrupted.
 - If **Entity Hider** hides every relevant player, the status may wrongly turn red.
 - Players past the "players per tile" limit stay hidden in the middle, as in the normal game.
 
@@ -61,7 +64,9 @@ src/main/java/com/grant9008/personalspace/
   PersonalSpacePlugin.java      plugin entry: safety rules, per-tick layout, sidebar updates
   SpreadingDrawCallbacks.java   sits in front of the renderer; draws players at their spots
   StackProbe.java               confirms players are ones the game is willing to draw
-  StackSpreader.java            layout: who goes where (circle or side by side)
+  StackSpreader.java            starting spots per tile (circle or side by side)
+  CrowdLayout.java              Smart arrangement: settles the whole crowd
+  CollisionTerrain.java         where a player can stand, from the game's walkability map
   StackRegistry.java            which players share each crowded tile
   StillnessTracker.java         "is this player standing still"
   OffsetTable.java              current offsets and smooth movement

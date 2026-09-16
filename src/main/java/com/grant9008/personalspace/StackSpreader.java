@@ -37,8 +37,8 @@ final class StackSpreader
 	/** How closely a group's facings must agree to count as "facing the same way" (about 25 degrees either side). */
 	static final double SAME_FACING = 0.9;
 
-	/** Furthest a player is placed from the tile centre along a line, in local units. A tile is 128, so this stays inside. */
-	static final int MAX_LINE_EXTENT = 56;
+	/** Furthest a player is placed from the tile centre along a line, in local units (two tiles). */
+	static final int MAX_LINE_EXTENT = 256;
 
 	/** One standing-still player on a tile. */
 	static final class Entry
@@ -139,7 +139,7 @@ final class StackSpreader
 			{
 				int[] off = line
 					? lineOffset(i, n, centreTaken, spacing, angle)
-					: ringOffset(i, n, spacing);
+					: ringOffset(i, n, ringRadius(n, centreTaken, spacing));
 				Entry e = movable.get(i);
 				out.add(new Placement(e.id, e.tile, off[0], off[1]));
 			}
@@ -222,6 +222,20 @@ final class StackSpreader
 			(int) Math.round(step * gap * acrossX),
 			(int) Math.round(step * gap * acrossZ)
 		};
+	}
+
+	/**
+	 * Ring radius that puts neighbours {@code spacing} apart, and also {@code spacing} away from
+	 * anyone standing in the middle.
+	 */
+	static int ringRadius(int count, boolean centreTaken, int spacing)
+	{
+		double r = count <= 1 ? spacing : spacing / (2 * Math.sin(Math.PI / count));
+		if (centreTaken)
+		{
+			r = Math.max(r, spacing);
+		}
+		return (int) Math.round(r);
 	}
 
 	/**

@@ -30,10 +30,12 @@ final class Snapshot
 	boolean active;
 	PersonalSpaceConfig.Arrangement arrangement = PersonalSpaceConfig.Arrangement.AUTO;
 	PersonalSpaceConfig.Mode mode = PersonalSpaceConfig.Mode.SPREAD;
-	PersonalSpaceConfig.Separation separation = PersonalSpaceConfig.Separation.MEDIUM;
+	int spacing = PersonalSpaceConfig.SPACING_NORMAL;
+	PersonalSpaceConfig.Movement movement = PersonalSpaceConfig.Movement.WALK;
 	int maxStack;
 	boolean includeLocal;
-	boolean smoothing;
+	/** Players drawn mid-step with their walk animation; total. */
+	long walkDraws;
 	int testOffset;
 
 	// safety

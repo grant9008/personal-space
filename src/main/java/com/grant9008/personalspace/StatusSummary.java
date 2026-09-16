@@ -164,10 +164,10 @@ final class StatusSummary
 		b.append("Settings: effect ").append(s.active ? "on" : "paused")
 			.append(", mode ").append(s.mode)
 			.append(", arrangement ").append(s.arrangement)
-			.append(", spacing ").append(s.separation)
+			.append(", spacing ").append(s.spacing)
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
-			.append(", smooth ").append(yesNo(s.smoothing))
+			.append(", movement ").append(s.movement)
 			.append(", test offset ").append(s.testOffset).append('\n');
 		b.append("Safety: ").append(s.gate.label).append('\n');
 		b.append("Renderer: ").append(s.renderer == null ? "none" : s.renderer)
@@ -179,6 +179,7 @@ final class StatusSummary
 			.append(", players in other calls (should be 0): ").append(s.playersInOtherCalls)
 			.append(", off-thread draws (should be 0): ").append(s.offThreadDraws)
 			.append(", reveal errors: ").append(s.revealErrors)
+			.append(", walk frames drawn: ").append(s.walkDraws)
 			.append(", held for confirmation: ").append(s.probeHeld)
 			.append(", never confirmed: ").append(s.probeGaveUp)
 			.append(", no draws sustained: ").append(yesNo(s.noPlayerDrawsSustained))

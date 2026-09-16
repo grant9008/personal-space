@@ -39,8 +39,9 @@ public class StackSpreaderTest
 		in.add(new StackSpreader.Entry(7, TILE_A, false));
 		in.add(new StackSpreader.Entry(3, TILE_A, false));
 		Map<Integer, int[]> out = byId(StackSpreader.place(in, true, 5, 32));
-		Assert.assertArrayEquals(new int[]{32, 0}, out.get(3));   // lower id takes slot 0 (east)
-		Assert.assertArrayEquals(new int[]{-32, 0}, out.get(7));
+		// Spacing is the distance between the two, so each sits half of it from the middle.
+		Assert.assertArrayEquals(new int[]{16, 0}, out.get(3));   // lower id takes slot 0 (east)
+		Assert.assertArrayEquals(new int[]{-16, 0}, out.get(7));
 	}
 
 	@Test
@@ -179,7 +180,20 @@ public class StackSpreaderTest
 	}
 
 	@Test
-	public void longLinesStayInsideTheTile()
+	public void ringNeighboursAreOneSpacingApart()
+	{
+		for (int n = 3; n <= 5; n++)
+		{
+			int r = StackSpreader.ringRadius(n, false, 60);
+			int[] a = StackSpreader.ringOffset(0, n, r);
+			int[] b = StackSpreader.ringOffset(1, n, r);
+			Assert.assertEquals("n=" + n, 60.0, Math.hypot(a[0] - b[0], a[1] - b[1]), 2.0);
+		}
+		Assert.assertEquals("someone in the middle keeps a full spacing away", 60, StackSpreader.ringRadius(5, true, 60));
+	}
+
+	@Test
+	public void longLinesAreCapped()
 	{
 		for (int n = 2; n <= 5; n++)
 		{
