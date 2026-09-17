@@ -409,7 +409,89 @@ public class CrowdPlannerTest
 	}
 
 	@Test
-	public void aSharedLineThatCantFitFallsBackToRows()
+	public void tooManyFishersForTheEdgeStandInTidyRowsBehindTheirOwnStretch()
+	{
+		// Four bank tiles, seven fishers each, water north, but only those four tiles of edge.
+		CrowdPlanner.Surroundings shortBank = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(tile) * 128 + dx;
+				return dz <= 0 && x >= 50 * 128 - 40 && x <= 53 * 128 + 40;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int t = 0; t < 4; t++)
+		{
+			for (int i = 0; i < 7; i++)
+			{
+				still.add(new StackSpreader.Entry(t * 10 + i + 1, StackRegistry.key(0, 50 + t, 50), false, NORTH));
+			}
+		}
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, shortBank);
+		Assert.assertEquals("everyone is shown", 28, plan.placements.size());
+		Map<Integer, int[]> at = drawnAt(plan);
+		int edge = 0;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertTrue("player " + p.id + " is on the land side", p.dz <= 0);
+			edge += p.dz == 0 ? 1 : 0;
+		}
+		Assert.assertTrue("the edge is filled first: " + edge, edge >= 9);
+		List<int[]> all = new ArrayList<>(at.values());
+		for (int a = 0; a < all.size(); a++)
+		{
+			for (int b = a + 1; b < all.size(); b++)
+			{
+				double gap = Math.hypot(all.get(a)[0] - all.get(b)[0], all.get(a)[1] - all.get(b)[1]);
+				Assert.assertTrue("two fishers only " + gap + " apart", gap >= 40);
+			}
+		}
+		// Within each row, the tiles keep their people in order along the bank.
+		for (int t = 0; t < 3; t++)
+		{
+			for (int i = 1; i <= 7; i++)
+			{
+				for (int k = 1; k <= 7; k++)
+				{
+					int[] mine = at.get(t * 10 + i);
+					int[] next = at.get((t + 1) * 10 + k);
+					if (mine[1] == next[1])
+					{
+						Assert.assertTrue("tile " + t + " passes tile " + (t + 1) + " in a row", mine[0] < next[0]);
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	public void aCrampedSharedLineNeverPutsPeopleOnTopOfEachOther()
 	{
 		// Walls a tile either side of the pair of tiles: not enough edge for ten people in one line.
 		CrowdPlanner.Surroundings cramped = new CrowdPlanner.Surroundings()
@@ -452,8 +534,108 @@ public class CrowdPlannerTest
 			still.add(new StackSpreader.Entry(20 + i, StackRegistry.key(0, 51, 50), false, NORTH));
 		}
 		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, cramped);
-		Assert.assertTrue(plan.tiles.get(StackRegistry.key(0, 50, 50)).shape.startsWith("counter row"));
-		Assert.assertFalse(plan.tiles.get(StackRegistry.key(0, 50, 50)).shape.contains("shared"));
+		List<int[]> all = new ArrayList<>(drawnAt(plan).values());
+		for (int a = 0; a < all.size(); a++)
+		{
+			for (int b = a + 1; b < all.size(); b++)
+			{
+				Assert.assertTrue("two people on top of each other",
+					Math.hypot(all.get(a)[0] - all.get(b)[0], all.get(a)[1] - all.get(b)[1]) >= 40);
+			}
+		}
+	}
+
+	/** Four bank tiles facing water to the north, open land along them. */
+	private static List<StackSpreader.Entry> bank(int[] perTile, int firstId)
+	{
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int id = firstId;
+		for (int t = 0; t < perTile.length; t++)
+		{
+			for (int i = 0; i < perTile[t]; i++)
+			{
+				still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 50 + t, 50), false, NORTH));
+			}
+		}
+		return still;
+	}
+
+	@Test
+	public void onASharedLineNobodyElseMovesWhenSomeoneArrivesOrLeaves()
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings open = surroundings(true, true, false);
+		List<StackSpreader.Entry> before = bank(new int[]{3, 4, 3, 4}, 1);
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			settled = spots(planner.plan(before, x -> true, 128, 10, true, false, t, open));
+		}
+		// Someone new joins the second tile.
+		List<StackSpreader.Entry> joined = new ArrayList<>(before);
+		joined.add(new StackSpreader.Entry(99, StackRegistry.key(0, 51, 50), false, NORTH));
+		Map<Integer, int[]> after = spots(planner.plan(joined, x -> true, 128, 10, true, false, 4, open));
+		for (Map.Entry<Integer, int[]> e : settled.entrySet())
+		{
+			Assert.assertArrayEquals("player " + e.getKey() + " moved when someone joined", e.getValue(), after.get(e.getKey()));
+		}
+		Assert.assertTrue(after.containsKey(99));
+		// Someone leaves the third tile.
+		List<StackSpreader.Entry> left = new ArrayList<>(joined);
+		left.removeIf(en -> en.id == 8);
+		Map<Integer, int[]> gone = spots(planner.plan(left, x -> true, 128, 10, true, false, 5, open));
+		for (Map.Entry<Integer, int[]> e : gone.entrySet())
+		{
+			Assert.assertArrayEquals("player " + e.getKey() + " moved when someone left", after.get(e.getKey()), e.getValue());
+		}
+	}
+
+	@Test
+	public void aLineStopsWhereTheWaterEnds()
+	{
+		// Water only in front of tiles 50 and 51; land past them.
+		CrowdPlanner.Surroundings shortWater = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				int x = StackRegistry.sceneX(tile);
+				return x == 50 || x == 51;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return facesObstacle(tile, angle);
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(bank(new int[]{10, 10}, 1), x -> true, 128, 10, true, false, 1, shortWater);
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (p.dz == 0)
+			{
+				int x = (int) Math.round((StackRegistry.sceneX(p.tile) * 128 + p.dx) / 128.0);
+				Assert.assertTrue("player " + p.id + " lined up at x=" + x + " with no water in front", x == 50 || x == 51);
+			}
+		}
 	}
 
 	@Test

@@ -103,6 +103,7 @@ final class CrowdPlanner
 
 	private final SlotBook slots = new SlotBook();
 	private final ShapeMemory shapes = new ShapeMemory();
+	private final LineBook lineBook = new LineBook();
 
 	/** The "Small groups stay close" setting: whether spacing grows with the size of the group. Set by the plugin each tick. */
 	boolean smallGroupsClose = true;
@@ -386,14 +387,15 @@ final class CrowdPlanner
 	}
 
 	/**
-	 * Give every counter or riverbank tile its spots. Neighbouring tiles along the same line share one
-	 * line between them, so a busy bank or fishing spot stands side by side all along the edge instead
-	 * of each tile squeezing its people into rows behind. A tile on its own keeps its own row.
+	 * Give every counter or riverbank tile its spots. A tile on its own keeps its own row.
+	 * Neighbouring tiles along the same edge become one shared line, laid out by {@link LineBook};
+	 * those tiles are taken out of {@code movableByTile} and returned.
 	 */
-	private static void layOutStraightRows(List<Straight> rows, Map<Long, List<StackSpreader.Entry>> byTile, int capacity,
-		Surroundings around, Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile,
+	private List<LineBook.Line> layOutStraightRows(List<Straight> rows, Map<Long, List<StackSpreader.Entry>> byTile, int capacity,
+		Map<Long, List<Integer>> movableByTile, Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile,
 		Map<Long, Integer> spacingByTile, Map<Long, Integer> blockedByTile)
 	{
+		List<LineBook.Line> shared = new ArrayList<>();
 		Map<String, List<Straight>> lines = new LinkedHashMap<>();
 		for (Straight r : rows)
 		{
@@ -410,7 +412,7 @@ final class CrowdPlanner
 					continue;
 				}
 				List<Straight> chain = line.subList(start, i);
-				if (chain.size() < 2 || !shareLine(chain, byTile, around, spotsByTile, shapeByTile, spacingByTile, blockedByTile))
+				if (chain.size() < 2)
 				{
 					for (Straight r : chain)
 					{
@@ -425,115 +427,29 @@ final class CrowdPlanner
 						blockedByTile.put(r.tile, r.blocked[0]);
 					}
 				}
+				else
+				{
+					int spacing = Integer.MAX_VALUE;
+					for (Straight r : chain)
+					{
+						spacing = Math.min(spacing, r.spacing);
+					}
+					List<LineBook.Member> members = new ArrayList<>(chain.size());
+					for (Straight r : chain)
+					{
+						members.add(new LineBook.Member(r.tile, r.along, movableByTile.remove(r.tile), r.middleTaken, capacity));
+						shapeByTile.put(r.tile, "counter row shared by " + chain.size() + " tiles");
+						spacingByTile.put(r.tile, spacing);
+					}
+					Straight first = chain.get(0);
+					Straight last = chain.get(chain.size() - 1);
+					shared.add(new LineBook.Line(first.plane, first.sideX, first.sideY, first.across, first.angle, spacing, members,
+						first.centre() - lineEnd(byTile, first, -1, spacing), last.centre() + lineEnd(byTile, last, 1, spacing)));
+				}
 				start = i;
 			}
 		}
-	}
-
-	/**
-	 * Lay neighbouring tiles out along one shared line: spots every spacing along it, on a grid fixed
-	 * to the map so they don't slide about as people come and go, reaching past the ends onto free
-	 * edge. Each tile gets a run of spots in order along the line, as close to its own middle as the
-	 * others allow, so nobody crosses over anyone else. Returns false (and changes nothing) if the line
-	 * can't fit everyone.
-	 */
-	private static boolean shareLine(List<Straight> chain, Map<Long, List<StackSpreader.Entry>> byTile, Surroundings around,
-		Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile, Map<Long, Integer> spacingByTile,
-		Map<Long, Integer> blockedByTile)
-	{
-		int s = Integer.MAX_VALUE;
-		int needed = 0;
-		for (Straight r : chain)
-		{
-			s = Math.min(s, r.spacing);
-			needed += r.wanted;
-		}
-		Straight first = chain.get(0);
-		Straight last = chain.get(chain.size() - 1);
-		double lo = first.centre() - lineEnd(byTile, first, -1, s);
-		double hi = last.centre() + lineEnd(byTile, last, 1, s);
-
-		List<Double> points = new ArrayList<>();
-		List<Double> rejected = new ArrayList<>();
-		for (long j = (long) Math.ceil(lo / s); j * s <= hi; j++)
-		{
-			double p = j * (double) s;
-			Straight owner = first;
-			for (Straight r : chain)
-			{
-				if (Math.abs(p - r.centre()) < Math.abs(p - owner.centre()))
-				{
-					owner = r;
-				}
-			}
-			boolean middleInUse = false;
-			for (Straight r : chain)
-			{
-				middleInUse |= r.middleTaken && Math.abs(p - r.centre()) < 0.75 * s;
-			}
-			double d = p - owner.centre();
-			if (middleInUse || !around.canStand(owner.tile, (int) Math.round(owner.sideX * d), (int) Math.round(owner.sideY * d)))
-			{
-				rejected.add(p);
-				continue;
-			}
-			points.add(p);
-		}
-		if (points.size() < needed)
-		{
-			return false;
-		}
-
-		// The run of spots that keeps everyone closest to their own tile.
-		int bestStart = 0;
-		double bestCost = Double.MAX_VALUE;
-		for (int w = 0; w + needed <= points.size(); w++)
-		{
-			double cost = 0;
-			int index = w;
-			for (Straight r : chain)
-			{
-				double sum = 0;
-				for (int k = 0; k < r.wanted; k++)
-				{
-					sum += points.get(index + k);
-				}
-				cost += Math.abs(sum / r.wanted - r.centre());
-				index += r.wanted;
-			}
-			if (cost < bestCost - 1e-9)
-			{
-				bestCost = cost;
-				bestStart = w;
-			}
-		}
-
-		double from = points.get(bestStart);
-		double to = points.get(bestStart + needed - 1);
-		int blocked = 0;
-		for (double p : rejected)
-		{
-			blocked += p > from && p < to ? 1 : 0;
-		}
-		int index = bestStart;
-		for (Straight r : chain)
-		{
-			List<Double> own = new ArrayList<>(points.subList(index, index + r.wanted));
-			index += r.wanted;
-			double centre = r.centre();
-			own.sort(Comparator.<Double>comparingDouble(p -> Math.abs(p - centre)).thenComparingDouble(p -> p));
-			List<int[]> spots = new ArrayList<>(own.size());
-			for (double p : own)
-			{
-				double d = p - centre;
-				spots.add(new int[]{(int) Math.round(r.sideX * d), (int) Math.round(r.sideY * d)});
-			}
-			spotsByTile.put(r.tile, spots);
-			shapeByTile.put(r.tile, "counter row shared by " + chain.size() + " tiles");
-			spacingByTile.put(r.tile, s);
-			blockedByTile.put(r.tile, blocked);
-		}
-		return true;
+		return shared;
 	}
 
 	/** How far a shared line may reach past its end: halfway to the next row along it, or three tiles. */
@@ -775,11 +691,40 @@ final class CrowdPlanner
 			blockedByTile.put(tile, blocked[0]);
 		}
 
-		layOutStraightRows(pendingStraight, byTile, capacity, around, spotsByTile, shapeByTile, spacingByTile, blockedByTile);
+		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
+			spacingByTile, blockedByTile);
 
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 
 		Set<Integer> placed = new HashSet<>();
+		Map<Long, LineBook.LineReport> lineReports = new HashMap<>();
+		List<StackSpreader.Placement> onLines = lineBook.update(shared, tick, new LineBook.Terrain()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return around.canStand(tile, dx, dz);
+			}
+
+			@Override
+			public boolean facesEdge(long tile, double angle)
+			{
+				return around.facesObstacle(tile, angle);
+			}
+		}, lineReports);
+		Map<Long, Integer> placedOnTile = new HashMap<>();
+		for (StackSpreader.Placement p : onLines)
+		{
+			plan.placements.add(p);
+			placed.add(p.id);
+			placedOnTile.merge(p.tile, 1, Integer::sum);
+		}
+		for (Map.Entry<Long, LineBook.LineReport> e : lineReports.entrySet())
+		{
+			long tile = e.getKey();
+			plan.tiles.put(tile, new TileReport(shapeByTile.get(tile), spacingByTile.get(tile), shownByTile.get(tile),
+				placedOnTile.getOrDefault(tile, 0), e.getValue().placed, e.getValue().blocked));
+		}
 		for (Map.Entry<Long, Map<Integer, Integer>> e : assigned.entrySet())
 		{
 			long tile = e.getKey();
@@ -825,12 +770,13 @@ final class CrowdPlanner
 	/** Times a player with a spot was moved to a different spot to fill a gap; total. */
 	long spotMoves()
 	{
-		return slots.moves;
+		return slots.moves + lineBook.moves;
 	}
 
 	void clear()
 	{
 		slots.clear();
+		lineBook.clear();
 		shapes.clear();
 		previousSizes.clear();
 		currentSizes.clear();
