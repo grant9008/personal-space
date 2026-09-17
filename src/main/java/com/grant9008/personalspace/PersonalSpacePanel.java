@@ -287,8 +287,8 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
-		card.add(switchRow("Small groups stay close", smallGroupsSwitch,
-			"On: two or three players stand close together and big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot."), c);
+		card.add(switchRow("Auto-space small groups", smallGroupsSwitch,
+			"On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);

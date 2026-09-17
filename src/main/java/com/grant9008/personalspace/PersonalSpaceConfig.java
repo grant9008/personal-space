@@ -143,7 +143,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_SPACING,
 		name = "Spacing",
-		description = "How far apart players are drawn, in game units (128 is one tile). With 'Small groups stay close' on, this is for a big crowd and smaller groups stand closer.",
+		description = "How far apart players are drawn, in game units (128 is one tile). With 'Auto-space small groups' on, this is for a big crowd and groups of 2 or 3 stand closer.",
 		position = 2
 	)
 	default int spacing()
@@ -176,8 +176,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_SMALL_GROUPS_CLOSE,
-		name = "Small groups stay close",
-		description = "On: two or three players on a tile stand close together and only big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot.",
+		name = "Auto-space small groups",
+		description = "On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos.",
 		position = 5
 	)
 	default boolean smallGroupsClose()

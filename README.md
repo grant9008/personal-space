@@ -12,9 +12,11 @@ turns out to be four friends hanging out.
 
 ![Before and after: one player turns out to be three](docs/photos/trio.jpg)
 
+![A group of three in each pose: off, natural, angled, facing, then facing close and wide](docs/photos/poses.jpg)
+
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-panel.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-settings.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -71,7 +73,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. Bank counters, fires and anvils stay closer on their own. Changes show live. |
 | Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
-| Small groups stay close | On: two or three players on a tile stand close together and only big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot. |
+| Auto-space small groups | On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn it off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos. |
 | Move my character too | Off: you stay put and others step around you. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
 
