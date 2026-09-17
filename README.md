@@ -8,8 +8,6 @@ turns out to be four friends hanging out.
 
 ![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
 
-![Before and after: one player turns out to be two](docs/photos/pair.jpg)
-
 ![Before and after: two players facing each other](docs/photos/pair-facing.jpg)
 
 ![Two players on one tile in each pose: off, angled, facing, facing close](docs/photos/pair-poses.jpg)
