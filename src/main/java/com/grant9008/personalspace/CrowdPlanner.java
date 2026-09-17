@@ -531,7 +531,8 @@ final class CrowdPlanner
 					Straight first = chain.get(0);
 					Straight last = chain.get(chain.size() - 1);
 					shared.add(new LineBook.Line(first.plane, first.sideX, first.sideY, first.across, first.angle, spacing, members,
-						first.centre() - lineEnd(byTile, first, -1, spacing), last.centre() + lineEnd(byTile, last, 1, spacing)));
+						first.centre() - lineEnd(byTile, loneId, first, -1, spacing),
+						last.centre() + lineEnd(byTile, loneId, last, 1, spacing)));
 				}
 				start = i;
 			}
@@ -540,14 +541,19 @@ final class CrowdPlanner
 	}
 
 	/** How far a shared line may reach past its end: halfway to the next row along it, or three tiles. */
-	private static double lineEnd(Map<Long, List<StackSpreader.Entry>> byTile, Straight end, int direction, int spacing)
+	private static double lineEnd(Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, Integer> loneId, Straight end,
+		int direction, int spacing)
 	{
 		for (int k = 1; k <= LINE_LOOKOUT; k++)
 		{
-			List<StackSpreader.Entry> there = byTile.get(end.keyAt(end.along + direction * k));
+			long key = end.keyAt(end.along + direction * k);
+			List<StackSpreader.Entry> there = byTile.get(key);
 			if (there != null)
 			{
-				return reachTowards(there.size(), k, spacing);
+				// Someone standing alone who has joined a line of their own stands out on that line,
+				// not in the middle of their tile, so leave them the room a pair needs. Two lines
+				// either side of them would otherwise both reach for the same ground.
+				return reachTowards(loneId.containsKey(key) ? 2 : there.size(), k, spacing);
 			}
 		}
 		return StackSpreader.MAX_LINE_EXTENT;

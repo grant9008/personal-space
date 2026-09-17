@@ -152,6 +152,25 @@ public class SlotBookTest
 	}
 
 	@Test
+	public void youWalkOnceToTheFrontEvenWhenAMiddleSpotIsFree()
+	{
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		step(book, 1, 10, 20, 30, 40, 99);
+		// 20 and 30 leave: their spots are held for a while, then free.
+		Map<Integer, Integer> before = null;
+		for (int t = 2; t <= 1 + SlotBook.HOLD_TICKS + 2; t++)
+		{
+			before = step(book, t, 10, 40, 99);
+		}
+		Assert.assertEquals("you end up at the front", 0, (int) before.get(99));
+		for (int t = 1; t <= 4; t++)
+		{
+			Assert.assertEquals("and then nobody moves", before, step(book, 20 + t, 10, 40, 99));
+		}
+	}
+
+	@Test
 	public void clearForgetsEverything()
 	{
 		SlotBook book = new SlotBook();

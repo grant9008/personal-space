@@ -8,13 +8,13 @@ turns out to be four friends hanging out.
 
 ![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
 
-![Before and after round a bonfire](docs/photos/bonfire.jpg)
+![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
+
+![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
 
 ![Before and after: two players facing each other](docs/photos/pair-facing.jpg)
 
-![Two players on one tile in each pose: off, angled, facing, facing close](docs/photos/pair-poses.jpg)
-
-![A group of three in each pose: off, natural, angled, facing, then facing close and wide](docs/photos/poses.jpg)
+![Before and after round a bonfire](docs/photos/bonfire.jpg)
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
@@ -54,8 +54,6 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ## In game
 
-![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
-
 ![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
 
 ![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithers.jpg)
@@ -66,9 +64,15 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after at a fishing spot with a bonfire behind it](docs/photos/fishing-and-bonfire.jpg)
 
-![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
-
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
+
+### Posing a pair or a group
+
+![Two players on one tile in each pose: off, angled, facing, facing close](docs/photos/pair-poses.jpg)
+
+![A group of three in each pose: off, natural, angled, facing, then facing close and wide](docs/photos/poses.jpg)
+
+### While you're fighting
 
 ![Fighting with the plugin on: the Pause while I am fighting switch off, then on](docs/photos/combat-pause-switch.jpg)
 

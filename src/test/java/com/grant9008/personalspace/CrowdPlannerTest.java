@@ -845,6 +845,54 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void twoCounterRowsEitherSideOfALonePlayerDontMeetInTheGap()
+	{
+		// Two busy stretches of counter with one person standing alone at the end of the first one and
+		// an empty tile between the stretches. The lone player stands out on their neighbours' row, so
+		// the other row must not reach across them: everybody's spot is their own.
+		CrowdPlanner.Surroundings counters = surroundings(true, true, false);
+		for (int gap = 1; gap <= 2; gap++)
+		{
+			for (int spacing : new int[]{42, 72, 128, 256})
+			{
+				int[][] tiles = {{53, 2}, {54, 7}, {55, 1}, {55 + gap + 1, 6}, {56 + gap + 1, 6}, {57 + gap + 1, 2}};
+				List<StackSpreader.Entry> still = new ArrayList<>();
+				int id = 1;
+				for (int[] tile : tiles)
+				{
+					for (int n = 0; n < tile[1]; n++)
+					{
+						still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, tile[0], 50), false, NORTH));
+					}
+				}
+				CrowdPlanner planner = new CrowdPlanner();
+				Map<Integer, int[]> at = new HashMap<>();
+				for (int t = 1; t <= 3; t++)
+				{
+					at.clear();
+					for (StackSpreader.Placement p : planner.plan(still, x -> true, spacing, 10, true, false, t, counters).placements)
+					{
+						at.put(p.id, new int[]{StackRegistry.sceneX(p.tile) * 128 + p.dx, p.dz});
+					}
+				}
+				for (Map.Entry<Integer, int[]> a : at.entrySet())
+				{
+					for (Map.Entry<Integer, int[]> b : at.entrySet())
+					{
+						if (a.getKey() >= b.getKey())
+						{
+							continue;
+						}
+						double away = Math.hypot(a.getValue()[0] - b.getValue()[0], a.getValue()[1] - b.getValue()[1]);
+						Assert.assertTrue("gap " + gap + " at " + spacing + ": players " + a.getKey() + " and "
+							+ b.getKey() + " only " + away + " apart", away >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+					}
+				}
+			}
+		}
+	}
+
+	@Test
 	public void aLineStopsWhereTheWaterEnds()
 	{
 		// Water only in front of tiles 50 and 51; land past them.

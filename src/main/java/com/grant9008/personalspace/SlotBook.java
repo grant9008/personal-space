@@ -196,6 +196,7 @@ final class SlotBook
 			// one, else whoever has the front spot takes yours. Not while a better spot is being held
 			// for someone: they may come back, and a swap now would only be undone later.
 			Integer mine = t.slotOf.get(localId);
+			boolean waiting = false;
 			if (mine != null)
 			{
 				sawLocal = true;
@@ -214,17 +215,19 @@ final class SlotBook
 						free = s;
 					}
 				}
+				waiting = mine > 0 && tick - localSince < LOCAL_SWAP_DELAY;
 				if (mine > 0 && !holdAhead && tick - localSince >= LOCAL_SWAP_DELAY)
 				{
-					int target = free >= 0 ? free : 0;
-					Integer other = t.occupant.get(target);
+					// Straight to the front in one step. Whoever was there takes the best free spot if
+					// there is one, else yours, so neither of you is moved again next tick.
+					Integer other = t.occupant.get(0);
 					t.vacate(localId, tick, false);
 					if (other != null)
 					{
 						t.vacate(other, tick, false);
-						t.assign(other, mine);
+						t.assign(other, free > 0 ? free : mine);
 					}
-					t.assign(localId, target);
+					t.assign(localId, 0);
 					moves++;
 				}
 			}
@@ -238,6 +241,12 @@ final class SlotBook
 				int worst = -1;
 				for (int slot : t.occupant.keySet())
 				{
+					// Not you, while you're waiting out the moment before you take the front spot:
+					// filling a gap now would only mean walking twice.
+					if (waiting && t.occupant.get(slot) == localId)
+					{
+						continue;
+					}
 					if (slot > s && slot > worst)
 					{
 						worst = slot;
