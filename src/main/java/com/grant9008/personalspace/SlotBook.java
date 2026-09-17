@@ -93,6 +93,15 @@ final class SlotBook
 	int localId = -1;
 
 	/**
+	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
+	 * seconds. Stopping for a moment on your way past doesn't push anyone around.
+	 */
+	static final int LOCAL_SWAP_DELAY = 4;
+
+	private long localTile = Long.MIN_VALUE;
+	private int localSince;
+
+	/**
 	 * Work out this tick's spots.
 	 *
 	 * @param present  for each tile, the players standing there who may be moved
@@ -121,6 +130,7 @@ final class SlotBook
 			}
 		}
 
+		boolean sawLocal = false;
 		Map<Long, Map<Integer, Integer>> out = new HashMap<>();
 		for (Map.Entry<Long, List<Integer>> e : present.entrySet())
 		{
@@ -182,26 +192,40 @@ final class SlotBook
 					}
 				}
 			}
-			// You get the best spot going; whoever has it takes yours.
+			// Once you've stood here a moment you get the best spot going: a free one if there is
+			// one, else whoever has the front spot takes yours. Not while a better spot is being held
+			// for someone: they may come back, and a swap now would only be undone later.
 			Integer mine = t.slotOf.get(localId);
 			if (mine != null)
 			{
+				sawLocal = true;
+				if (localTile != e.getKey())
+				{
+					localTile = e.getKey();
+					localSince = tick;
+				}
+				boolean holdAhead = false;
+				int free = -1;
 				for (int s = 0; s < mine; s++)
 				{
-					if (t.held(s, tick))
+					holdAhead |= t.held(s, tick);
+					if (free < 0 && !t.occupant.containsKey(s))
 					{
-						continue;
+						free = s;
 					}
-					Integer other = t.occupant.get(s);
+				}
+				if (mine > 0 && !holdAhead && tick - localSince >= LOCAL_SWAP_DELAY)
+				{
+					int target = free >= 0 ? free : 0;
+					Integer other = t.occupant.get(target);
 					t.vacate(localId, tick, false);
 					if (other != null)
 					{
 						t.vacate(other, tick, false);
 						t.assign(other, mine);
 					}
-					t.assign(localId, s);
+					t.assign(localId, target);
 					moves++;
-					break;
 				}
 			}
 			// Fill gaps from the back: the player in the worst spot moves into the best free one.
@@ -230,6 +254,10 @@ final class SlotBook
 			}
 
 			out.put(e.getKey(), new HashMap<>(t.slotOf));
+		}
+		if (!sawLocal)
+		{
+			localTile = Long.MIN_VALUE;
 		}
 		return out;
 	}

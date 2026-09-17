@@ -637,7 +637,11 @@ public class CrowdPlannerTest
 		}
 		List<StackSpreader.Entry> withYou = new ArrayList<>(others);
 		withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
-		Map<Integer, int[]> after = spots(planner.plan(withYou, x -> true, 128, 10, true, true, 4, shortBank));
+		Map<Integer, int[]> after = null;
+		for (int t = 4; t <= 4 + SlotBook.LOCAL_SWAP_DELAY; t++)
+		{
+			after = spots(planner.plan(withYou, x -> true, 128, 10, true, true, t, shortBank));
+		}
 		Assert.assertEquals("you stand at the water's edge", 0, after.get(99)[1]);
 		int moved = 0;
 		for (Map.Entry<Integer, int[]> e : before.entrySet())
@@ -645,7 +649,7 @@ public class CrowdPlannerTest
 			moved += java.util.Arrays.equals(e.getValue(), after.get(e.getKey())) ? 0 : 1;
 		}
 		Assert.assertEquals("only the person who swapped with you moved", 1, moved);
-		Map<Integer, int[]> later = spots(planner.plan(withYou, x -> true, 128, 10, true, true, 5, shortBank));
+		Map<Integer, int[]> later = spots(planner.plan(withYou, x -> true, 128, 10, true, true, 30, shortBank));
 		for (Map.Entry<Integer, int[]> e : after.entrySet())
 		{
 			Assert.assertArrayEquals("player " + e.getKey() + " moved again", e.getValue(), later.get(e.getKey()));
@@ -675,6 +679,49 @@ public class CrowdPlannerTest
 				Assert.assertArrayEquals("tick " + t + ": player " + e.getKey() + " moved", settled.get(e.getKey()), e.getValue());
 			}
 			Assert.assertTrue("the fisher left alone keeps their place in the line", now.containsKey(11));
+		}
+	}
+
+	@Test
+	public void someoneStoppingBesideOneBusyBankTileDoesNotReshuffleIt()
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings open = surroundings(true, true, false);
+		List<StackSpreader.Entry> alone = bank(new int[]{4}, 1);
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			settled = spots(planner.plan(alone, x -> true, 128, 10, true, false, t, open));
+		}
+		List<StackSpreader.Entry> withPasser = new ArrayList<>(alone);
+		withPasser.add(new StackSpreader.Entry(50, StackRegistry.key(0, 51, 50), false, NORTH));
+		for (int t = 4; t <= 12; t++)
+		{
+			Map<Integer, int[]> now = spots(planner.plan(t < 9 ? withPasser : alone, x -> true, 128, 10, true, false, t, open));
+			for (Map.Entry<Integer, int[]> e : settled.entrySet())
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + e.getKey() + " moved", e.getValue(), now.get(e.getKey()));
+			}
+		}
+	}
+
+	@Test
+	public void aTileStaysOnItsLineWhenTheTileBesideItEmpties()
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings open = surroundings(true, true, false);
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			settled = spots(planner.plan(bank(new int[]{5, 2}, 1), x -> true, 128, 10, true, false, t, open));
+		}
+		for (int t = 4; t <= 20; t++)
+		{
+			Map<Integer, int[]> now = spots(planner.plan(bank(new int[]{5}, 1), x -> true, 128, 10, true, false, t, open));
+			for (int id = 1; id <= 5; id++)
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + id + " moved", settled.get(id), now.get(id));
+			}
 		}
 	}
 

@@ -121,6 +121,10 @@ final class CrowdPlanner
 	private Map<Long, Double> previousMostFaced = new HashMap<>();
 	private Map<Long, Double> currentMostFaced = new HashMap<>();
 
+	/** Tiles laid out on a shared line, last tick and this. A tile on a line stays on it while it's spread. */
+	private Set<Long> previousLineTiles = new HashSet<>();
+	private Set<Long> currentLineTiles = new HashSet<>();
+
 	/** Directions a row can face, straight ones first so a bank counter wins a tie with a diagonal. */
 	private static final int[] EIGHTHS = {0, 2, 4, 6, 1, 3, 5, 7};
 
@@ -287,10 +291,10 @@ final class CrowdPlanner
 	{
 		for (int k = 1; k <= LINE_LOOKOUT; k++)
 		{
-			if (byTile.containsKey(StackRegistry.key(plane, sceneX + k * sideX, sceneY + k * sideY)))
+			List<StackSpreader.Entry> there = byTile.get(StackRegistry.key(plane, sceneX + k * sideX, sceneY + k * sideY));
+			if (there != null)
 			{
-				// Halfway to them, less half a spacing, so their row can reach halfway back.
-				return k * HALF_TILE - spacing / 2.0;
+				return reachTowards(there.size(), k, spacing);
 			}
 		}
 		return Double.MAX_VALUE;
@@ -329,6 +333,18 @@ final class CrowdPlanner
 		}
 		blocked[0] = bestBlocked;
 		return best;
+	}
+
+	/**
+	 * How far a row may reach towards a tile {@code tilesAway} along the edge with {@code people} on
+	 * it. Someone alone stays in the middle of their tile, so the row only keeps a spacing clear of
+	 * them. A group spreads into a row of its own, so the two rows meet halfway.
+	 */
+	private static double reachTowards(int people, int tilesAway, int spacing)
+	{
+		return people == 1
+			? Math.max(0, tilesAway * 2.0 * HALF_TILE - spacing)
+			: Math.max(0, tilesAway * HALF_TILE - spacing / 2.0);
 	}
 
 	/** How many tiles along a counter or bank to look for someone else's row. */
@@ -451,12 +467,18 @@ final class CrowdPlanner
 					continue;
 				}
 				List<Straight> chain = line.subList(start, i);
+				// A shared line needs two busy tiles side by side to start. Once a tile is on a line it
+				// stays on it, even if its neighbour empties, so its people keep their places; and one
+				// busy tile isn't re-laid as a line just because someone stops beside it for a moment.
 				int real = 0;
+				boolean wasLine = false;
 				for (Straight r : chain)
 				{
-					real += loneId.containsKey(r.tile) ? 0 : 1;
+					boolean lone = loneId.containsKey(r.tile);
+					real += lone ? 0 : 1;
+					wasLine |= !lone && previousLineTiles.contains(r.tile);
 				}
-				if (chain.size() < 2 || real == 0)
+				if (real == 0 || (real < 2 && !wasLine))
 				{
 					for (Straight r : chain)
 					{
@@ -499,6 +521,10 @@ final class CrowdPlanner
 							shownByTile.put(r.tile, 1);
 						}
 						members.add(new LineBook.Member(r.tile, r.along, ids, r.middleTaken, capacity));
+						if (lone == null)
+						{
+							currentLineTiles.add(r.tile);
+						}
 						shapeByTile.put(r.tile, "counter row shared by " + chain.size() + " tiles");
 						spacingByTile.put(r.tile, spacing);
 					}
@@ -518,9 +544,10 @@ final class CrowdPlanner
 	{
 		for (int k = 1; k <= LINE_LOOKOUT; k++)
 		{
-			if (byTile.containsKey(end.keyAt(end.along + direction * k)))
+			List<StackSpreader.Entry> there = byTile.get(end.keyAt(end.along + direction * k));
+			if (there != null)
 			{
-				return Math.max(0, k * HALF_TILE - spacing / 2.0);
+				return reachTowards(there.size(), k, spacing);
 			}
 		}
 		return StackSpreader.MAX_LINE_EXTENT;
@@ -584,6 +611,8 @@ final class CrowdPlanner
 		currentSizes = new HashMap<>();
 		previousMostFaced = currentMostFaced;
 		currentMostFaced = new HashMap<>();
+		previousLineTiles = currentLineTiles;
+		currentLineTiles = new HashSet<>();
 		Map<Long, List<Integer>> movableByTile = new HashMap<>();
 		Map<Long, List<int[]>> spotsByTile = new HashMap<>();
 		Map<Long, String> shapeByTile = new HashMap<>();
@@ -898,5 +927,7 @@ final class CrowdPlanner
 		currentSizes.clear();
 		previousMostFaced.clear();
 		currentMostFaced.clear();
+		previousLineTiles.clear();
+		currentLineTiles.clear();
 	}
 }

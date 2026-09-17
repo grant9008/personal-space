@@ -181,12 +181,18 @@ final class LineBook
 	/** Diagnostics: people who stepped forward into a free spot at the edge; total. */
 	long moves;
 
+	private int tick;
+
 	/**
 	 * Your own player's id when your character may be moved, else -1. If you end up in a row behind
 	 * while someone from your tile stands at the edge, you swap with them, once: what you're doing
 	 * (fishing, banking) should look right on your own screen.
 	 */
 	int localId = -1;
+
+	private long localTile = Long.MIN_VALUE;
+	private int localSince;
+	private boolean sawLocal;
 
 	/**
 	 * Work out this tick's spots on every shared line.
@@ -196,6 +202,8 @@ final class LineBook
 	 */
 	List<StackSpreader.Placement> update(List<Line> lines, int tick, Terrain terrain, Map<Long, LineReport> reports)
 	{
+		sawLocal = false;
+		this.tick = tick;
 		// Who is where this tick.
 		Map<Integer, Member> memberOf = new HashMap<>();
 		Map<Integer, Line> lineOf = new HashMap<>();
@@ -249,6 +257,10 @@ final class LineBook
 		for (Line line : lines)
 		{
 			layOut(line, terrain, reports, out);
+		}
+		if (!sawLocal)
+		{
+			localTile = Long.MIN_VALUE;
 		}
 		return out;
 	}
@@ -385,10 +397,26 @@ final class LineBook
 			}
 		}
 
-		// You get a place at the edge if anyone from your tile has one: swap with whoever of them
-		// stands nearest your tile's middle.
+		// Once you've stood here a moment, you get a place at the edge if anyone from your tile has
+		// one: swap with whoever of them stands nearest your tile's middle. Not while an edge spot is
+		// being held for someone from your tile: when that hold ends you step forward into it instead,
+		// and nobody else has to move.
 		Spot mine = spotOf.get(localId);
-		if (mine != null && mine.line.equals(key) && mine.row > 0)
+		if (mine != null && mine.line.equals(key))
+		{
+			sawLocal = true;
+			if (localTile != mine.tile)
+			{
+				localTile = mine.tile;
+				localSince = tick;
+			}
+		}
+		boolean edgeHeld = false;
+		for (Spot spot : held.values())
+		{
+			edgeHeld |= mine != null && spot.line.equals(key) && spot.row == 0 && spot.tile == mine.tile;
+		}
+		if (mine != null && mine.line.equals(key) && mine.row > 0 && !edgeHeld && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
 		{
 			for (Member m : members)
 			{
@@ -424,26 +452,34 @@ final class LineBook
 
 		// One person a tick steps forward into a free spot at the edge in their own stretch.
 		stepForward:
-		for (int i = 0; i < members.size(); i++)
+		for (int pass = 0; pass < 2; pass++)
 		{
-			for (int id : members.get(i).ids)
+			for (int i = 0; i < members.size(); i++)
 			{
-				Spot spot = spotOf.get(id);
-				if (spot == null || spot.row == 0)
+				for (int id : members.get(i).ids)
 				{
-					continue;
+					// You first, then everyone else in order along the line.
+					if ((pass == 0) != (id == localId))
+					{
+						continue;
+					}
+					Spot spot = spotOf.get(id);
+					if (spot == null || spot.row == 0)
+					{
+						continue;
+					}
+					taken.remove(spot.point());
+					String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, taken, 0);
+					if (best != null && best.startsWith("0/"))
+					{
+						Spot moved = new Spot(key, 0, Long.parseLong(best.split("/")[1]), spot.tile);
+						spotOf.put(id, moved);
+						taken.add(moved.point());
+						moves++;
+						break stepForward;
+					}
+					taken.add(spot.point());
 				}
-				taken.remove(spot.point());
-				String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, taken, 0);
-				if (best != null && best.startsWith("0/"))
-				{
-					Spot moved = new Spot(key, 0, Long.parseLong(best.split("/")[1]), spot.tile);
-					spotOf.put(id, moved);
-					taken.add(moved.point());
-					moves++;
-					break stepForward;
-				}
-				taken.add(spot.point());
 			}
 		}
 
@@ -622,6 +658,7 @@ final class LineBook
 
 	void clear()
 	{
+		localTile = Long.MIN_VALUE;
 		spotOf.clear();
 		held.clear();
 		heldUntil.clear();

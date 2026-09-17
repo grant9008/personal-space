@@ -70,7 +70,7 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 
-![Fighting with the pause switch off and on](docs/photos/combat-switch.jpg)
+![Fighting with the plugin on: the Pause while I am fighting switch off, then on](docs/photos/combat-pause-switch.jpg)
 
 ## Using it
 

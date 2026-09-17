@@ -98,15 +98,57 @@ public class SlotBookTest
 		SlotBook book = new SlotBook();
 		book.localId = 99;
 		Map<Integer, Integer> before = step(book, 1, 10, 20, 30);
-		Map<Integer, Integer> after = step(book, 2, 10, 20, 30, 99);
-		Assert.assertEquals("you get the best spot", 0, (int) after.get(99));
+		Map<Integer, Integer> arrived = step(book, 2, 10, 20, 30, 99);
+		Assert.assertEquals("at first you take the next free spot and nobody moves", 3, (int) arrived.get(99));
+		Map<Integer, Integer> after = arrived;
+		for (int t = 3; t <= 2 + SlotBook.LOCAL_SWAP_DELAY; t++)
+		{
+			after = step(book, t, 10, 20, 30, 99);
+		}
+		Assert.assertEquals("once you've stayed a moment you get the best spot", 0, (int) after.get(99));
 		int moved = 0;
 		for (Map.Entry<Integer, Integer> e : before.entrySet())
 		{
 			moved += e.getValue().equals(after.get(e.getKey())) ? 0 : 1;
 		}
 		Assert.assertEquals("only whoever had it moves", 1, moved);
-		Assert.assertEquals("and then everyone stays put", after, step(book, 3, 10, 20, 30, 99));
+		Assert.assertEquals("and then everyone stays put", after, step(book, 20, 10, 20, 30, 99));
+	}
+
+	@Test
+	public void stoppingForAMomentOnYourWayPastPushesNobodyAround()
+	{
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		Map<Integer, Integer> before = step(book, 1, 10, 20, 30);
+		for (int t = 2; t <= 40; t++)
+		{
+			boolean stopped = t % 12 == 0 || t % 12 == 1;
+			Map<Integer, Integer> now = stopped ? step(book, t, 10, 20, 30, 99) : step(book, t, 10, 20, 30);
+			for (Map.Entry<Integer, Integer> e : before.entrySet())
+			{
+				Assert.assertEquals("tick " + t + ": player " + e.getKey() + " was moved", e.getValue(), now.get(e.getKey()));
+			}
+		}
+	}
+
+	@Test
+	public void youDontSwapWhileABetterSpotIsHeldForSomeone()
+	{
+		// The front player steps away; you arrive; their hold runs out. Nobody else moves at all:
+		// you step into the freed front spot.
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		Map<Integer, Integer> before = step(book, 1, 10, 20, 30, 40);
+		for (int t = 2; t <= 30; t++)
+		{
+			Map<Integer, Integer> now = t < 5 ? step(book, t, 10, 20, 30, 40) : t < 8 ? step(book, t, 20, 30, 40) : step(book, t, 20, 30, 40, 99);
+			for (int id : new int[]{20, 30, 40})
+			{
+				Assert.assertEquals("tick " + t + ": player " + id + " was moved", before.get(id), now.get(id));
+			}
+		}
+		Assert.assertEquals(0, (int) step(book, 31, 20, 30, 40, 99).get(99));
 	}
 
 	@Test
