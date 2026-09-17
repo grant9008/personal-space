@@ -182,6 +182,13 @@ final class LineBook
 	long moves;
 
 	/**
+	 * Your own player's id when your character may be moved, else -1. If you end up in a row behind
+	 * while someone from your tile stands at the edge, you swap with them, once: what you're doing
+	 * (fishing, banking) should look right on your own screen.
+	 */
+	int localId = -1;
+
+	/**
 	 * Work out this tick's spots on every shared line.
 	 *
 	 * @param reports filled with what happened on each tile's line, by tile
@@ -378,6 +385,43 @@ final class LineBook
 			}
 		}
 
+		// You get a place at the edge if anyone from your tile has one: swap with whoever of them
+		// stands nearest your tile's middle.
+		Spot mine = spotOf.get(localId);
+		if (mine != null && mine.line.equals(key) && mine.row > 0)
+		{
+			for (Member m : members)
+			{
+				if (!m.ids.contains(localId))
+				{
+					continue;
+				}
+				int swapWith = -1;
+				double nearest = Double.MAX_VALUE;
+				for (int id : m.ids)
+				{
+					Spot theirs = spotOf.get(id);
+					if (id == localId || theirs == null || theirs.row != 0)
+					{
+						continue;
+					}
+					double distance = Math.abs(line.along(0, theirs.j) - m.centre());
+					if (distance < nearest)
+					{
+						nearest = distance;
+						swapWith = id;
+					}
+				}
+				if (swapWith >= 0)
+				{
+					Spot theirs = spotOf.get(swapWith);
+					spotOf.put(localId, new Spot(key, 0, theirs.j, m.tile));
+					spotOf.put(swapWith, new Spot(key, mine.row, mine.j, m.tile));
+					moves++;
+				}
+			}
+		}
+
 		// One person a tick steps forward into a free spot at the edge in their own stretch.
 		stepForward:
 		for (int i = 0; i < members.size(); i++)
@@ -403,6 +447,38 @@ final class LineBook
 			}
 		}
 
+		// Anyone left without a spot is drawn in the middle of their tile, and so is whoever stays put
+		// there: nobody at the edge is drawn on top of them. They keep their spot, so nothing
+		// reshuffles; they just aren't shown while it's taken.
+		Set<Integer> hidden = new HashSet<>();
+		for (boolean changed = true; changed; )
+		{
+			changed = false;
+			for (Member m : members)
+			{
+				boolean inMiddle = m.middleTaken;
+				for (int id : m.ids)
+				{
+					inMiddle |= !spotOf.containsKey(id) || hidden.contains(id);
+				}
+				if (!inMiddle)
+				{
+					continue;
+				}
+				for (Member o : members)
+				{
+					for (int id : o.ids)
+					{
+						Spot spot = spotOf.get(id);
+						if (spot != null && spot.row == 0 && Math.abs(line.along(0, spot.j) - m.centre()) < s && hidden.add(id))
+						{
+							changed = true;
+						}
+					}
+				}
+			}
+		}
+
 		// Placements.
 		int placed = 0;
 		int aheadX = line.aheadX();
@@ -412,7 +488,7 @@ final class LineBook
 			for (int id : m.ids)
 			{
 				Spot spot = spotOf.get(id);
-				if (spot == null)
+				if (spot == null || hidden.contains(id))
 				{
 					continue;
 				}
@@ -451,6 +527,18 @@ final class LineBook
 				if (i == index)
 				{
 					continue;
+				}
+				// Someone staying put in the middle of a tile counts as that tile's person at the edge.
+				if (row == 0 && line.members.get(i).middleTaken)
+				{
+					if (i < index)
+					{
+						before = Math.max(before, line.members.get(i).centre());
+					}
+					else
+					{
+						after = Math.min(after, line.members.get(i).centre());
+					}
 				}
 				for (int id : line.members.get(i).ids)
 				{

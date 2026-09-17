@@ -393,10 +393,49 @@ final class CrowdPlanner
 	 */
 	private List<LineBook.Line> layOutStraightRows(List<Straight> rows, Map<Long, List<StackSpreader.Entry>> byTile, int capacity,
 		Map<Long, List<Integer>> movableByTile, Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile,
-		Map<Long, Integer> spacingByTile, Map<Long, Integer> blockedByTile)
+		Map<Long, Integer> spacingByTile, Map<Long, Integer> blockedByTile, Map<Long, Integer> shownByTile,
+		Surroundings around, IntPredicate shown, boolean includeLocal)
 	{
 		List<LineBook.Line> shared = new ArrayList<>();
 		Map<String, List<Straight>> lines = new LinkedHashMap<>();
+
+		// Someone alone on the next tile along, facing the same edge, joins the line rather than ending
+		// it. Busy fishing tiles drop to one person and back all the time; if that ended the line each
+		// time, everyone standing over that tile would be sent to a row behind at once.
+		Map<Long, Integer> loneId = new HashMap<>();
+		Set<Long> rowTiles = new HashSet<>();
+		for (Straight r : rows)
+		{
+			rowTiles.add(r.tile);
+		}
+		List<Straight> withLone = new ArrayList<>(rows);
+		for (Straight r : rows)
+		{
+			for (int direction : new int[]{-1, 1})
+			{
+				long next = r.keyAt(r.along + direction);
+				List<StackSpreader.Entry> there = byTile.get(next);
+				if (there == null || there.size() != 1 || rowTiles.contains(next) || loneId.containsKey(next))
+				{
+					continue;
+				}
+				StackSpreader.Entry lone = there.get(0);
+				if ((lone.local && !includeLocal) || lone.orientation < 0 || !shown.test(lone.id)
+					|| !around.facesObstacle(next, r.angle))
+				{
+					continue;
+				}
+				double facing = StackSpreader.toRadians(lone.orientation);
+				if (Math.sin(facing) * Math.sin(r.angle) + Math.cos(facing) * Math.cos(r.angle) < FACING_FIRE)
+				{
+					continue; // standing by the edge, but not facing it
+				}
+				loneId.put(next, lone.id);
+				withLone.add(new Straight(next, r.plane, StackRegistry.sceneX(next), StackRegistry.sceneY(next), r.sideX, r.sideY,
+					r.angle, r.spacing, false, 1, r.check, new int[1]));
+			}
+		}
+		rows = withLone;
 		for (Straight r : rows)
 		{
 			lines.computeIfAbsent(r.plane + ":" + r.sideX + ":" + r.sideY + ":" + r.across, k -> new ArrayList<>()).add(r);
@@ -412,13 +451,27 @@ final class CrowdPlanner
 					continue;
 				}
 				List<Straight> chain = line.subList(start, i);
-				if (chain.size() < 2)
+				int real = 0;
+				for (Straight r : chain)
+				{
+					real += loneId.containsKey(r.tile) ? 0 : 1;
+				}
+				if (chain.size() < 2 || real == 0)
 				{
 					for (Straight r : chain)
 					{
+						if (loneId.containsKey(r.tile))
+						{
+							continue;
+						}
 						boolean[] squeezed = {false};
 						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.wanted,
 							r.check, r.blocked, squeezed);
+						if (!r.middleTaken && spots.size() < r.wanted)
+						{
+							// Someone will be left in the middle without a spot: don't give the middle away too.
+							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, capacity, r.wanted, r.check, r.blocked, squeezed);
+						}
 						if (squeezed[0])
 						{
 							shapeByTile.put(r.tile, shapeByTile.get(r.tile) + ", squeezed into a ring");
@@ -437,7 +490,15 @@ final class CrowdPlanner
 					List<LineBook.Member> members = new ArrayList<>(chain.size());
 					for (Straight r : chain)
 					{
-						members.add(new LineBook.Member(r.tile, r.along, movableByTile.remove(r.tile), r.middleTaken, capacity));
+						Integer lone = loneId.get(r.tile);
+						List<Integer> ids = movableByTile.remove(r.tile);
+						if (lone != null)
+						{
+							ids = new ArrayList<>();
+							ids.add(lone);
+							shownByTile.put(r.tile, 1);
+						}
+						members.add(new LineBook.Member(r.tile, r.along, ids, r.middleTaken, capacity));
 						shapeByTile.put(r.tile, "counter row shared by " + chain.size() + " tiles");
 						spacingByTile.put(r.tile, spacing);
 					}
@@ -505,6 +566,17 @@ final class CrowdPlanner
 		{
 			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>(4)).add(e);
 		}
+
+		int localId = -1;
+		if (includeLocal)
+		{
+			for (StackSpreader.Entry e : still)
+			{
+				localId = e.local ? e.id : localId;
+			}
+		}
+		slots.localId = localId;
+		lineBook.localId = localId;
 
 		Plan plan = new Plan();
 		shapes.startTick();
@@ -692,17 +764,61 @@ final class CrowdPlanner
 		}
 
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
-			spacingByTile, blockedByTile);
+			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 
 		Set<Integer> placed = new HashSet<>();
 		Map<Long, LineBook.LineReport> lineReports = new HashMap<>();
+		// Where everyone who isn't on a shared line is drawn, so a line (and its rows behind, which
+		// reach onto the tiles behind it) keeps its spots clear of them.
+		Set<Long> onLine = new HashSet<>();
+		for (LineBook.Line l : shared)
+		{
+			for (LineBook.Member m : l.members)
+			{
+				onLine.add(m.tile);
+			}
+		}
+		List<int[]> others = new ArrayList<>();
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			long tile = e.getKey();
+			if (onLine.contains(tile))
+			{
+				continue;
+			}
+			int cx = StackRegistry.sceneX(tile) * 2 * HALF_TILE;
+			int cz = StackRegistry.sceneY(tile) * 2 * HALF_TILE;
+			Map<Integer, Integer> given = assigned.get(tile);
+			if (given != null)
+			{
+				for (int index : given.values())
+				{
+					int[] spot = spotsByTile.get(tile).get(index);
+					others.add(new int[]{StackRegistry.plane(tile), cx + spot[0], cz + spot[1]});
+				}
+			}
+			if (given == null || given.size() < e.getValue().size())
+			{
+				others.add(new int[]{StackRegistry.plane(tile), cx, cz});
+			}
+		}
 		List<StackSpreader.Placement> onLines = lineBook.update(shared, tick, new LineBook.Terrain()
 		{
 			@Override
 			public boolean canStand(long tile, int dx, int dz)
 			{
+				int x = StackRegistry.sceneX(tile) * 2 * HALF_TILE + dx;
+				int z = StackRegistry.sceneY(tile) * 2 * HALF_TILE + dz;
+				int gap = spacingByTile.get(tile);
+				for (int[] other : others)
+				{
+					if (other[0] == StackRegistry.plane(tile) && Math.hypot(other[1] - x, other[2] - z) < gap)
+					{
+						return false;
+					}
+				}
 				return around.canStand(tile, dx, dz);
 			}
 

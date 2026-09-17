@@ -167,7 +167,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_INCLUDE_LOCAL,
 		name = "Move my character too",
-		description = "Off: your own character always stays exactly where it really is and other players step around you. On: you take a spot like everyone else.",
+		description = "Off: your own character always stays exactly where it really is and other players step around you. On: you take a spot too, at the front, so what you're doing looks right.",
 		position = 4
 	)
 	default boolean includeLocalPlayer()

@@ -87,6 +87,12 @@ final class SlotBook
 	long moves;
 
 	/**
+	 * Your own player's id when your character may be moved, else -1. You get the best spot on your
+	 * tile (the front, where what you're doing looks right); whoever had it swaps with you, once.
+	 */
+	int localId = -1;
+
+	/**
 	 * Work out this tick's spots.
 	 *
 	 * @param present  for each tile, the players standing there who may be moved
@@ -174,6 +180,28 @@ final class SlotBook
 						t.assign(id, s);
 						break;
 					}
+				}
+			}
+			// You get the best spot going; whoever has it takes yours.
+			Integer mine = t.slotOf.get(localId);
+			if (mine != null)
+			{
+				for (int s = 0; s < mine; s++)
+				{
+					if (t.held(s, tick))
+					{
+						continue;
+					}
+					Integer other = t.occupant.get(s);
+					t.vacate(localId, tick, false);
+					if (other != null)
+					{
+						t.vacate(other, tick, false);
+						t.assign(other, mine);
+					}
+					t.assign(localId, s);
+					moves++;
+					break;
 				}
 			}
 			// Fill gaps from the back: the player in the worst spot moves into the best free one.

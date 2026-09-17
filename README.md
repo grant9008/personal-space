@@ -82,7 +82,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
 | Auto-space small groups | On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn it off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos. |
-| Move my character too | Off: you stay put and others step around you. |
+| Move my character too | Off: you stay put and others step around you. On: you take a spot too, at the front, so what you're doing looks right. |
 | Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
 

@@ -93,6 +93,23 @@ public class SlotBookTest
 	}
 
 	@Test
+	public void youGetTheFrontSpotAndOnlyOnePersonMakesRoom()
+	{
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		Map<Integer, Integer> before = step(book, 1, 10, 20, 30);
+		Map<Integer, Integer> after = step(book, 2, 10, 20, 30, 99);
+		Assert.assertEquals("you get the best spot", 0, (int) after.get(99));
+		int moved = 0;
+		for (Map.Entry<Integer, Integer> e : before.entrySet())
+		{
+			moved += e.getValue().equals(after.get(e.getKey())) ? 0 : 1;
+		}
+		Assert.assertEquals("only whoever had it moves", 1, moved);
+		Assert.assertEquals("and then everyone stays put", after, step(book, 3, 10, 20, 30, 99));
+	}
+
+	@Test
 	public void clearForgetsEverything()
 	{
 		SlotBook book = new SlotBook();
