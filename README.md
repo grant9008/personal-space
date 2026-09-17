@@ -64,7 +64,7 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after woodcutting at the willows](docs/photos/willows.jpg)
 
-![Before and after fishing on a riverbank](docs/photos/fishing.jpg)
+![Before and after at a fishing spot](docs/photos/fishing-spot.jpg)
 
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
