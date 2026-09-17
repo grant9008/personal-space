@@ -3,9 +3,10 @@
 **See the whole crowd.** When several players stand on the same tile, Old School RuneScape only
 draws one of them, so a packed bank, the Grand Exchange, an anvil or a campfire looks half empty.
 Personal Space brings everyone back into view and gives them a little room, so every player and
-every outfit can be seen.
+every outfit can be seen. Often it isn't a big crowd at all: the one player you saw by the fire
+turns out to be four friends hanging out.
 
-![Before and after at the Grand Exchange](docs/photos/grand-exchange-busy.jpg)
+![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
@@ -43,7 +44,7 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
 
-![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
+![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 
