@@ -32,7 +32,7 @@ turns out to be four friends hanging out.
   end up on. Two players share the space in front of it evenly; extra players fill the
   curve outwards, then stand in the gaps of a second row behind.
 - **At a bank counter**, players line up side by side along the counter, close together, like a
-  busy bank rather than a queue. Around a fire they stay close too, whatever the spacing slider says.
+  busy bank rather than a queue, even when a couple of them are busy casting spells or trading. Around a fire they stay close too, whatever the spacing slider says.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
   When a crowd shrinks to one player, they step back to the middle of their tile.
@@ -53,6 +53,8 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 ![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
 
 ![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
+
+![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithing.jpg)
 
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 

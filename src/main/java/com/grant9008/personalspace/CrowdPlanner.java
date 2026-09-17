@@ -116,6 +116,66 @@ final class CrowdPlanner
 	private Map<Long, int[]> previousSizes = new HashMap<>();
 	private Map<Long, int[]> currentSizes = new HashMap<>();
 
+	/** Tiles lined up because most of the group faces something, and which way. */
+	private Map<Long, Double> previousMostFaced = new HashMap<>();
+	private Map<Long, Double> currentMostFaced = new HashMap<>();
+
+	/** Directions a row can face, straight ones first so a bank counter wins a tie with a diagonal. */
+	private static final int[] EIGHTHS = {0, 2, 4, 6, 1, 3, 5, 7};
+
+	/**
+	 * The direction most of this group faces, if it has something in it (a booth, anvil, range or
+	 * tree) and at least half of them face it. Null otherwise.
+	 *
+	 * <p>Everyone on a tile rarely faces exactly the same way: at a bank, a couple of people casting
+	 * Superheat Item or trading can face anywhere. Once a tile has lined up this way it stays lined
+	 * up for as long as it's spread, so someone turning around doesn't flip it back to a ring.
+	 */
+	private Double facedByMost(long tile, List<StackSpreader.Entry> group, Surroundings around)
+	{
+		Double remembered = previousMostFaced.get(tile);
+		if (remembered != null)
+		{
+			currentMostFaced.put(tile, remembered);
+			return remembered;
+		}
+		Double best = null;
+		int bestCount = 0;
+		for (int eighth : EIGHTHS)
+		{
+			double angle = eighth * Math.PI / 4;
+			if (!around.facesObstacle(tile, angle))
+			{
+				continue;
+			}
+			int count = 0;
+			for (StackSpreader.Entry e : group)
+			{
+				if (e.orientation < 0)
+				{
+					continue;
+				}
+				double a = StackSpreader.toRadians(e.orientation);
+				double dot = Math.sin(a) * Math.sin(angle) + Math.cos(a) * Math.cos(angle);
+				if (dot >= FACING_FIRE)
+				{
+					count++;
+				}
+			}
+			if (count > bestCount)
+			{
+				best = angle;
+				bestCount = count;
+			}
+		}
+		if (best == null || bestCount * 2 < group.size())
+		{
+			return null;
+		}
+		currentMostFaced.put(tile, best);
+		return best;
+	}
+
 	/**
 	 * Spacing for a group of {@code players}: at most {@link PersonalSpaceConfig#PAIR_SPACING} for
 	 * two, growing evenly to the slider's {@code spacing} at {@link PersonalSpaceConfig#FULL_CROWD}.
@@ -233,6 +293,8 @@ final class CrowdPlanner
 		shapes.startTick();
 		previousSizes = currentSizes;
 		currentSizes = new HashMap<>();
+		previousMostFaced = currentMostFaced;
+		currentMostFaced = new HashMap<>();
 		Map<Long, List<Integer>> movableByTile = new HashMap<>();
 		Map<Long, List<int[]>> spotsByTile = new HashMap<>();
 		Map<Long, String> shapeByTile = new HashMap<>();
@@ -278,19 +340,29 @@ final class CrowdPlanner
 			// the same way form a crowd instead, so a pair facing east doesn't line up one behind the
 			// other as seen from the usual camera.
 			boolean row = shape.row && (around.facesObstacle(tile, shape.angle) || around.facesFire(tile, shape.angle));
+			double rowAngle = shape.angle;
+			if (smart && !row)
+			{
+				Double faced = facedByMost(tile, group, around);
+				if (faced != null)
+				{
+					row = true;
+					rowAngle = faced;
+				}
+			}
 
 			// At a bank counter or row of booths, people stand close together in a straight line
 			// along it: spread wide, a bank crowd reads as a queue. Around a fire they stay close
 			// too, or it looks deserted.
 			int tileSpacing = smallGroupsClose ? spacingFor(spacing, sizeFor(tile, group.size(), tick)) : spacing;
-			double angle = shape.angle;
+			double angle = rowAngle;
 			boolean straight = false;
 			String kind = row ? "curved row" : "crowd";
-			if (row && around.isCounter(tile, shape.angle))
+			if (row && around.isCounter(tile, rowAngle))
 			{
 				tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.COUNTER_SPACING);
 				// Run exactly along the counter, even if the row was formed by someone facing it at a slant.
-				angle = Math.round(shape.angle / (Math.PI / 2)) * (Math.PI / 2);
+				angle = Math.round(rowAngle / (Math.PI / 2)) * (Math.PI / 2);
 				straight = true;
 				kind = "counter row";
 			}
@@ -299,7 +371,7 @@ final class CrowdPlanner
 				// Gathered round a fire, in a row or not: stay close, whatever the slider says, and
 				// everyone faces the fire.
 				int[] fire = fireFaced(group, around.firesNear(tile));
-				if (fire != null || (row && around.facesFire(tile, shape.angle)))
+				if (fire != null || (row && around.facesFire(tile, rowAngle)))
 				{
 					tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.FIRE_SPACING);
 					kind = row ? "fire row" : "crowd round a fire";
@@ -416,5 +488,7 @@ final class CrowdPlanner
 		shapes.clear();
 		previousSizes.clear();
 		currentSizes.clear();
+		previousMostFaced.clear();
+		currentMostFaced.clear();
 	}
 }

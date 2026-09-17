@@ -467,6 +467,74 @@ public class CrowdPlannerTest
 		Assert.assertEquals(0, StackSpreader.faceTowards(1024, 0, 250, 0, 128));
 	}
 
+	/** A bank counter to the north only: nothing to face in any other direction. */
+	private static final CrowdPlanner.Surroundings COUNTER_NORTH = new CrowdPlanner.Surroundings()
+	{
+		@Override
+		public boolean canStand(long tile, int dx, int dz)
+		{
+			return true;
+		}
+
+		@Override
+		public boolean facesObstacle(long tile, double angle)
+		{
+			return Math.abs(angle - Math.PI) < 0.01;
+		}
+
+		@Override
+		public boolean isCounter(long tile, double angle)
+		{
+			return facesObstacle(tile, angle);
+		}
+
+		@Override
+		public boolean facesFire(long tile, double angle)
+		{
+			return false;
+		}
+
+		@Override
+		public List<int[]> firesNear(long tile)
+		{
+			return new ArrayList<>();
+		}
+	};
+
+	@Test
+	public void aBankCrowdLinesUpWhenMostOfThemFaceTheBooth()
+	{
+		// Three banking, two casting spells facing elsewhere.
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(players(1, NORTH, 2, NORTH, 3, NORTH, 4, 1536, 5, SOUTH),
+			id -> true, 72, 5, true, false, 1, COUNTER_NORTH);
+		Assert.assertEquals("counter row", plan.tiles.get(TILE).shape);
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertEquals("player " + p.id + " level with the counter", 0, p.dz);
+		}
+
+		CrowdPlanner fewFacing = new CrowdPlanner();
+		Assert.assertEquals("only one of five faces the booth: a crowd", "crowd",
+			fewFacing.plan(players(1, NORTH, 2, 1536, 3, SOUTH, 4, 512, 5, SOUTH), id -> true, 72, 5, true, false, 1, COUNTER_NORTH)
+				.tiles.get(TILE).shape);
+	}
+
+	@Test
+	public void aBankRowStaysLinedUpWhenTheCastersTurnAround()
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> first = spots(planner.plan(players(1, NORTH, 2, NORTH, 3, NORTH, 4, 1536, 5, SOUTH),
+			id -> true, 72, 5, true, false, 1, COUNTER_NORTH));
+		CrowdPlanner.Plan later = planner.plan(players(1, NORTH, 2, SOUTH, 3, 1536, 4, 1536, 5, SOUTH),
+			id -> true, 72, 5, true, false, 2, COUNTER_NORTH);
+		Assert.assertEquals("counter row", later.tiles.get(TILE).shape);
+		Map<Integer, int[]> second = spots(later);
+		for (int id = 1; id <= 5; id++)
+		{
+			Assert.assertArrayEquals("player " + id + " kept their spot", first.get(id), second.get(id));
+		}
+	}
+
 	@Test
 	public void aRowAtAnAnvilCurvesAndTurnsPlayersToFaceIt()
 	{
