@@ -12,6 +12,8 @@ public class CrowdPlannerTest
 {
 	private static final long TILE = StackRegistry.key(0, 50, 50);
 	private static final int NORTH = 1024;
+	/** The least room anyone may be given, as a distance between two drawn players. */
+	private static final double MIN_SHARED_SPACING_FOR_TEST = 25;
 	private static final int SOUTH = 0;
 
 	private static CrowdPlanner.Surroundings surroundings(boolean obstacle, boolean counter, boolean fire)
@@ -1127,6 +1129,67 @@ public class CrowdPlannerTest
 		CrowdPlanner.Plan plan = arc.plan(players(1, NORTH, 2, NORTH, 3, NORTH), id -> true, 128, 10, true, false, 1, OPEN);
 		Assert.assertTrue("the tile curves", plan.curvedRows.contains(TILE));
 		Assert.assertEquals(3, plan.placements.size());
+	}
+
+	@Test
+	public void twoTilesAtOneAnvilArentPinnedToTheTightestSpacing()
+	{
+		// Sharing what you face with the tile next door limits how much of the ring is yours. That
+		// used to shrink both crowds to the least room anyone may have, whatever the slider said, so
+		// a busy anvil looked the same at Close as at Wide and both looked cramped.
+		CrowdPlanner.Surroundings anvil = surroundings(true, false, false);
+		long neighbour = StackRegistry.key(0, StackRegistry.sceneX(TILE) + 1, StackRegistry.sceneY(TILE));
+		for (boolean autoSpace : new boolean[]{true, false})
+		{
+			double closest = 0;
+			int tightest = 0;
+			for (int slider : new int[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_WIDE})
+			{
+				List<StackSpreader.Entry> group = new ArrayList<>();
+				int id = 1;
+				for (long tile : new long[]{TILE, neighbour})
+				{
+					for (int i = 0; i < 5; i++)
+					{
+						group.add(new StackSpreader.Entry(id++, tile, false, NORTH));
+					}
+				}
+				CrowdPlanner planner = new CrowdPlanner();
+				planner.smallGroupsClose = autoSpace;
+				CrowdPlanner.Plan plan = null;
+				for (int t = 1; t <= 3; t++)
+				{
+					plan = planner.plan(group, x -> true, slider, 10, true, false, t, anvil);
+				}
+				double nearest = Double.MAX_VALUE;
+				List<int[]> at = new ArrayList<>();
+				for (StackSpreader.Placement placement : plan.placements)
+				{
+					at.add(new int[]{StackRegistry.sceneX(placement.tile) * 128 + placement.dx,
+						StackRegistry.sceneY(placement.tile) * 128 + placement.dz});
+				}
+				for (int i = 0; i < at.size(); i++)
+				{
+					for (int j = i + 1; j < at.size(); j++)
+					{
+						nearest = Math.min(nearest, Math.hypot(at.get(i)[0] - at.get(j)[0], at.get(i)[1] - at.get(j)[1]));
+					}
+				}
+				Assert.assertTrue("auto-space " + autoSpace + " at " + slider + ": two people drawn " + nearest + " apart",
+					nearest >= MIN_SHARED_SPACING_FOR_TEST);
+				if (slider == PersonalSpaceConfig.SPACING_CLOSE)
+				{
+					closest = nearest;
+					tightest = plan.tiles.get(TILE).spacing;
+				}
+				else
+				{
+					Assert.assertTrue("Wide is no roomier than Close: " + closest + " then " + nearest, nearest > closest);
+					Assert.assertTrue("both tiles were pinned to the tightest spacing there is",
+						plan.tiles.get(TILE).spacing > tightest);
+				}
+			}
+		}
 	}
 
 	@Test
