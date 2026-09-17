@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
 	name = "Personal Space",
-	description = "See the whole crowd: players on the same tile are spread out so everyone is visible. Cosmetic only, and off wherever players can fight.",
+	description = "See the whole community: the one player you see on a tile is often a whole group, and this shows everyone standing there. Cosmetic only, and off wherever players can fight.",
 	tags = {"stacked", "stacking", "unstack", "overlapping", "clipping", "crowded", "fashionscape", "fashion show", "outfits",
 		"drip", "cosmetics", "gear", "other players", "show all players", "reveal", "grand exchange", "social", "hangout",
 		"lively", "roleplay", "house party", "drop party", "clan events", "group photo", "screenshots", "content creator",
@@ -49,7 +49,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.7.2";
+	static final String VERSION = "1.7.3";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
