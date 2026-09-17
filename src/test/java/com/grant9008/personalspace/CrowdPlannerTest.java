@@ -1,6 +1,7 @@
 package com.grant9008.personalspace;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -157,7 +158,8 @@ public class CrowdPlannerTest
 		List<Integer> xs = new ArrayList<>();
 		for (StackSpreader.Placement p : plan.placements)
 		{
-			Assert.assertEquals("everyone level with the counter", 0, p.dz);
+			Assert.assertTrue("player " + p.id + " stands " + p.dz + " back, further than the bow allows",
+				Math.abs(p.dz) <= StackSpreader.MAX_BOW);
 			xs.add(p.dx);
 		}
 		xs.sort(Integer::compare);
@@ -948,7 +950,7 @@ public class CrowdPlannerTest
 			id -> true, 72, 5, true, false, 1, surroundings(true, true, false));
 		for (StackSpreader.Placement p : plan.placements)
 		{
-			Assert.assertEquals("level with the counter", 0, p.dz);
+			Assert.assertTrue("stands " + p.dz + " back, further than the bow allows", Math.abs(p.dz) <= StackSpreader.MAX_BOW);
 		}
 	}
 
@@ -1125,6 +1127,41 @@ public class CrowdPlannerTest
 		CrowdPlanner.Plan plan = arc.plan(players(1, NORTH, 2, NORTH, 3, NORTH), id -> true, 128, 10, true, false, 1, OPEN);
 		Assert.assertTrue("the tile curves", plan.curvedRows.contains(TILE));
 		Assert.assertEquals(3, plan.placements.size());
+	}
+
+	@Test
+	public void aBankRowCurvesRoundTheBoothAndKeepsItsSpacing()
+	{
+		// Smart's counter rows bow like a crowd round an anvil: the middle stands at the booth and
+		// the wings fall back, rather than everyone standing in a flat line along the counter.
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(
+			players(1, NORTH, 2, NORTH, 3, NORTH, 4, NORTH, 5, NORTH, 6, NORTH, 7, NORTH),
+			id -> true, PersonalSpaceConfig.COUNTER_SPACING, 10, true, false, 1, surroundings(true, true, false));
+		Assert.assertEquals("counter row", plan.tiles.get(TILE).shape);
+		List<StackSpreader.Placement> row = new ArrayList<>(plan.placements);
+		row.sort(Comparator.comparingInt(p -> p.dx));
+		int middle = row.size() / 2;
+		Assert.assertTrue("the wings should fall back from the booth",
+			Math.abs(row.get(0).dz) > Math.abs(row.get(middle).dz));
+		Assert.assertTrue("but no further than the bow allows", Math.abs(row.get(0).dz) <= StackSpreader.MAX_BOW);
+		for (StackSpreader.Placement a : row)
+		{
+			for (StackSpreader.Placement b : row)
+			{
+				// Further out along the counter is further back from it, with no kinks in the curve.
+				Assert.assertFalse("the curve doubles back at " + a.dx + " and " + b.dx,
+					Math.abs(a.dx) < Math.abs(b.dx) && Math.abs(a.dz) > Math.abs(b.dz));
+			}
+		}
+		for (int i = 0; i < row.size(); i++)
+		{
+			for (int j = i + 1; j < row.size(); j++)
+			{
+				double away = Math.hypot(row.get(i).dx - row.get(j).dx, row.get(i).dz - row.get(j).dz);
+				Assert.assertTrue("a bowed row put two people " + away + " apart",
+					away >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+			}
+		}
 	}
 
 	@Test
@@ -1339,7 +1376,8 @@ public class CrowdPlannerTest
 		Assert.assertEquals("counter row", plan.tiles.get(TILE).shape);
 		for (StackSpreader.Placement p : plan.placements)
 		{
-			Assert.assertEquals("player " + p.id + " level with the counter", 0, p.dz);
+			Assert.assertTrue("player " + p.id + " stands " + p.dz + " back, further than the bow allows",
+				Math.abs(p.dz) <= StackSpreader.MAX_BOW);
 		}
 
 		CrowdPlanner fewFacing = new CrowdPlanner();

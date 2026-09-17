@@ -62,6 +62,13 @@ final class StackSpreader
 
 	/** Furthest a player is placed from the tile centre along a line, in local units (three tiles). */
 	static final int MAX_LINE_EXTENT = 384;
+	/** Furthest back from its middle a bowed counter row reaches, in local units. */
+	static final int MAX_BOW = 48;
+	/**
+	 * Steepest a bow gets. A row behind stands half a spacing along from the one in front, so a
+	 * steeper curve than this would close the gap between them until the two of them touched.
+	 */
+	static final double BOW_SLOPE = 0.45;
 
 	/** One standing-still player on a tile. */
 	static final class Entry
@@ -131,6 +138,20 @@ final class StackSpreader
 	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity,
 		SpotCheck check, int arcRadius)
 	{
+		return spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, false);
+	}
+
+	/** As above; {@code bow} curves a straight row gently round what it stands along. */
+	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity,
+		SpotCheck check, int arcRadius, boolean bow)
+	{
+		return spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, bow, WRAP_ARC);
+	}
+
+	/** As above, wrapping {@code wrap} round what everyone faces before a row behind is started. */
+	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity,
+		SpotCheck check, int arcRadius, boolean bow, double wrap)
+	{
 		List<int[]> out = new ArrayList<>(capacity);
 		if (!row)
 		{
@@ -149,7 +170,7 @@ final class StackSpreader
 			return out;
 		}
 
-		double reach = straight ? STRAIGHT_REACH : WRAP_ARC / curvedTurn(spacing, arcRadius) + 1e-9;
+		double reach = straight ? STRAIGHT_REACH : wrap / curvedTurn(spacing, arcRadius) + 1e-9;
 		int width = straight ? ROW_WIDTH : CURVED_ROW_WIDTH;
 		// Which side of the middle a row fills first. The ring pattern always starts on the east
 		// side, so a row does too where it can: a pair then keeps its places when their tile changes
@@ -170,7 +191,7 @@ final class StackSpreader
 					{
 						continue;
 					}
-					int[] spot = rowSpot(rowNumber, first * (side == 0 ? step : -step), straight, angle, spacing, arcRadius);
+					int[] spot = rowSpot(rowNumber, first * (side == 0 ? step : -step), straight, angle, spacing, arcRadius, bow);
 					if (spot != null && (check == null || check.canStand(spot[0], spot[1])))
 					{
 						out.add(spot);
@@ -201,6 +222,12 @@ final class StackSpreader
 	/** As above, on a curve of {@code arcRadius}; see {@link #arcRadius(int, boolean)}. */
 	static int[] rowSpot(int rowNumber, double step, boolean straight, double angle, int spacing, int arcRadius)
 	{
+		return rowSpot(rowNumber, step, straight, angle, spacing, arcRadius, false);
+	}
+
+	/** As above; {@code bow} curves a straight row gently round what it stands along. */
+	static int[] rowSpot(int rowNumber, double step, boolean straight, double angle, int spacing, int arcRadius, boolean bow)
+	{
 		double fwdX = -Math.sin(angle);
 		double fwdZ = -Math.cos(angle);
 		double depth = rowNumber * (double) Math.min(spacing, ROW_DEPTH);
@@ -211,8 +238,9 @@ final class StackSpreader
 			{
 				return null;
 			}
-			double x = fwdZ * along - fwdX * depth;
-			double z = -fwdX * along - fwdZ * depth;
+			double back = depth + (bow ? bowBack(along) : 0);
+			double x = fwdZ * along - fwdX * back;
+			double z = -fwdX * along - fwdZ * back;
 			return new int[]{(int) Math.round(x), (int) Math.round(z)};
 		}
 		double radius = arcRadius + depth;
@@ -229,6 +257,26 @@ final class StackSpreader
 			return null;
 		}
 		return new int[]{(int) Math.round(x), (int) Math.round(z)};
+	}
+
+	/**
+	 * How far back from the middle of a bowed row a spot {@code along} it stands, so a crowd at a
+	 * bank booth curves round it the way one round an anvil does, instead of standing in a flat line.
+	 * It is the same circle a curved row hugs, flattened out at {@link #MAX_BOW} so a wide row's ends
+	 * don't curl back into the row behind.
+	 */
+	static int bowBack(double along)
+	{
+		// The circle, while it is shallow enough that the row behind keeps its gap over a half step,
+		// then a straight taper at that same slope, then flat at MAX_BOW.
+		double turn = BOW_SLOPE / Math.sqrt(1 + BOW_SLOPE * BOW_SLOPE);
+		double straightFrom = LOOK_AHEAD * turn;
+		double d = Math.abs(along);
+		double back = d <= straightFrom
+			? LOOK_AHEAD - Math.sqrt(LOOK_AHEAD * (double) LOOK_AHEAD - d * d)
+			: LOOK_AHEAD - Math.sqrt(LOOK_AHEAD * (double) LOOK_AHEAD - straightFrom * straightFrom)
+				+ BOW_SLOPE * (d - straightFrom);
+		return (int) Math.round(Math.min(MAX_BOW, back));
 	}
 
 	/** The angle between neighbours in a curved row, in radians. */

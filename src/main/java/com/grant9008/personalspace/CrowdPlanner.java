@@ -313,10 +313,11 @@ final class CrowdPlanner
 	 * @param squeezed set to whether the ring was used instead of the tile's own shape
 	 */
 	private static List<int[]> spotsWithRoom(boolean row, boolean straight, double angle, boolean middleTaken, int spacing,
-		int capacity, int wanted, StackSpreader.SpotCheck check, int[] blocked, boolean[] squeezed, int arcRadius)
+		int capacity, int wanted, StackSpreader.SpotCheck check, int[] blocked, boolean[] squeezed, int arcRadius, boolean bow,
+		double wrap)
 	{
 		blocked[0] = 0;
-		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius);
+		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, bow, wrap);
 		int bestBlocked = blocked[0];
 		squeezed[0] = false;
 		for (int s : new int[]{spacing, MIN_SHARED_SPACING})
@@ -410,11 +411,13 @@ final class CrowdPlanner
 	 * Neighbouring tiles along the same edge become one shared line, laid out by {@link LineBook};
 	 * those tiles are taken out of {@code movableByTile} and returned.
 	 */
+	@SuppressWarnings("SameParameterValue")
 	private List<LineBook.Line> layOutStraightRows(List<Straight> rows, Map<Long, List<StackSpreader.Entry>> byTile, int capacity,
 		Map<Long, List<Integer>> movableByTile, Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile,
 		Map<Long, Integer> spacingByTile, Map<Long, Integer> blockedByTile, Map<Long, Integer> shownByTile,
 		Surroundings around, IntPredicate shown, boolean includeLocal)
 	{
+		boolean bowRows = arrangement != PersonalSpaceConfig.Arrangement.ROW;
 		List<LineBook.Line> shared = new ArrayList<>();
 		Map<String, List<Straight>> lines = new LinkedHashMap<>();
 
@@ -491,12 +494,12 @@ final class CrowdPlanner
 						}
 						boolean[] squeezed = {false};
 						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.wanted,
-							r.check, r.blocked, squeezed, StackSpreader.LOOK_AHEAD);
+							r.check, r.blocked, squeezed, StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC);
 						if (!r.middleTaken && spots.size() < r.wanted)
 						{
 							// Someone will be left in the middle without a spot: don't give the middle away too.
 							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, capacity, r.wanted, r.check, r.blocked, squeezed,
-								StackSpreader.LOOK_AHEAD);
+								StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC);
 						}
 						if (squeezed[0])
 						{
@@ -830,14 +833,14 @@ final class CrowdPlanner
 			}
 			boolean[] squeezed = {false};
 			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
-				Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius);
+				Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC);
 			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
 			{
 				// Walls leave too few spots for everyone: someone stays in the middle without a spot,
 				// so don't also give the middle to someone else.
 				boolean wasRow = row && squeezed[0];
 				spots = spotsWithRoom(false, false, angle, true, tileSpacing, capacity,
-					Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius);
+					Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC);
 				squeezed[0] |= wasRow;
 			}
 			if (squeezed[0])
