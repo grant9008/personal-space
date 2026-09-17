@@ -64,11 +64,13 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after woodcutting at the willows](docs/photos/willows.jpg)
 
-![Before and after at a fishing spot](docs/photos/fishing-spot.jpg)
+![Before and after at a fishing spot with a bonfire behind it](docs/photos/fishing-and-bonfire.jpg)
 
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
+
+![Fighting with the pause switch off and on](docs/photos/combat-switch.jpg)
 
 ## Using it
 
