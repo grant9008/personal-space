@@ -61,9 +61,6 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 ![Players in a curve around an anvil in Varrock](docs/photos/anvil.jpg)
 *Smithing together: a group that would all share one tile forms a curve around the anvil.*
 
-![Personal Space and its sidebar at Varrock West Bank](docs/photos/in-game-sidebar.jpg)
-*Choose how many players can share a tile and how far apart they stand; changes show straight away.*
-
 ## Using it
 
 Click the **Personal Space** button on RuneLite's right-hand toolbar.
