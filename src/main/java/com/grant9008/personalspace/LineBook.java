@@ -317,6 +317,12 @@ final class LineBook
 				spotOf.remove(id);
 				waiting.add(id);
 			}
+			// You take your pick of what's free before the others on your tile, so arriving at an
+			// edge settles in one step instead of settling and then swapping forward.
+			if (waiting.remove((Integer) localId))
+			{
+				waiting.add(0, localId);
+			}
 			newcomers.put(m, waiting);
 		}
 

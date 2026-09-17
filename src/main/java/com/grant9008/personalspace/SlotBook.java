@@ -176,8 +176,16 @@ final class SlotBook
 					}
 				}
 			}
-			// Newcomers take the best free spot that isn't being held.
-			for (int id : ids)
+			// Newcomers take the best free spot that isn't being held. You go first, so walking in
+			// beside someone settles both of you in one step: without that, whoever has the lower
+			// player id takes the front spot and you swap with them a few ticks later, which looks
+			// like the pair shuffling about once for no reason.
+			List<Integer> arriving = new ArrayList<>(ids);
+			if (arriving.remove((Integer) localId))
+			{
+				arriving.add(0, localId);
+			}
+			for (int id : arriving)
 			{
 				if (t.slotOf.containsKey(id))
 				{

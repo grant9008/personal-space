@@ -151,6 +151,11 @@ final class StackSpreader
 
 		double reach = straight ? STRAIGHT_REACH : WRAP_ARC / curvedTurn(spacing, arcRadius) + 1e-9;
 		int width = straight ? ROW_WIDTH : CURVED_ROW_WIDTH;
+		// Which side of the middle a row fills first. The ring pattern always starts on the east
+		// side, so a row does too where it can: a pair then keeps its places when their tile changes
+		// between a ring and a row, instead of the two of them swapping sides for no reason.
+		double alongX = -Math.cos(angle);
+		int first = (Math.abs(alongX) > 1e-9 ? alongX : Math.sin(angle)) >= 0 ? 1 : -1;
 		for (int rowNumber = 0; rowNumber < ROWS && out.size() < capacity; rowNumber++)
 		{
 			// Rows take turns between spots off the middle line and spots on it, so each row
@@ -165,7 +170,7 @@ final class StackSpreader
 					{
 						continue;
 					}
-					int[] spot = rowSpot(rowNumber, side == 0 ? step : -step, straight, angle, spacing, arcRadius);
+					int[] spot = rowSpot(rowNumber, first * (side == 0 ? step : -step), straight, angle, spacing, arcRadius);
 					if (spot != null && (check == null || check.canStand(spot[0], spot[1])))
 					{
 						out.add(spot);

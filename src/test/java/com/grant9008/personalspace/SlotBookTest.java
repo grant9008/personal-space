@@ -171,6 +171,23 @@ public class SlotBookTest
 	}
 
 	@Test
+	public void walkingInBesideSomeoneSettlesInOneStep()
+	{
+		// The other player has the lower id, so without first pick they would take the front spot and
+		// you would swap with them a few ticks later: the pair shuffling about once for no reason.
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		// A tile with one person on it isn't laid out, so the pair's spots are both handed out the
+		// tick you arrive: the other player has the lower id and would otherwise take the front one.
+		Map<Integer, Integer> pair = step(book, 1, 7, 99);
+		Assert.assertEquals("you take the front spot as you arrive", 0, (int) pair.get(99));
+		for (int t = 2; t <= 2 + SlotBook.LOCAL_SWAP_DELAY + 2; t++)
+		{
+			Assert.assertEquals("and then nobody shuffles", pair, step(book, t, 7, 99));
+		}
+	}
+
+	@Test
 	public void clearForgetsEverything()
 	{
 		SlotBook book = new SlotBook();

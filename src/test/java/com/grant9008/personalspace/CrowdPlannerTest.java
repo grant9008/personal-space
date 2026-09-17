@@ -1090,6 +1090,34 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void walkingInBesideSomeoneSettlesWithoutAShuffle()
+	{
+		// Someone stands alone, so nothing is spread. You walk onto their tile: both of you get a
+		// spot that same tick, and neither of you may be moved again afterwards.
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> alone = new ArrayList<>();
+		alone.add(new StackSpreader.Entry(7, TILE, false, NORTH));
+		for (int t = 1; t <= 3; t++)
+		{
+			Assert.assertTrue("nothing to spread yet",
+				planner.plan(alone, id -> true, 128, 10, true, true, t, OPEN).placements.isEmpty());
+		}
+		List<StackSpreader.Entry> pair = new ArrayList<>(alone);
+		pair.add(new StackSpreader.Entry(99, TILE, true, NORTH));
+		Map<Integer, int[]> settled = spots(planner.plan(pair, id -> true, 128, 10, true, true, 4, OPEN));
+		Assert.assertEquals(2, settled.size());
+		for (int t = 5; t <= 4 + SlotBook.LOCAL_SWAP_DELAY + 3; t++)
+		{
+			Map<Integer, int[]> now = spots(planner.plan(pair, id -> true, 128, 10, true, true, t, OPEN));
+			for (Map.Entry<Integer, int[]> e : settled.entrySet())
+			{
+				Assert.assertArrayEquals("player " + e.getKey() + " shuffled at tick " + t,
+					e.getValue(), now.get(e.getKey()));
+			}
+		}
+	}
+
+	@Test
 	public void theArcArrangementCurvesThemWhereSmartWouldMakeARing()
 	{
 		CrowdPlanner arc = new CrowdPlanner();
