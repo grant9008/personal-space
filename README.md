@@ -56,6 +56,8 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithers.jpg)
 
+![Before and after woodcutting at the willows](docs/photos/willows.jpg)
+
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
