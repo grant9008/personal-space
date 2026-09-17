@@ -62,9 +62,6 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 
-![Players in a curve around an anvil in Varrock](docs/photos/anvil.jpg)
-*Smithing together: a group that would all share one tile forms a curve around the anvil.*
-
 ## Using it
 
 Click the **Personal Space** button on RuneLite's right-hand toolbar.
