@@ -1135,6 +1135,54 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void aBankCrowdFacingTheBoothAtASlantStillLinesUpAlongTheCounter()
+	{
+		// People walk up to a bank booth at whatever slant they arrive at. A counter only reads as one
+		// square on, since counters run along the edges of tiles, so a crowd mostly facing the booth
+		// from the side used to form a curve out in the open instead of a row along the counter - and
+		// one person standing at a slant was enough to decide it for everybody.
+		CrowdPlanner.Surroundings booth = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				// The counter is north; its corner also blocks the way looking north-west.
+				return Math.abs(angle - Math.PI) < 0.01 || Math.abs(angle - 3 * Math.PI / 4) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				// Only square on: this is what the game's own collision map gives us.
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		int slant = 768;
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(players(1, slant, 2, slant, 3, slant, 4, slant, 5, slant),
+			id -> true, PersonalSpaceConfig.SPACING_NORMAL, 10, true, false, 1, booth);
+		Assert.assertEquals("counter row", plan.tiles.get(TILE).shape);
+		Assert.assertTrue("a counter row runs straight, it doesn't curve", plan.curvedRows.isEmpty());
+	}
+
+	@Test
 	public void aBoothWithADozenPeopleOnItLeavesNobodyInTheHeap()
 	{
 		// A busy bank booth really does get a dozen people on one tile. At the old cap of ten, three of

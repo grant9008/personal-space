@@ -773,7 +773,14 @@ final class CrowdPlanner
 			double angle = rowAngle;
 			boolean straight = false;
 			String kind = row ? "curved row" : "crowd";
-			boolean counter = row && !curve && around.isCounter(tile, rowAngle);
+			// People face a bank booth at whatever slant they walked up at, and a counter only counts as
+			// one when you look at it square on, since counters run along the edges of tiles. So the
+			// square-on direction is tested as well: without it, a tile in the middle of a bank formed
+			// a curve in the open instead of a row along the counter, and one person standing at a
+			// slant was enough to decide it for everybody.
+			double squareOn = Math.round(rowAngle / (Math.PI / 2)) * (Math.PI / 2);
+			boolean counter = row && !curve
+				&& (around.isCounter(tile, rowAngle) || around.isCounter(tile, squareOn));
 			if (counter || (row && lineUp))
 			{
 				if (counter && smallGroupsClose)
