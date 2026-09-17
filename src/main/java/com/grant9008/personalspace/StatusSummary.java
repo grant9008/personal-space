@@ -168,6 +168,7 @@ final class StatusSummary
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
+			.append(", pose ").append(s.pose)
 
 			.append(", test offset ").append(s.testOffset).append('\n');
 		b.append("Safety: ").append(s.gate.label).append('\n');

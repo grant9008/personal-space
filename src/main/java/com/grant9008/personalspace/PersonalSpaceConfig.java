@@ -22,6 +22,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_MAX_STACK = "maxStack";
 	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
 	String KEY_SMALL_GROUPS_CLOSE = "smallGroupsClose";
+	String KEY_POSE = "smallGroupPose";
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
@@ -57,6 +58,27 @@ public interface PersonalSpaceConfig extends Config
 		private final String label;
 
 		Mode(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
+	/** How two or three players standing together in the open are turned. */
+	enum Pose
+	{
+		NATURAL("Natural"),
+		ANGLED("Angled"),
+		FACING("Facing");
+
+		private final String label;
+
+		Pose(String label)
 		{
 			this.label = label;
 		}
@@ -161,6 +183,17 @@ public interface PersonalSpaceConfig extends Config
 	default boolean smallGroupsClose()
 	{
 		return true;
+	}
+
+	@ConfigItem(
+		keyName = KEY_POSE,
+		name = "Small group pose",
+		description = "How two or three players standing together in the open are turned. Natural: the way they really face. Angled: turned halfway towards each other, like a photo. Facing: towards each other. Players at an anvil, booth or fire keep facing it.",
+		position = 6
+	)
+	default Pose pose()
+	{
+		return Pose.NATURAL;
 	}
 
 	@ConfigItem(

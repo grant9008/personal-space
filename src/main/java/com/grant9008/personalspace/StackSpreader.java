@@ -306,6 +306,13 @@ final class StackSpreader
 		return OffsetTable.facing(lookX, lookZ);
 	}
 
+	/** The orientation halfway round from {@code from} to {@code to}, the short way. */
+	static int halfway(int from, int to)
+	{
+		int diff = ((to - from) % FULL_TURN + FULL_TURN + FULL_TURN / 2) % FULL_TURN - FULL_TURN / 2;
+		return ((from + diff / 2) % FULL_TURN + FULL_TURN) % FULL_TURN;
+	}
+
 	static double toRadians(int orientation)
 	{
 		return 2 * Math.PI * (((orientation % FULL_TURN) + FULL_TURN) % FULL_TURN) / FULL_TURN;

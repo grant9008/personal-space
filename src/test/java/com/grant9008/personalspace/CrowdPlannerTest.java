@@ -429,6 +429,30 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void smallGroupsInTheOpenArePosedButBigOnesAndRowsAreNot()
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		planner.pose = PersonalSpaceConfig.Pose.FACING;
+		Assert.assertEquals(PersonalSpaceConfig.Pose.FACING,
+			planner.plan(players(1, NORTH, 2, SOUTH), id -> true, 72, 5, true, false, 1, OPEN).poses.get(TILE));
+		CrowdPlanner three = new CrowdPlanner();
+		three.pose = PersonalSpaceConfig.Pose.FACING;
+		Assert.assertEquals(PersonalSpaceConfig.Pose.FACING,
+			three.plan(players(1, NORTH, 2, SOUTH, 3, 512), id -> true, 72, 5, true, false, 1, OPEN).poses.get(TILE));
+
+		CrowdPlanner four = new CrowdPlanner();
+		four.pose = PersonalSpaceConfig.Pose.FACING;
+		Assert.assertNull(four.plan(players(1, NORTH, 2, SOUTH, 3, 512, 4, 1536), id -> true, 72, 5, true, false, 1, OPEN).poses.get(TILE));
+
+		CrowdPlanner anvil = new CrowdPlanner();
+		anvil.pose = PersonalSpaceConfig.Pose.FACING;
+		Assert.assertNull("an anvil row keeps facing the anvil",
+			anvil.plan(players(1, NORTH, 2, NORTH), id -> true, 72, 5, true, false, 1, ANVIL).poses.get(TILE));
+
+		Assert.assertTrue("natural by default", new CrowdPlanner().plan(players(1, NORTH, 2, SOUTH), id -> true, 72, 5, true, false, 1, OPEN).poses.isEmpty());
+	}
+
+	@Test
 	public void aCrowdFacingAFireIsTurnedToFaceIt()
 	{
 		List<int[]> fireNorth = new ArrayList<>();

@@ -30,6 +30,8 @@ final class StackRegistry
 	private volatile java.util.Set<Integer> unplaced = Collections.emptySet();
 	/** Tiles gathered round a fire, and where the fire is from the tile centre. */
 	private volatile Map<Long, int[]> fires = Collections.emptyMap();
+	/** Small groups posed to face each other or angled towards each other. */
+	private volatile Map<Long, PersonalSpaceConfig.Pose> poses = Collections.emptyMap();
 
 	static long key(int plane, int sceneX, int sceneY)
 	{
@@ -65,9 +67,16 @@ final class StackRegistry
 	void rebuild(List<StackSpreader.Placement> members, java.util.Set<Long> curvedRowTiles, java.util.Set<Integer> unplacedIds,
 		Map<Long, int[]> fireByTile)
 	{
+		rebuild(members, curvedRowTiles, unplacedIds, fireByTile, Collections.emptyMap());
+	}
+
+	void rebuild(List<StackSpreader.Placement> members, java.util.Set<Long> curvedRowTiles, java.util.Set<Integer> unplacedIds,
+		Map<Long, int[]> fireByTile, Map<Long, PersonalSpaceConfig.Pose> poseByTile)
+	{
 		curvedRows = curvedRowTiles == null ? Collections.emptySet() : new java.util.HashSet<>(curvedRowTiles);
 		unplaced = unplacedIds == null ? Collections.emptySet() : new java.util.HashSet<>(unplacedIds);
 		fires = fireByTile == null ? Collections.emptyMap() : new HashMap<>(fireByTile);
+		poses = poseByTile == null ? Collections.emptyMap() : new HashMap<>(poseByTile);
 		rebuild(members);
 	}
 
@@ -79,7 +88,8 @@ final class StackRegistry
 
 	/**
 	 * Which way a player drawn at (dx, dz) from this tile's centre should face: towards the fire the
-	 * crowd is gathered round, round towards what a curved row faces, or just their own facing.
+	 * crowd is gathered round, round towards what a curved row faces, posed for a small group, or
+	 * just their own facing.
 	 */
 	int drawOrientation(long tileKey, int orientation, int dx, int dz)
 	{
@@ -88,7 +98,20 @@ final class StackRegistry
 		{
 			return StackSpreader.faceTowards(orientation, dx, dz, fire[0], fire[1]);
 		}
-		return curvedRows.contains(tileKey) ? StackSpreader.faceSameSpot(orientation, dx, dz) : orientation;
+		if (curvedRows.contains(tileKey))
+		{
+			return StackSpreader.faceSameSpot(orientation, dx, dz);
+		}
+		PersonalSpaceConfig.Pose pose = poses.get(tileKey);
+		if (pose == PersonalSpaceConfig.Pose.FACING)
+		{
+			return StackSpreader.faceTowards(orientation, dx, dz, 0, 0);
+		}
+		if (pose == PersonalSpaceConfig.Pose.ANGLED)
+		{
+			return StackSpreader.halfway(orientation, StackSpreader.faceTowards(orientation, dx, dz, 0, 0));
+		}
+		return orientation;
 	}
 
 	/** True if this player is on a crowded tile but wasn't given a spot this tick. */
@@ -134,6 +157,7 @@ final class StackRegistry
 		curvedRows = Collections.emptySet();
 		unplaced = Collections.emptySet();
 		fires = Collections.emptyMap();
+		poses = Collections.emptyMap();
 		byTile = Collections.emptyMap();
 	}
 

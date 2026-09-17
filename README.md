@@ -8,9 +8,11 @@ turns out to be four friends hanging out.
 
 ![Before and after in a Varrock doorway by a fire](docs/photos/doorway-fire.jpg)
 
+![Before and after: one player turns out to be two](docs/photos/pair.jpg)
+
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-panel.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -19,6 +21,8 @@ turns out to be four friends hanging out.
   or wall, and line up side by side at things people face. Small groups stay close together; big
   crowds get more room.
 - **Players walk into place** with their own walk animation.
+- **Pose small groups.** Two or three players in the open can be angled towards each other like a
+  photo, or turned to face each other, for the perfect fashionscape screenshot.
 - **At an anvil, range or fire**, players form a curve around it and all face it, so nobody ends
   up hitting thin air. A crowd gathered round a fire stays close and faces the fire, whichever side of it they
   end up on. Two players share the space in front of it evenly; extra players fill the
@@ -64,6 +68,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Players per tile | How many players on one tile get their own spot: 2 to 10, with 5 as the sweet spot. |
 | Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. Bank counters, fires and anvils stay closer on their own. Changes show live. |
 | Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |
+| Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
 | Small groups stay close | On: two or three players on a tile stand close together and only big crowds get the full spacing. Off: the spacing applies to every group, for lining up the perfect outfit screenshot. |
 | Move my character too | Off: you stay put and others step around you. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |

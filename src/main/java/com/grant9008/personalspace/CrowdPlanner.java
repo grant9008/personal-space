@@ -61,6 +61,8 @@ final class CrowdPlanner
 		final Set<Long> curvedRows = new HashSet<>();
 		/** Spread tiles gathered round a fire: where the fire is, in local units from the tile centre. Everyone there faces it. */
 		final Map<Long, int[]> fires = new HashMap<>();
+		/** Small groups in the open that are posed (angled or facing each other). */
+		final Map<Long, PersonalSpaceConfig.Pose> poses = new HashMap<>();
 		/** What was decided for each spread tile, for the troubleshooting report. */
 		final Map<Long, TileReport> tiles = new HashMap<>();
 		/** Players standing still on a tile with company whom the game isn't showing. */
@@ -104,6 +106,11 @@ final class CrowdPlanner
 
 	/** The "Small groups stay close" setting: whether spacing grows with the size of the group. Set by the plugin each tick. */
 	boolean smallGroupsClose = true;
+	/** The "Small group pose" setting. Set by the plugin each tick. */
+	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
+
+	/** Largest group the pose applies to. */
+	static final int POSED_GROUP = 3;
 
 	/** How many players each tile's spacing is sized for, and the last tick the tile was that big. */
 	private Map<Long, int[]> previousSizes = new HashMap<>();
@@ -300,6 +307,10 @@ final class CrowdPlanner
 				if (fire != null)
 				{
 					plan.fires.put(tile, new int[]{fire[0] * 2 * HALF_TILE, fire[1] * 2 * HALF_TILE});
+				}
+				else if (!row && pose != PersonalSpaceConfig.Pose.NATURAL && group.size() <= POSED_GROUP)
+				{
+					plan.poses.put(tile, pose);
 				}
 			}
 			if (row && !straight)

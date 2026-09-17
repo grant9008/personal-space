@@ -78,6 +78,8 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JLabel spacingValue = new JLabel();
 	private final PillGroup<PersonalSpaceConfig.Arrangement> arrangementPills = new PillGroup<>(
 		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
+	private final PillGroup<PersonalSpaceConfig.Pose> posePills = new PillGroup<>(
+		PersonalSpaceConfig.Pose.values(), labels(PersonalSpaceConfig.Pose.values()));
 
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
@@ -175,6 +177,7 @@ final class PersonalSpacePanel extends PluginPanel
 		setSliderQuietly(spacingSlider, clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING));
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
+		posePills.select(config.pose());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
@@ -273,6 +276,14 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(0, 0, 0, 0);
 		arrangementPills.setToolTipText("Smart: people line up around things they're facing, like an anvil or bank booth, and everyone else forms rings. Circle: always rings.");
 		card.add(arrangementPills, c);
+
+		c.gridy++;
+		c.insets = new Insets(6, 0, 4, 0);
+		card.add(fieldLabel("Pose for 2 or 3 players"), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		posePills.setToolTipText("Natural: the way they really face. Angled: turned halfway towards each other, like a photo. Facing: towards each other. Players at an anvil, booth or fire keep facing it.");
+		card.add(posePills, c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
@@ -439,6 +450,7 @@ final class PersonalSpacePanel extends PluginPanel
 			}
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
+		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
@@ -468,6 +480,7 @@ final class PersonalSpacePanel extends PluginPanel
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
+		posePills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);
 	}

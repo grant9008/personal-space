@@ -98,6 +98,25 @@ public class StackRegistryTest
 	}
 
 	@Test
+	public void posedPairsFaceOrAngleTowardsEachOther()
+	{
+		long facing = StackRegistry.key(0, 4, 4);
+		long angled = StackRegistry.key(0, 5, 5);
+		java.util.Map<Long, PersonalSpaceConfig.Pose> poses = new java.util.HashMap<>();
+		poses.put(facing, PersonalSpaceConfig.Pose.FACING);
+		poses.put(angled, PersonalSpaceConfig.Pose.ANGLED);
+		StackRegistry r = new StackRegistry();
+		r.rebuild(new ArrayList<>(), java.util.Collections.emptySet(), java.util.Collections.emptySet(), java.util.Collections.emptyMap(), poses);
+		// Drawn east of the middle: facing each other means facing west.
+		Assert.assertEquals(512, r.drawOrientation(facing, 0, 80, 0));
+		Assert.assertEquals(1536, r.drawOrientation(facing, 0, -80, 0));
+		// Both really facing south (the camera): angled turns each halfway in.
+		Assert.assertEquals(256, r.drawOrientation(angled, 0, 80, 0));
+		Assert.assertEquals(1792, r.drawOrientation(angled, 0, -80, 0));
+		Assert.assertEquals("someone in the middle keeps their facing", 300, r.drawOrientation(facing, 300, 0, 0));
+	}
+
+	@Test
 	public void playersWithoutASpotAreRemembered()
 	{
 		long tile = StackRegistry.key(0, 1, 1);
