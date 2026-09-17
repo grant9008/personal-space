@@ -57,6 +57,8 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithers.jpg)
 
+![Before and after chopping yews](docs/photos/yews.jpg)
+
 ![Before and after woodcutting at the willows](docs/photos/willows.jpg)
 
 ![Before and after fishing on a riverbank](docs/photos/fishing.jpg)
