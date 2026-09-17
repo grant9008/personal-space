@@ -363,6 +363,52 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void aBoxedInBankTileSqueezesEveryoneIntoARingRatherThanHidingThem()
+	{
+		// A little point of land: water and rock all round, room only inside the tile itself.
+		CrowdPlanner.Surroundings point = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return Math.abs(dx) <= 45 && Math.abs(dz) <= 45;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 0; i < 7; i++)
+		{
+			still.add(new StackSpreader.Entry(1 + i, TILE, false, NORTH));
+		}
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, point);
+		Assert.assertEquals("all seven fishers get a spot", 7, plan.placements.size());
+		Assert.assertTrue(plan.tiles.get(TILE).shape.endsWith("squeezed into a ring"));
+	}
+
+	@Test
 	public void aSharedLineThatCantFitFallsBackToRows()
 	{
 		// Walls a tile either side of the pair of tiles: not enough edge for ten people in one line.
@@ -406,7 +452,8 @@ public class CrowdPlannerTest
 			still.add(new StackSpreader.Entry(20 + i, StackRegistry.key(0, 51, 50), false, NORTH));
 		}
 		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, cramped);
-		Assert.assertEquals("counter row", plan.tiles.get(StackRegistry.key(0, 50, 50)).shape);
+		Assert.assertTrue(plan.tiles.get(StackRegistry.key(0, 50, 50)).shape.startsWith("counter row"));
+		Assert.assertFalse(plan.tiles.get(StackRegistry.key(0, 50, 50)).shape.contains("shared"));
 	}
 
 	@Test

@@ -295,6 +295,41 @@ final class CrowdPlanner
 		return Double.MAX_VALUE;
 	}
 
+	/**
+	 * A tile's spots: its own shape first. If walls, water or neighbours leave too few for everyone,
+	 * a tight ring on the tile is tried too, first at the tile's spacing and then closer, and used if
+	 * it fits more people. Better close together than hidden in the middle.
+	 *
+	 * @param wanted   how many people need a spot
+	 * @param blocked  set to how many spots the chosen layout had blocked
+	 * @param squeezed set to whether the ring was used instead of the tile's own shape
+	 */
+	private static List<int[]> spotsWithRoom(boolean row, boolean straight, double angle, boolean middleTaken, int spacing,
+		int capacity, int wanted, StackSpreader.SpotCheck check, int[] blocked, boolean[] squeezed)
+	{
+		blocked[0] = 0;
+		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check);
+		int bestBlocked = blocked[0];
+		squeezed[0] = false;
+		for (int s : new int[]{spacing, MIN_SHARED_SPACING})
+		{
+			if (best.size() >= wanted || s > spacing || (!row && s == spacing))
+			{
+				continue;
+			}
+			blocked[0] = 0;
+			List<int[]> ring = StackSpreader.spots(false, false, angle, middleTaken, s, capacity, check);
+			if (ring.size() > best.size())
+			{
+				best = ring;
+				bestBlocked = blocked[0];
+				squeezed[0] = true;
+			}
+		}
+		blocked[0] = bestBlocked;
+		return best;
+	}
+
 	/** How many tiles along a counter or bank to look for someone else's row. */
 	private static final int LINE_LOOKOUT = 4;
 
@@ -379,7 +414,14 @@ final class CrowdPlanner
 				{
 					for (Straight r : chain)
 					{
-						spotsByTile.put(r.tile, StackSpreader.spots(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.check));
+						boolean[] squeezed = {false};
+						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.wanted,
+							r.check, r.blocked, squeezed);
+						if (squeezed[0])
+						{
+							shapeByTile.put(r.tile, shapeByTile.get(r.tile) + ", squeezed into a ring");
+						}
+						spotsByTile.put(r.tile, spots);
 						blockedByTile.put(r.tile, r.blocked[0]);
 					}
 				}
@@ -709,13 +751,21 @@ final class CrowdPlanner
 				shownByTile.put(tile, group.size());
 				continue;
 			}
-			List<int[]> spots = StackSpreader.spots(row, straight, angle, middleTaken, tileSpacing, capacity, check);
-			if (!row && !middleTaken && spots.size() < movable.size())
+			boolean[] squeezed = {false};
+			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
+				Math.min(capacity, movable.size()), check, blocked, squeezed);
+			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
 			{
 				// Walls leave too few spots for everyone: someone stays in the middle without a spot,
 				// so don't also give the middle to someone else.
-				blocked[0] = 0;
-				spots = StackSpreader.spots(false, false, angle, true, tileSpacing, capacity, check);
+				boolean wasRow = row && squeezed[0];
+				spots = spotsWithRoom(false, false, angle, true, tileSpacing, capacity,
+					Math.min(capacity, movable.size()), check, blocked, squeezed);
+				squeezed[0] |= wasRow;
+			}
+			if (squeezed[0])
+			{
+				kind += ", squeezed into a ring";
 			}
 			spotsByTile.put(tile, spots);
 			movableByTile.put(tile, movable);
