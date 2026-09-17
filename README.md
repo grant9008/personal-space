@@ -10,6 +10,10 @@ turns out to be four friends hanging out.
 
 ![Before and after: one player turns out to be two](docs/photos/pair.jpg)
 
+![Before and after: two players facing each other](docs/photos/pair-facing.jpg)
+
+![Two players on one tile in each pose: off, angled, facing, facing close](docs/photos/pair-poses.jpg)
+
 ![A group of three in each pose: off, natural, angled, facing, then facing close and wide](docs/photos/poses.jpg)
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
