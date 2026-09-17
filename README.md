@@ -48,8 +48,6 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 
-![Before and after on the Grand Exchange steps](docs/photos/grand-exchange-steps.jpg)
-
 ![Players in a curve around an anvil in Varrock](docs/photos/anvil.jpg)
 *Smithing together: a group that would all share one tile forms a curve around the anvil.*
 
