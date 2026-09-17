@@ -94,7 +94,9 @@ public interface PersonalSpaceConfig extends Config
 	enum Arrangement
 	{
 		AUTO("Smart"),
-		CIRCLE("Circle");
+		CIRCLE("Circle"),
+		ROW("Line"),
+		ARC("Arc");
 
 		private final String label;
 
@@ -132,7 +134,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_ARRANGEMENT,
 		name = "Arrangement",
-		description = "Smart: the crowd spreads into open space, stays out of booths, stalls, anvils and walls, and lines up at things people face. Circle: a simple ring on each tile.",
+		description = "How everyone on a tile is drawn up. Smart: they line up along whatever they are facing, such as a bank counter, a wall or a fire, and stand in a ring out in the open where there is nothing to line up along. Circle: always a ring. Line: always side by side, even in the open, for a group photo. Arc: a curve, like the crowd round an anvil. Smart always keeps people out of booths, stalls, anvils and walls; the other three keep out of them too, but choose the shape themselves.",
 		position = 1
 	)
 	default Arrangement arrangement()
@@ -188,8 +190,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_SMALL_GROUPS_CLOSE,
-		name = "Auto-space small groups",
-		description = "On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos.",
+		name = "Auto-space",
+		description = "On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn off to unlock the slider: it then sets exactly how far apart everyone stands, anywhere, handy for photos.",
 		position = 5
 	)
 	default boolean smallGroupsClose()

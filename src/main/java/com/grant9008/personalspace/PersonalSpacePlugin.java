@@ -51,7 +51,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.3";
+	static final String VERSION = "1.8.4";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -113,6 +113,7 @@ public class PersonalSpacePlugin extends Plugin
 	private int skippedIds;
 	private int unseen;
 	private String nearestTile;
+	private String yourShape;
 
 	/** Sidebar rate bookkeeping. */
 	private long lastPanelNanos;
@@ -320,6 +321,7 @@ public class PersonalSpacePlugin extends Plugin
 			skippedIds = 0;
 			unseen = 0;
 			nearestTile = null;
+			yourShape = null;
 			return;
 		}
 
@@ -378,8 +380,9 @@ public class PersonalSpacePlugin extends Plugin
 
 		planner.smallGroupsClose = config.smallGroupsClose();
 		planner.pose = config.pose();
+		planner.arrangement = config.arrangement();
 		CrowdPlanner.Plan plan = planner.plan(entries, id -> shownTick[id] == tick, config.spacing(), config.maxStack(),
-			config.arrangement() == PersonalSpaceConfig.Arrangement.AUTO, config.includeLocalPlayer(), tick, surroundings(wv));
+			config.arrangement() != PersonalSpaceConfig.Arrangement.CIRCLE, config.includeLocalPlayer(), tick, surroundings(wv));
 		offsets.clearTargets();
 		for (StackSpreader.Placement pl : plan.placements)
 		{
@@ -405,6 +408,7 @@ public class PersonalSpacePlugin extends Plugin
 		skippedIds = skipped;
 		unseen = plan.unseen;
 		nearestTile = nearestTileReport(plan, local);
+		yourShape = yourShapeReport(plan, local, config.spacing(), config.smallGroupsClose());
 	}
 
 	/** Why the effect must be off right now, or SAFE. */
@@ -486,6 +490,7 @@ public class PersonalSpacePlugin extends Plugin
 		skippedIds = 0;
 		unseen = 0;
 		nearestTile = null;
+		yourShape = null;
 	}
 
 	/** Client thread. The world around crowded tiles; the collision map is only read if a tile needs it. */
@@ -547,6 +552,58 @@ public class PersonalSpacePlugin extends Plugin
 				return PersonalSpacePlugin.this.facesFire(wv, StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
 			}
 		};
+	}
+
+	/**
+	 * Plain words for the shape you are standing in, for the line under the sidebar's title, or null
+	 * when your own tile isn't being spread. It also says why people are close when something other
+	 * than the slider decided that, which is the question the sidebar can't otherwise answer.
+	 */
+	private static String yourShapeReport(CrowdPlanner.Plan plan, Player local, int slider, boolean autoSpace)
+	{
+		LocalPoint lp = local.getLocalLocation();
+		WorldPoint wp = local.getWorldLocation();
+		if (lp == null || wp == null)
+		{
+			return null;
+		}
+		CrowdPlanner.TileReport yours = plan.tiles.get(StackRegistry.key(wp.getPlane(), lp.getSceneX(), lp.getSceneY()));
+		if (yours == null)
+		{
+			return null;
+		}
+		String shape = yours.shape;
+		String what;
+		if (shape.startsWith("counter row"))
+		{
+			what = "a row along the counter or wall";
+		}
+		else if (shape.startsWith("line"))
+		{
+			what = "a line";
+		}
+		else if (shape.contains("fire"))
+		{
+			what = "a ring round the fire";
+		}
+		else if (shape.startsWith("curved row"))
+		{
+			what = "a curve round what you're facing";
+		}
+		else
+		{
+			what = "a ring";
+		}
+		String why = "";
+		if (shape.contains("squeezed"))
+		{
+			why = ", squeezed for room";
+		}
+		else if (autoSpace && yours.spacing < slider)
+		{
+			why = ", kept close by Auto-space";
+		}
+		return "You're in " + what + why;
 	}
 
 	/** What was decided for the spread tile nearest to you, for the report; null if none is near. */
@@ -713,6 +770,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.spotMoves = planner.spotMoves();
 		s.unseenStacked = unseen;
 		s.nearestTile = nearestTile;
+		s.yourShape = yourShape;
 		s.nearby = nearby;
 		s.still = still;
 		s.stackedTiles = stackedTiles;

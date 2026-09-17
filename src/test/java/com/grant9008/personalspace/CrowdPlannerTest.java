@@ -1023,6 +1023,121 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void theLineArrangementStandsThemSideBySideWhereSmartWouldMakeARing()
+	{
+		// Three players in the open with nothing to face: Smart rings them, which puts one behind the
+		// others. Line stands them shoulder to shoulder instead, for a photo.
+		List<StackSpreader.Entry> three = players(1, NORTH, 2, NORTH, 3, NORTH);
+		CrowdPlanner.Plan ring = new CrowdPlanner().plan(three, id -> true, 128, 10, true, false, 1, OPEN);
+		Assert.assertEquals("crowd", ring.tiles.get(TILE).shape);
+
+		CrowdPlanner lineUp = new CrowdPlanner();
+		lineUp.arrangement = PersonalSpaceConfig.Arrangement.ROW;
+		CrowdPlanner.Plan plan = lineUp.plan(three, id -> true, 128, 10, true, false, 1, OPEN);
+		Assert.assertEquals("line", plan.tiles.get(TILE).shape);
+		Assert.assertTrue("a line is straight", plan.curvedRows.isEmpty());
+		Map<Integer, int[]> at = spots(plan);
+		Assert.assertEquals(3, at.size());
+		int depth = at.values().iterator().next()[1];
+		for (Map.Entry<Integer, int[]> e : at.entrySet())
+		{
+			Assert.assertEquals("player " + e.getKey() + " stands out of line", depth, e.getValue()[1]);
+		}
+	}
+
+	@Test
+	public void theArcArrangementCurvesThemWhereSmartWouldMakeARing()
+	{
+		CrowdPlanner arc = new CrowdPlanner();
+		arc.arrangement = PersonalSpaceConfig.Arrangement.ARC;
+		CrowdPlanner.Plan plan = arc.plan(players(1, NORTH, 2, NORTH, 3, NORTH), id -> true, 128, 10, true, false, 1, OPEN);
+		Assert.assertTrue("the tile curves", plan.curvedRows.contains(TILE));
+		Assert.assertEquals(3, plan.placements.size());
+	}
+
+	@Test
+	public void theLineArrangementStillRunsAlongACounter()
+	{
+		CrowdPlanner lineUp = new CrowdPlanner();
+		lineUp.arrangement = PersonalSpaceConfig.Arrangement.ROW;
+		CrowdPlanner.Plan plan = lineUp.plan(players(1, NORTH, 2, NORTH, 3, NORTH), id -> true, 128, 10, true, false, 1,
+			surroundings(true, true, false));
+		Assert.assertEquals("counter row", plan.tiles.get(TILE).shape);
+		Assert.assertEquals(PersonalSpaceConfig.COUNTER_SPACING, plan.tiles.get(TILE).spacing);
+	}
+
+	@Test
+	public void withAutoSpaceOffAPairAgainstAWallUsesTheFullSpacing()
+	{
+		// Two players up against a castle wall: a counter row, which normally stands shoulder to
+		// shoulder. With auto-spacing off the slider decides instead, so a photo can be set up
+		// anywhere, wall or no wall.
+		CrowdPlanner.Surroundings wall = surroundings(true, true, false);
+		CrowdPlanner.Plan close = new CrowdPlanner()
+			.plan(players(1, NORTH, 2, NORTH), id -> true, PersonalSpaceConfig.SPACING_WIDE, 10, true, false, 1, wall);
+		Assert.assertEquals("auto-spacing on keeps them at the counter distance",
+			PersonalSpaceConfig.COUNTER_SPACING, close.tiles.get(TILE).spacing);
+
+		CrowdPlanner unlocked = new CrowdPlanner();
+		unlocked.smallGroupsClose = false;
+		CrowdPlanner.Plan wide = unlocked
+			.plan(players(1, NORTH, 2, NORTH), id -> true, PersonalSpaceConfig.SPACING_WIDE, 10, true, false, 1, wall);
+		Assert.assertEquals("with it off the slider decides", PersonalSpaceConfig.SPACING_WIDE, wide.tiles.get(TILE).spacing);
+		List<int[]> where = new ArrayList<>();
+		for (StackSpreader.Placement placement : wide.placements)
+		{
+			where.add(new int[]{placement.dx, placement.dz});
+		}
+		Assert.assertEquals(2, where.size());
+		double apart = Math.hypot(where.get(0)[0] - where.get(1)[0], where.get(0)[1] - where.get(1)[1]);
+		Assert.assertTrue("they only stand " + apart + " apart", apart >= PersonalSpaceConfig.SPACING_WIDE - 1);
+	}
+
+	@Test
+	public void withAutoSpaceOffACrowdRoundAFireUsesTheFullSpacing()
+	{
+		CrowdPlanner.Surroundings fire = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				List<int[]> fires = new ArrayList<>();
+				fires.add(new int[]{0, 1});
+				return fires;
+			}
+		};
+		List<StackSpreader.Entry> five = players(1, NORTH, 2, NORTH, 3, NORTH, 4, NORTH, 5, NORTH);
+		CrowdPlanner unlocked = new CrowdPlanner();
+		unlocked.smallGroupsClose = false;
+		CrowdPlanner.Plan plan = unlocked.plan(five, id -> true, PersonalSpaceConfig.SPACING_WIDE, 10, true, false, 1, fire);
+		Assert.assertEquals(PersonalSpaceConfig.SPACING_WIDE, plan.tiles.get(TILE).spacing);
+	}
+
+	@Test
 	public void aBigCrowdRoundAFireStaysCloseAtAnySpacing()
 	{
 		CrowdPlanner.Surroundings fireNorth = new CrowdPlanner.Surroundings()

@@ -107,6 +107,9 @@ final class CrowdPlanner
 
 	/** The "Small groups stay close" setting: whether spacing grows with the size of the group. Set by the plugin each tick. */
 	boolean smallGroupsClose = true;
+
+	/** How the sidebar says crowds should be drawn up. Only Line and Arc change what happens here. */
+	PersonalSpaceConfig.Arrangement arrangement = PersonalSpaceConfig.Arrangement.AUTO;
 	/** The "Small group pose" setting. Set by the plugin each tick. */
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
 
@@ -560,6 +563,34 @@ final class CrowdPlanner
 	}
 
 	/**
+	 * The way most of a group is facing, rounded to a quarter turn, so a line runs square across it;
+	 * {@code fallback} when nobody's facing is known.
+	 */
+	private static double facingOfMost(List<StackSpreader.Entry> group, double fallback)
+	{
+		int[] quarters = new int[4];
+		for (StackSpreader.Entry e : group)
+		{
+			if (e.orientation >= 0)
+			{
+				int q = (int) Math.round(StackSpreader.toRadians(e.orientation) / (Math.PI / 2));
+				quarters[((q % 4) + 4) % 4]++;
+			}
+		}
+		int best = -1;
+		int most = 0;
+		for (int q = 0; q < 4; q++)
+		{
+			if (quarters[q] > most)
+			{
+				most = quarters[q];
+				best = q;
+			}
+		}
+		return best < 0 ? fallback : best * (Math.PI / 2);
+	}
+
+	/**
 	 * The group size a tile's spacing is based on. It grows as soon as someone arrives, so the group
 	 * makes room for them, but only shrinks once people have been gone for {@link SlotBook#HOLD_TICKS},
 	 * together with the gap filling, so a player stepping away and back doesn't make everyone move.
@@ -664,6 +695,8 @@ final class CrowdPlanner
 			// A row only makes sense in front of something. Out in the open, people who happen to face
 			// the same way form a crowd instead, so a pair facing east doesn't line up one behind the
 			// other as seen from the usual camera.
+			boolean lineUp = arrangement == PersonalSpaceConfig.Arrangement.ROW;
+			boolean curve = arrangement == PersonalSpaceConfig.Arrangement.ARC;
 			boolean row = shape.row && (around.facesObstacle(tile, shape.angle) || around.facesFire(tile, shape.angle));
 			double rowAngle = shape.angle;
 			if (smart && !row)
@@ -679,18 +712,30 @@ final class CrowdPlanner
 			// At a bank counter or row of booths, people stand close together in a straight line
 			// along it: spread wide, a bank crowd reads as a queue. Around a fire they stay close
 			// too, or it looks deserted.
+			// Line and Arc: drawn up wherever they are, even in the open with nothing to face, which
+			// is where Smart would make a ring. The shape still runs along whatever they are facing.
+			if ((lineUp || curve) && !row)
+			{
+				row = true;
+				rowAngle = facingOfMost(group, shape.angle);
+			}
+
 			int lagged = sizeFor(tile, group.size(), tick);
 			int tileSpacing = smallGroupsClose ? spacingFor(spacing, lagged) : spacing;
 			double angle = rowAngle;
 			boolean straight = false;
 			String kind = row ? "curved row" : "crowd";
-			if (row && around.isCounter(tile, rowAngle))
+			boolean counter = row && !curve && around.isCounter(tile, rowAngle);
+			if (counter || (row && lineUp))
 			{
-				tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.COUNTER_SPACING);
+				if (counter && smallGroupsClose)
+				{
+					tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.COUNTER_SPACING);
+				}
 				// Run exactly along the counter, even if the row was formed by someone facing it at a slant.
 				angle = Math.round(rowAngle / (Math.PI / 2)) * (Math.PI / 2);
 				straight = true;
-				kind = "counter row";
+				kind = counter ? "counter row" : "line";
 			}
 			else
 			{
@@ -699,7 +744,9 @@ final class CrowdPlanner
 				int[] fire = fireFaced(group, around.firesNear(tile));
 				if (fire != null || (row && around.facesFire(tile, rowAngle)))
 				{
-					tileSpacing = Math.min(tileSpacing, PersonalSpaceConfig.FIRE_SPACING);
+					tileSpacing = smallGroupsClose
+						? Math.min(tileSpacing, PersonalSpaceConfig.FIRE_SPACING)
+						: tileSpacing;
 					kind = row ? "fire row" : "crowd round a fire";
 				}
 				if (fire != null)

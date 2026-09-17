@@ -37,6 +37,8 @@ final class Snapshot
 	boolean smallGroupsClose = true;
 	boolean pauseInCombat = true;
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
+	/** Plain words for the shape you are standing in right now, for the sidebar; null when you aren't in one. */
+	String yourShape;
 	/** Players drawn mid-step with their walk animation; total. */
 	long walkDraws;
 	/** Moving players drawn without a walk animation because they were busy with an emote or action; total. */

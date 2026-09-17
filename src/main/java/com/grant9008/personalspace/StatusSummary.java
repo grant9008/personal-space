@@ -197,6 +197,7 @@ final class StatusSummary
 			.append(", being spread: ").append(s.moving)
 			.append(", skipped ids: ").append(s.skippedIds)
 			.append(", stacked but not shown by the game: ").append(s.unseenStacked).append('\n');
+		b.append("Your tile: ").append(s.yourShape == null ? "not being spread" : s.yourShape).append('\n');
 		b.append("Nearest spread tile: ").append(s.nearestTile == null ? "none" : s.nearestTile).append('\n');
 		return b.toString();
 	}

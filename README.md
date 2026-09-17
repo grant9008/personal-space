@@ -28,14 +28,15 @@ turns out to be four friends hanging out.
   crowds get more room.
 - **Players walk into place** with their own walk animation.
 - **Pose small groups.** Two or three players in the open can be angled towards each other like a
-  photo, or turned to face each other, for the perfect fashionscape screenshot.
+  photo, or turned to face each other, for the perfect fashionscape screenshot. **Line** and **Arc**
+  draw any crowd up in a row or a curve wherever they're standing, for a group shot.
 - **At an anvil, range or fire**, players form a curve around it and all face it, so nobody ends
   up hitting thin air. A crowd gathered round a fire stays close and faces the fire, whichever side of it they
   end up on. Two players share the space in front of it evenly; extra players fill the
   curve outwards, then stand in the gaps of a second row behind.
 - **At a bank counter or along a riverbank**, players line up side by side along the edge, close
   together, like a busy bank rather than a queue. Neighbouring tiles share one line: a busy
-  fishing spot fills the water's edge first, then stands in tidy rows just behind it, even when a couple of them are busy casting spells or trading. Around a fire they stay close too, whatever the spacing slider says.
+  fishing spot fills the water's edge first, then stands in tidy rows just behind it, even when a couple of them are busy casting spells or trading. Around a fire they stay close too. Turn **Auto-space** off and the Spacing slider sets those distances instead, so you can push a group right out for a photo.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
   When a crowd shrinks to one player, they step back to the middle of their tile.
@@ -82,12 +83,12 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 
 | Setting | What it does |
 | --- | --- |
-| On/off switch | Spread out crowds, or show the game as normal. The line under the title says what's happening right now, for example "Spreading 7 players on 3 tiles". |
+| On/off switch | Spread out crowds, or show the game as normal. The lines under the title say what's happening right now, for example "Spreading 7 players on 3 tiles" and "You're in a row along the counter or wall". |
 | Players per tile | How many players on one tile get their own spot: 2 to 10, with 5 as the sweet spot. |
-| Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. Bank counters, fires and anvils stay closer on their own. Changes show live. |
-| Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |
+| Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. With **Auto-space** on, bank counters, walls and fires stay closer on their own; turn it off and the slider sets the distance everywhere. Changes show live. |
+| Arrangement | **Smart**: a line along whatever people are facing - a counter, a wall, an anvil, a fire - and a ring out in the open, where there's nothing to line up along. **Circle**: always a ring. **Line**: side by side anywhere, even in the open. **Arc**: a curve, like the crowd round an anvil. |
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
-| Auto-space small groups | On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn it off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos. |
+| Auto-space | On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn it off to unlock the slider: it then sets exactly how far apart everyone stands, anywhere, handy for photos. |
 | Move my character too | Off: you stay put and others step around you. On: you take a spot too, at the front, so what you're doing looks right. |
 | Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |

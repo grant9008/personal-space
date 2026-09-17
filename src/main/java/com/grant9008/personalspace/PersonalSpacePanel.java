@@ -69,6 +69,8 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JLabel statusTitle = new JLabel();
 	/** One line under the title saying what the plugin is doing right now, e.g. "Spreading 7 players on 3 tiles". */
 	private final JLabel liveLine = new JLabel();
+	/** A second line saying what shape you're standing in, e.g. "You're in a row along the counter or wall". */
+	private final JLabel shapeLine = new JLabel();
 	private final JLabel liveDot = new JLabel();
 	private final JLabel statusDetail = new JLabel();
 
@@ -150,6 +152,8 @@ final class PersonalSpacePanel extends PluginPanel
 		StatusSummary.Headline h = StatusSummary.headline(s);
 		liveDot.setIcon(new Dot(colorFor(h.level), 7));
 		liveLine.setText(h.title);
+		shapeLine.setText(s.yourShape == null ? "" : wrap(s.yourShape));
+		shapeLine.setVisible(s.yourShape != null);
 		if (!troubleshootingBody.isVisible())
 		{
 			return;
@@ -241,7 +245,18 @@ final class PersonalSpacePanel extends PluginPanel
 		liveLine.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		liveLine.setToolTipText("What Personal Space is doing right now. Open Troubleshooting for details.");
 		live.add(liveLine, BorderLayout.CENTER);
-		p.add(live, BorderLayout.SOUTH);
+
+		shapeLine.setFont(FontManager.getRunescapeSmallFont());
+		shapeLine.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		shapeLine.setBorder(new EmptyBorder(3, 13, 0, 0));
+		shapeLine.setToolTipText("The shape your own tile is using. Change it with Arrangement, or with the Spacing slider and Auto-space.");
+		shapeLine.setVisible(false);
+
+		JPanel lines = new JPanel(new BorderLayout());
+		lines.setOpaque(false);
+		lines.add(live, BorderLayout.NORTH);
+		lines.add(shapeLine, BorderLayout.SOUTH);
+		p.add(lines, BorderLayout.SOUTH);
 		return p;
 	}
 
@@ -293,7 +308,7 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(fieldLabel("Arrangement"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		arrangementPills.setToolTipText("Smart: people line up around things they're facing, like an anvil or bank booth, and everyone else forms rings. Circle: always rings.");
+		arrangementPills.setToolTipText("How everyone on a tile is drawn up. Smart: along whatever they're facing - a counter, a wall, an anvil, a fire - and a ring out in the open, where there's nothing to line up along. Circle: always a ring. Line: side by side anywhere. Arc: a curve, like the crowd round an anvil.");
 		card.add(arrangementPills, c);
 
 		c.gridy++;
@@ -306,8 +321,8 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
-		card.add(switchRow("Auto-space small groups", smallGroupsSwitch,
-			"On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos."), c);
+		card.add(switchRow("Auto-space", smallGroupsSwitch,
+			"On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn off to unlock the slider: it then sets exactly how far apart everyone stands, anywhere, handy for photos."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
