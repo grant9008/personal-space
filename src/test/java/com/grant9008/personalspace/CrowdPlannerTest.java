@@ -1130,6 +1130,81 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void askingForMoreRoomNeverDrawsPeopleCloserTogether()
+	{
+		// A cramped spot can't give everyone the room the slider asks for, and falls back to a ring.
+		// Whatever it falls back to, a wider setting must never end up tighter than a narrower one:
+		// at an anvil in a small room, Wide used to draw a crowd closer together than Close did.
+		CrowdPlanner.Surroundings smallRoom = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return Math.abs(dx) <= 128 && Math.abs(dz) <= 128;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		for (boolean autoSpace : new boolean[]{true, false})
+		{
+			for (int people = 3; people <= 8; people++)
+			{
+				List<StackSpreader.Entry> group = new ArrayList<>();
+				for (int i = 0; i < people; i++)
+				{
+					group.add(new StackSpreader.Entry(i + 1, TILE, false, NORTH));
+				}
+				double narrower = 0;
+				for (int slider : new int[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_NORMAL, 200,
+					PersonalSpaceConfig.SPACING_WIDE})
+				{
+					CrowdPlanner planner = new CrowdPlanner();
+					planner.smallGroupsClose = autoSpace;
+					CrowdPlanner.Plan plan = null;
+					for (int t = 1; t <= 3; t++)
+					{
+						plan = planner.plan(group, x -> true, slider, 10, true, false, t, smallRoom);
+					}
+					double nearest = Double.MAX_VALUE;
+					List<StackSpreader.Placement> all = plan.placements;
+					for (int i = 0; i < all.size(); i++)
+					{
+						for (int j = i + 1; j < all.size(); j++)
+						{
+							nearest = Math.min(nearest, Math.hypot(all.get(i).dx - all.get(j).dx, all.get(i).dz - all.get(j).dz));
+						}
+					}
+					Assert.assertTrue("auto-space " + autoSpace + ", " + people + " people: " + slider + " drew them "
+						+ nearest + " apart, closer than the setting below it did (" + narrower + ")", nearest >= narrower - 0.5);
+					narrower = nearest;
+				}
+			}
+		}
+	}
+
+	@Test
 	public void aWideSpacingWithSomeoneEitherSideStillGivesEveryoneASpot()
 	{
 		// Keeping clear of a neighbour who stands alone in the middle of their tile costs ground. At

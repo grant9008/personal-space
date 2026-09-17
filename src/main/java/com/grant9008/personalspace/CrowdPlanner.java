@@ -320,19 +320,27 @@ final class CrowdPlanner
 		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, bow, wrap);
 		int bestBlocked = blocked[0];
 		squeezed[0] = false;
-		for (int s : new int[]{spacing, MIN_SHARED_SPACING})
+		// Too little room for the shape they wanted: fall back to a ring, giving up room a step at a
+		// time until everyone fits. Dropping straight to the least room anyone can have meant a wide
+		// slider could draw a cramped crowd closer together than a narrow one did.
+		for (int s = PersonalSpaceConfig.MAX_SPACING; best.size() < wanted; s = Math.max(MIN_SHARED_SPACING, s * 3 / 4))
 		{
-			if (best.size() >= wanted || s > spacing || (!row && s == spacing))
+			// The steps are the same whatever the slider says, so a wider setting always lands on the
+			// same step as a narrower one or a wider step, never a tighter one.
+			if (s <= spacing && (row || s != spacing))
 			{
-				continue;
+				blocked[0] = 0;
+				List<int[]> ring = StackSpreader.spots(false, false, angle, middleTaken, s, capacity, check);
+				if (ring.size() > best.size())
+				{
+					best = ring;
+					bestBlocked = blocked[0];
+					squeezed[0] = true;
+				}
 			}
-			blocked[0] = 0;
-			List<int[]> ring = StackSpreader.spots(false, false, angle, middleTaken, s, capacity, check);
-			if (ring.size() > best.size())
+			if (s == MIN_SHARED_SPACING)
 			{
-				best = ring;
-				bestBlocked = blocked[0];
-				squeezed[0] = true;
+				break;
 			}
 		}
 		blocked[0] = bestBlocked;
