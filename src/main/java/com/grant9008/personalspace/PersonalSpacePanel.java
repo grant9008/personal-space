@@ -289,7 +289,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 		card.add(labelWithValue("Players per tile", perTileValue), c);
 		c.gridy++;
-		perTileSlider.setToolTipText("How many players on one tile get their own spot. 5 is the sweet spot; up to 10 for drop-party chaos.");
+		perTileSlider.setToolTipText("How many players on one tile get their own spot. 5 is the sweet spot; raise it if you see a heap left in the middle at a busy bank, up to 16 for drop-party chaos. The higher it goes, the further out the crowd reaches.");
 		card.add(slider(perTileSlider), c);
 
 		c.gridy++;

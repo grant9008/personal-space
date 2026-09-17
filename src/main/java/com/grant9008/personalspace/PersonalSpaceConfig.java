@@ -27,7 +27,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
-	int MAX_STACK = 10;
+	int MAX_STACK = 16;
 	int DEFAULT_STACK = 5;
 	int MIN_TEST_OFFSET = 0;
 	int MAX_TEST_OFFSET = 64;
@@ -158,7 +158,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_MAX_STACK,
 		name = "Players per tile",
-		description = "Spread out at most this many players on one tile (5 is the sweet spot). Anyone past that stays hidden in the middle, as in the normal game.",
+		description = "Spread out at most this many players on one tile (5 is the sweet spot). Anyone past that stays hidden in the middle, as in the normal game. A busy bank booth can have a dozen people on one tile, so raise it if you keep seeing a heap in the middle; the higher it goes, the further out the crowd reaches to make room.",
 		position = 3
 	)
 	default int maxStack()

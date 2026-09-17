@@ -1135,6 +1135,43 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void aBoothWithADozenPeopleOnItLeavesNobodyInTheHeap()
+	{
+		// A busy bank booth really does get a dozen people on one tile. At the old cap of ten, three of
+		// them were left drawn on top of each other in the middle; the cap now reaches far enough that
+		// everyone gets a spot, and nobody is put on top of anybody else to manage it.
+		CrowdPlanner.Surroundings bank = surroundings(true, true, false);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int id = 1;
+		for (int i = 0; i < 13; i++)
+		{
+			still.add(new StackSpreader.Entry(id++, TILE, false, NORTH));
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			plan = planner.plan(still, x -> true, PersonalSpaceConfig.SPACING_NORMAL, PersonalSpaceConfig.MAX_STACK, true,
+				false, t, bank);
+		}
+		Assert.assertEquals("everyone on the tile got a spot", 13, plan.placements.size());
+		for (StackSpreader.Placement a : plan.placements)
+		{
+			Assert.assertTrue("drawn " + Math.hypot(a.dx, a.dz) + " from where they stand, further than a row reaches",
+				Math.hypot(a.dx, a.dz) <= StackSpreader.MAX_LINE_EXTENT);
+			for (StackSpreader.Placement b : plan.placements)
+			{
+				if (a.id < b.id)
+				{
+					double away = Math.hypot(a.dx - b.dx, a.dz - b.dz);
+					Assert.assertTrue("players " + a.id + " and " + b.id + " only " + away + " apart",
+						away >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+				}
+			}
+		}
+	}
+
+	@Test
 	public void twoTilesAtOneAnvilArentPinnedToTheTightestSpacing()
 	{
 		// Sharing what you face with the tile next door limits how much of the ring is yours. That
