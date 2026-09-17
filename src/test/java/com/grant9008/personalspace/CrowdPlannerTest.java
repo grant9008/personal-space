@@ -1046,6 +1046,50 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void aCurveWithNothingToHugOpensOutWithTheSlider()
+	{
+		// A curve round an anvil or a fire hugs it, so neighbours are about half a tile apart however
+		// wide the slider is set. A curve asked for in the open has nothing to hug, so it opens out
+		// until people stand as far apart as the slider says.
+		List<StackSpreader.Entry> three = players(1, NORTH, 2, NORTH, 3, NORTH);
+
+		CrowdPlanner open = new CrowdPlanner();
+		open.arrangement = PersonalSpaceConfig.Arrangement.ARC;
+		open.smallGroupsClose = false;
+		double wide = nearestPair(open.plan(three, id -> true, PersonalSpaceConfig.SPACING_WIDE, 10, true, false, 1, OPEN));
+		Assert.assertTrue("a curve in the open only stands them " + wide + " apart",
+			wide >= PersonalSpaceConfig.SPACING_WIDE - 8);
+
+		// Auto-space on: a curve round something keeps hugging it, while one in the open still opens
+		// out to the distance auto-spacing picked.
+		CrowdPlanner hugging = new CrowdPlanner();
+		hugging.arrangement = PersonalSpaceConfig.Arrangement.ARC;
+		double close = nearestPair(hugging.plan(three, id -> true, PersonalSpaceConfig.SPACING_WIDE, 10, true, false, 1,
+			surroundings(true, false, false)));
+		Assert.assertTrue("a curve round something should hug it, not stand " + close + " apart", close < 70);
+
+		CrowdPlanner autoOpen = new CrowdPlanner();
+		autoOpen.arrangement = PersonalSpaceConfig.Arrangement.ARC;
+		double auto = nearestPair(autoOpen.plan(three, id -> true, PersonalSpaceConfig.SPACING_WIDE, 10, true, false, 1, OPEN));
+		Assert.assertTrue("a curve in the open is stuck at a hugging distance: " + auto, auto > 70);
+	}
+
+	/** The distance between the two closest players in a plan. */
+	private static double nearestPair(CrowdPlanner.Plan plan)
+	{
+		double nearest = Double.MAX_VALUE;
+		List<StackSpreader.Placement> all = plan.placements;
+		for (int i = 0; i < all.size(); i++)
+		{
+			for (int j = i + 1; j < all.size(); j++)
+			{
+				nearest = Math.min(nearest, Math.hypot(all.get(i).dx - all.get(j).dx, all.get(i).dz - all.get(j).dz));
+			}
+		}
+		return nearest;
+	}
+
+	@Test
 	public void theArcArrangementCurvesThemWhereSmartWouldMakeARing()
 	{
 		CrowdPlanner arc = new CrowdPlanner();

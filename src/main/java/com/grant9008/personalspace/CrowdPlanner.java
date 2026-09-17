@@ -313,10 +313,10 @@ final class CrowdPlanner
 	 * @param squeezed set to whether the ring was used instead of the tile's own shape
 	 */
 	private static List<int[]> spotsWithRoom(boolean row, boolean straight, double angle, boolean middleTaken, int spacing,
-		int capacity, int wanted, StackSpreader.SpotCheck check, int[] blocked, boolean[] squeezed)
+		int capacity, int wanted, StackSpreader.SpotCheck check, int[] blocked, boolean[] squeezed, int arcRadius)
 	{
 		blocked[0] = 0;
-		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check);
+		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius);
 		int bestBlocked = blocked[0];
 		squeezed[0] = false;
 		for (int s : new int[]{spacing, MIN_SHARED_SPACING})
@@ -491,11 +491,12 @@ final class CrowdPlanner
 						}
 						boolean[] squeezed = {false};
 						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.wanted,
-							r.check, r.blocked, squeezed);
+							r.check, r.blocked, squeezed, StackSpreader.LOOK_AHEAD);
 						if (!r.middleTaken && spots.size() < r.wanted)
 						{
 							// Someone will be left in the middle without a spot: don't give the middle away too.
-							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, capacity, r.wanted, r.check, r.blocked, squeezed);
+							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, capacity, r.wanted, r.check, r.blocked, squeezed,
+								StackSpreader.LOOK_AHEAD);
 						}
 						if (squeezed[0])
 						{
@@ -788,7 +789,13 @@ final class CrowdPlanner
 				tileSpacing = Math.min(tileSpacing,
 					Math.max(MIN_SHARED_SPACING, (int) Math.floor(StackSpreader.LOOK_AHEAD * tightest / 2)));
 			}
-			final double margin = row && !straight ? StackSpreader.curvedTurn(tileSpacing) / 2 : 0;
+			// A curve normally hugs what everyone is facing, which limits how far apart it can stand
+			// people. It opens out instead when the slider is in charge (auto-spacing off), or when
+			// it was asked for with nothing to hug, where hugging means nothing anyway.
+			final boolean freeCurve = row && !straight
+				&& !around.facesObstacle(tile, angle) && !around.facesFire(tile, angle) && !plan.fires.containsKey(tile);
+			final int arcRadius = StackSpreader.arcRadius(tileSpacing, !smallGroupsClose || freeCurve);
+			final double margin = row && !straight ? StackSpreader.curvedTurn(tileSpacing, arcRadius) / 2 : 0;
 			final double focusX = -Math.sin(angle) * StackSpreader.LOOK_AHEAD;
 			final double focusZ = -Math.cos(angle) * StackSpreader.LOOK_AHEAD;
 
@@ -823,14 +830,14 @@ final class CrowdPlanner
 			}
 			boolean[] squeezed = {false};
 			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
-				Math.min(capacity, movable.size()), check, blocked, squeezed);
+				Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius);
 			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
 			{
 				// Walls leave too few spots for everyone: someone stays in the middle without a spot,
 				// so don't also give the middle to someone else.
 				boolean wasRow = row && squeezed[0];
 				spots = spotsWithRoom(false, false, angle, true, tileSpacing, capacity,
-					Math.min(capacity, movable.size()), check, blocked, squeezed);
+					Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius);
 				squeezed[0] |= wasRow;
 			}
 			if (squeezed[0])

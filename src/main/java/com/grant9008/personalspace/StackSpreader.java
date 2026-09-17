@@ -124,6 +124,13 @@ final class StackSpreader
 	 */
 	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity, SpotCheck check)
 	{
+		return spots(row, straight, angle, middleTaken, spacing, capacity, check, LOOK_AHEAD);
+	}
+
+	/** As above, on a curve of {@code arcRadius}; see {@link #arcRadius(int, boolean)}. */
+	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity,
+		SpotCheck check, int arcRadius)
+	{
 		List<int[]> out = new ArrayList<>(capacity);
 		if (!row)
 		{
@@ -142,7 +149,7 @@ final class StackSpreader
 			return out;
 		}
 
-		double reach = straight ? STRAIGHT_REACH : WRAP_ARC / curvedTurn(spacing) + 1e-9;
+		double reach = straight ? STRAIGHT_REACH : WRAP_ARC / curvedTurn(spacing, arcRadius) + 1e-9;
 		int width = straight ? ROW_WIDTH : CURVED_ROW_WIDTH;
 		for (int rowNumber = 0; rowNumber < ROWS && out.size() < capacity; rowNumber++)
 		{
@@ -158,7 +165,7 @@ final class StackSpreader
 					{
 						continue;
 					}
-					int[] spot = rowSpot(rowNumber, side == 0 ? step : -step, straight, angle, spacing);
+					int[] spot = rowSpot(rowNumber, side == 0 ? step : -step, straight, angle, spacing, arcRadius);
 					if (spot != null && (check == null || check.canStand(spot[0], spot[1])))
 					{
 						out.add(spot);
@@ -183,6 +190,12 @@ final class StackSpreader
 	 */
 	static int[] rowSpot(int rowNumber, double step, boolean straight, double angle, int spacing)
 	{
+		return rowSpot(rowNumber, step, straight, angle, spacing, LOOK_AHEAD);
+	}
+
+	/** As above, on a curve of {@code arcRadius}; see {@link #arcRadius(int, boolean)}. */
+	static int[] rowSpot(int rowNumber, double step, boolean straight, double angle, int spacing, int arcRadius)
+	{
 		double fwdX = -Math.sin(angle);
 		double fwdZ = -Math.cos(angle);
 		double depth = rowNumber * (double) Math.min(spacing, ROW_DEPTH);
@@ -197,21 +210,47 @@ final class StackSpreader
 			double z = -fwdX * along - fwdZ * depth;
 			return new int[]{(int) Math.round(x), (int) Math.round(z)};
 		}
-		double radius = LOOK_AHEAD + depth;
-		double phi = step * curvedTurn(spacing);
-		double focusX = fwdX * LOOK_AHEAD;
-		double focusZ = fwdZ * LOOK_AHEAD;
+		double radius = arcRadius + depth;
+		double phi = step * curvedTurn(spacing, arcRadius);
+		double focusX = fwdX * arcRadius;
+		double focusZ = fwdZ * arcRadius;
 		double backX = -fwdX * radius;
 		double backZ = -fwdZ * radius;
 		double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
 		double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
+		if (arcRadius > LOOK_AHEAD && Math.hypot(x, z) > MAX_LINE_EXTENT)
+		{
+			// A curve opened out by the slider still reaches no further than a row does.
+			return null;
+		}
 		return new int[]{(int) Math.round(x), (int) Math.round(z)};
 	}
 
 	/** The angle between neighbours in a curved row, in radians. */
 	static double curvedTurn(int spacing)
 	{
-		return Math.min((double) spacing / LOOK_AHEAD, MAX_ARC / ARC_REACH);
+		return curvedTurn(spacing, LOOK_AHEAD);
+	}
+
+	/** The angle between neighbours in a curved row of {@code arcRadius}, in radians. */
+	static double curvedTurn(int spacing, int arcRadius)
+	{
+		return Math.min((double) spacing / arcRadius, MAX_ARC / ARC_REACH);
+	}
+
+	/**
+	 * The circle a curved row stands on. Normally {@link #LOOK_AHEAD}, so the curve hugs whatever
+	 * everyone is facing: an anvil, a tree, a fire. Neighbours are then never more than
+	 * {@link #MAX_ARC} / {@link #ARC_REACH} round from each other, which is about half a tile apart,
+	 * however wide the spacing slider is set.
+	 *
+	 * <p>With {@code wide} - auto-spacing off, so the slider is in charge - the circle grows instead
+	 * of the turn, until neighbours stand a full spacing apart. The curve opens out into a wide
+	 * crescent rather than stopping at half a tile.
+	 */
+	static int arcRadius(int spacing, boolean wide)
+	{
+		return wide ? Math.max(LOOK_AHEAD, (int) Math.ceil(spacing / (MAX_ARC / ARC_REACH))) : LOOK_AHEAD;
 	}
 
 	/** Crowd spot {@code index}, relative to the tile centre: an inner ring, the middle, then an outer ring. */
