@@ -34,8 +34,8 @@ turns out to be four friends hanging out.
   end up on. Two players share the space in front of it evenly; extra players fill the
   curve outwards, then stand in the gaps of a second row behind.
 - **At a bank counter or along a riverbank**, players line up side by side along the edge, close
-  together, like a busy bank rather than a queue. Neighbouring tiles share one line, so a busy
-  fishing spot stands shoulder to shoulder along the water instead of in rows, even when a couple of them are busy casting spells or trading. Around a fire they stay close too, whatever the spacing slider says.
+  together, like a busy bank rather than a queue. Neighbouring tiles share one line: a busy
+  fishing spot fills the water's edge first, then stands in tidy rows just behind it, even when a couple of them are busy casting spells or trading. Around a fire they stay close too, whatever the spacing slider says.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
   When a crowd shrinks to one player, they step back to the middle of their tile.
