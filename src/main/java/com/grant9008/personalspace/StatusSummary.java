@@ -131,7 +131,10 @@ final class StatusSummary
 			out.add(new Check(s.gate == Snapshot.Gate.SAFE ? Level.OK : Level.PAUSED, "Safety", s.gate.label));
 		}
 		out.add(new Check(s.renderer != null ? Level.OK : Level.PROBLEM, "Renderer", s.renderer != null ? s.renderer : "None (turn on GPU)"));
-		out.add(new Check(s.hooked ? Level.OK : (s.renderer == null ? Level.WAITING : Level.PROBLEM), "Connected", s.hooked ? "Yes" : "No"));
+		// Not being connected is only a problem once you're in the world: we deliberately stay out of
+		// the renderer's way at the login screen, while it is still starting up.
+		out.add(new Check(s.hooked ? Level.OK : (loggedIn && s.renderer != null ? Level.PROBLEM : Level.WAITING),
+			"Connected", s.hooked ? "Yes" : "No"));
 		if (loggedIn && s.hooked)
 		{
 			out.add(new Check(s.playerDrawsPerSec > 0 ? Level.OK : (s.noPlayerDrawsSustained ? Level.PROBLEM : Level.WAITING),

@@ -51,7 +51,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.9";
+	static final String VERSION = "1.8.10";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -226,6 +226,16 @@ public class PersonalSpacePlugin extends Plugin
 	 */
 	private void ensureInstalled()
 	{
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			// There is nothing to spread until you are in the world, and a renderer is at its most
+			// delicate while it is starting up or shutting down: it creates and destroys its native
+			// drawing context around then, and anything standing in front of it at that moment can be
+			// handed calls it isn't ready for. So we stay out of the way until the world is up.
+			uninstall();
+			return;
+		}
+
 		DrawCallbacks current = client.getDrawCallbacks();
 		if (current == null)
 		{
