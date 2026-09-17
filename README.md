@@ -18,7 +18,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-settings.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-live.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -38,7 +38,9 @@ turns out to be four friends hanging out.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
   When a crowd shrinks to one player, they step back to the middle of their tile.
-- **Purely cosmetic.** Nobody's real position, clickbox, name, chat or minimap dot changes.
+- **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
+  changes: you click, trade and follow them where they really stand, and names, chat and minimap
+  dots stay put.
 - **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds, in
   PvP minigames such as Castle Wars, Soul Wars and Last Man Standing, and while you're in combat.
   It never shows players the game itself (or another plugin such as Entity Hider) keeps hidden,
@@ -70,7 +72,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 
 | Setting | What it does |
 | --- | --- |
-| On/off switch | Spread out crowds, or show the game as normal. |
+| On/off switch | Spread out crowds, or show the game as normal. The line under the title says what's happening right now, for example "Spreading 7 players on 3 tiles". |
 | Players per tile | How many players on one tile get their own spot: 2 to 10, with 5 as the sweet spot. |
 | Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. Bank counters, fires and anvils stay closer on their own. Changes show live. |
 | Arrangement | **Smart** lines people up at things they're facing and rings everyone else. **Circle** always uses rings. |

@@ -67,6 +67,9 @@ final class PersonalSpacePanel extends PluginPanel
 	private final ToggleSwitch activeSwitch = new ToggleSwitch();
 	private final JLabel statusDot = new JLabel();
 	private final JLabel statusTitle = new JLabel();
+	/** One line under the title saying what the plugin is doing right now, e.g. "Spreading 7 players on 3 tiles". */
+	private final JLabel liveLine = new JLabel();
+	private final JLabel liveDot = new JLabel();
 	private final JLabel statusDetail = new JLabel();
 
 	private final JSlider perTileSlider = new JSlider(PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK, PersonalSpaceConfig.DEFAULT_STACK);
@@ -143,12 +146,14 @@ final class PersonalSpacePanel extends PluginPanel
 	void update(Snapshot s)
 	{
 		last = s;
+		StatusSummary.Headline h = StatusSummary.headline(s);
+		liveDot.setIcon(new Dot(colorFor(h.level), 7));
+		liveLine.setText(h.title);
 		if (!troubleshootingBody.isVisible())
 		{
 			return;
 		}
 
-		StatusSummary.Headline h = StatusSummary.headline(s);
 		statusDot.setIcon(new Dot(colorFor(h.level), 10));
 		statusTitle.setText(wrap(h.title));
 		statusDetail.setText(wrap(h.detail));
@@ -223,6 +228,18 @@ final class PersonalSpacePanel extends PluginPanel
 		p.add(title, BorderLayout.WEST);
 		activeSwitch.setToolTipText("Turn spreading out crowds on or off");
 		p.add(activeSwitch, BorderLayout.EAST);
+
+		JPanel live = new JPanel(new BorderLayout(5, 0));
+		live.setOpaque(false);
+		live.setBorder(new EmptyBorder(6, 1, 0, 0));
+		liveDot.setIcon(new Dot(ColorScheme.MEDIUM_GRAY_COLOR, 7));
+		liveDot.setBorder(new EmptyBorder(1, 0, 0, 0));
+		live.add(liveDot, BorderLayout.WEST);
+		liveLine.setFont(FontManager.getRunescapeSmallFont());
+		liveLine.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		liveLine.setToolTipText("What Personal Space is doing right now. Open Troubleshooting for details.");
+		live.add(liveLine, BorderLayout.CENTER);
+		p.add(live, BorderLayout.SOUTH);
 		return p;
 	}
 
@@ -294,6 +311,13 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
 			"Off: you stay where you are and others step around you."), c);
+
+		c.gridy++;
+		c.insets = new Insets(10, 0, 0, 0);
+		JLabel note = new JLabel(wrap("Visual only. Players are drawn shifted so you can see them, but you click them where they really stand."));
+		note.setFont(FontManager.getRunescapeSmallFont());
+		note.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		card.add(note, c);
 		return wrapCard(card);
 	}
 
