@@ -567,9 +567,22 @@ final class CrowdPlanner
 					}
 					Straight first = chain.get(0);
 					Straight last = chain.get(chain.size() - 1);
+					// A line only curves where there is nobody behind it to curve into: the wings of a bow
+					// fall back from the edge, and a row behind falls back further still.
+					boolean roomToBow = bowRows;
+					for (Straight r : chain)
+					{
+						for (int back = 1; back <= 2 && roomToBow; back++)
+						{
+							int aheadX = (int) Math.round(-Math.sin(r.angle));
+							int aheadZ = (int) Math.round(-Math.cos(r.angle));
+							roomToBow = !byTile.containsKey(
+								StackRegistry.key(r.plane, r.sceneX - aheadX * back, r.sceneY - aheadZ * back));
+						}
+					}
 					shared.add(new LineBook.Line(first.plane, first.sideX, first.sideY, first.across, first.angle, spacing, members,
 						first.centre() - lineEnd(byTile, loneId, first, -1, spacing),
-						last.centre() + lineEnd(byTile, loneId, last, 1, spacing)));
+						last.centre() + lineEnd(byTile, loneId, last, 1, spacing), roomToBow));
 				}
 				start = i;
 			}
@@ -675,6 +688,7 @@ final class CrowdPlanner
 		}
 		slots.localId = localId;
 		lineBook.localId = localId;
+		lineBook.bow = arrangement != PersonalSpaceConfig.Arrangement.ROW;
 
 		Plan plan = new Plan();
 		shapes.startTick();

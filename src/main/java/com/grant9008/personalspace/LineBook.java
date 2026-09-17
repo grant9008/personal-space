@@ -91,9 +91,18 @@ final class LineBook
 		/** How far along the line spots may go, in local units: halfway to anyone else's row. */
 		final double from;
 		final double to;
+		/** Whether this line may curve round each tile's booth: only where nobody stands behind it. */
+		final boolean bow;
 
 		Line(int plane, int sideX, int sideY, int across, double angle, int spacing, List<Member> members, double from, double to)
 		{
+			this(plane, sideX, sideY, across, angle, spacing, members, from, to, false);
+		}
+
+		Line(int plane, int sideX, int sideY, int across, double angle, int spacing, List<Member> members, double from, double to,
+			boolean bow)
+		{
+			this.bow = bow;
 			this.plane = plane;
 			this.sideX = sideX;
 			this.sideY = sideY;
@@ -189,6 +198,9 @@ final class LineBook
 	 * (fishing, banking) should look right on your own screen.
 	 */
 	int localId = -1;
+
+	/** Whether each tile's people curve gently round their own booth, rather than standing dead flat. */
+	boolean bow = true;
 
 	private long localTile = Long.MIN_VALUE;
 	private int localSince;
@@ -535,7 +547,22 @@ final class LineBook
 					continue;
 				}
 				double d = line.along(spot.row, spot.j) - m.centre();
+				// Each tile's people curve round their own booth while their places along the line stay
+				// exactly where they were: the line is still shared, it just isn't a flat wall of
+				// people. Rows behind get back the depth the bow can cost them, since they stand half a
+				// spacing along from the row in front, where the bow has moved away from them.
 				int depth = spot.row * line.rowGap();
+				if (bow && line.bow)
+				{
+					// A gentle curve round each booth along the line: whoever stands opposite one is at
+					// the counter, and the people to either side of them fall back a little. It is
+					// measured from the booth a spot sits at, not from the person's own tile and not
+					// from the middle of the line, so it doesn't jump where two tiles meet and doesn't
+					// change when a tile further along empties.
+					double alongHere = line.along(spot.row, spot.j);
+					double booth = Math.round((alongHere - m.centre()) / (double) TILE) * TILE + m.centre();
+					depth += StackSpreader.bowBack(alongHere - booth);
+				}
 				out.add(new StackSpreader.Placement(id, m.tile,
 					(int) Math.round(line.sideX * d - aheadX * depth), (int) Math.round(line.sideY * d - aheadZ * depth)));
 				placed++;

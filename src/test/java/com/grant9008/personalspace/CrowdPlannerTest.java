@@ -334,7 +334,8 @@ public class CrowdPlannerTest
 		Map<Integer, int[]> at = drawnAt(plan);
 		for (StackSpreader.Placement p : plan.placements)
 		{
-			Assert.assertEquals("player " + p.id + " is at the edge, not in a row behind", 0, p.dz);
+			Assert.assertTrue("player " + p.id + " is in a row behind, not at the edge (" + p.dz + ")",
+				Math.abs(p.dz) <= StackSpreader.MAX_BOW);
 		}
 		List<int[]> sorted = new ArrayList<>(at.values());
 		sorted.sort((a, b) -> Integer.compare(a[0], b[0]));
@@ -464,7 +465,8 @@ public class CrowdPlannerTest
 		for (StackSpreader.Placement p : plan.placements)
 		{
 			Assert.assertTrue("player " + p.id + " is on the land side", p.dz <= 0);
-			edge += p.dz == 0 ? 1 : 0;
+			// At the edge, allowing for the gentle bow round each tile's own stretch of it.
+			edge += Math.abs(p.dz) <= StackSpreader.MAX_BOW ? 1 : 0;
 		}
 		Assert.assertTrue("the edge is filled first: " + edge, edge >= 9);
 		List<int[]> all = new ArrayList<>(at.values());
@@ -646,7 +648,8 @@ public class CrowdPlannerTest
 		{
 			after = spots(planner.plan(withYou, x -> true, 128, 10, true, true, t, shortBank));
 		}
-		Assert.assertEquals("you stand at the water's edge", 0, after.get(99)[1]);
+		Assert.assertTrue("you stand " + after.get(99)[1] + " back, not at the water's edge",
+			Math.abs(after.get(99)[1]) <= StackSpreader.MAX_BOW);
 		int moved = 0;
 		for (Map.Entry<Integer, int[]> e : before.entrySet())
 		{
