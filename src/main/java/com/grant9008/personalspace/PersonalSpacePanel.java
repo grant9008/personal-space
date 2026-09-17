@@ -86,6 +86,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
+	private final ToggleSwitch combatSwitch = new ToggleSwitch();
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
@@ -185,6 +186,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.select(config.pose());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
+		combatSwitch.setOn(config.pauseInCombat());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
 		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
 		testOffsetValue.setText(testOffsetSlider.getValue() + " units");
@@ -311,6 +313,11 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
 			"Off: you stay where you are and others step around you."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Pause while I'm fighting", combatSwitch,
+			"On: everyone is shown where they really stand while you fight, and for a few seconds after. Keep this on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer."), c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
@@ -477,6 +484,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
+		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
 		testOffsetSlider.addChangeListener(e ->
@@ -507,6 +515,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);
+		combatSwitch.setEnabled(enabled);
 	}
 
 	/** Show the spacing as a share of a tile, and light up the matching quick pick if there is one. */

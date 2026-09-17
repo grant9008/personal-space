@@ -35,6 +35,7 @@ final class Snapshot
 	int maxStack;
 	boolean includeLocal;
 	boolean smallGroupsClose = true;
+	boolean pauseInCombat = true;
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
 	/** Players drawn mid-step with their walk animation; total. */
 	long walkDraws;

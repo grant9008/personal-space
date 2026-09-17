@@ -226,6 +226,7 @@ public class StatusSummaryTest
 		Assert.assertTrue(r.contains("stacked tiles: 2"));
 		Assert.assertTrue(r.contains("players in other calls (should be 0): 0"));
 		Assert.assertTrue(r.contains("hidden shown/sec: 0"));
+		Assert.assertTrue(r.contains("pause in combat yes"));
 	}
 
 	private static boolean hasLabel(List<StatusSummary.Check> checks, String label)

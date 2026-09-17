@@ -23,6 +23,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_INCLUDE_LOCAL = "includeLocalPlayer";
 	String KEY_SMALL_GROUPS_CLOSE = "smallGroupsClose";
 	String KEY_POSE = "smallGroupPose";
+	String KEY_PAUSE_IN_COMBAT = "pauseInCombat";
 	String KEY_TEST_OFFSET = "testOffset";
 
 	int MIN_STACK = 2;
@@ -172,6 +173,17 @@ public interface PersonalSpaceConfig extends Config
 	default boolean includeLocalPlayer()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+		keyName = KEY_PAUSE_IN_COMBAT,
+		name = "Pause while I'm fighting",
+		description = "On: everyone is shown where they really stand while you fight, and for a few seconds after. Keep this on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer.",
+		position = 7
+	)
+	default boolean pauseInCombat()
+	{
+		return true;
 	}
 
 	@ConfigItem(

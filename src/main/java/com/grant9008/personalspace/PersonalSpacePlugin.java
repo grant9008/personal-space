@@ -51,7 +51,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.7.5";
+	static final String VERSION = "1.7.6";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -433,7 +433,8 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		Actor target = local.getInteracting();
 		boolean attacking = target instanceof NPC || target instanceof Player;
-		if (combat.update(local.getHealthRatio() != -1, attacking, attacking && target.getHealthRatio() != -1, tick))
+		boolean fighting = combat.update(local.getHealthRatio() != -1, attacking, attacking && target.getHealthRatio() != -1, tick);
+		if (fighting && config.pauseInCombat())
 		{
 			return Snapshot.Gate.IN_COMBAT;
 		}
@@ -662,6 +663,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.smallGroupsClose = config.smallGroupsClose();
+		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();
 		s.testOffset = config.testOffset();
 

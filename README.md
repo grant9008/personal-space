@@ -16,7 +16,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-live.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v176.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -40,7 +40,8 @@ turns out to be four friends hanging out.
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.
 - **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds, in
-  PvP minigames such as Castle Wars, Soul Wars and Last Man Standing, and while you're in combat.
+  PvP minigames such as Castle Wars, Soul Wars and Last Man Standing, and (unless you turn it off)
+  while you're fighting.
   It never shows players the game itself (or another plugin such as Entity Hider) keeps hidden,
   and they never push anyone else aside.
 
@@ -77,6 +78,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
 | Auto-space small groups | On: groups of 2 or 3 automatically stand close together, whatever the Spacing slider says. Turn it off to unlock them: the Spacing slider then sets exactly how far apart small groups stand, handy for photos. |
 | Move my character too | Off: you stay put and others step around you. |
+| Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
 
 If crowds aren't spreading, open **Troubleshooting**: the status at the top says why (for example
