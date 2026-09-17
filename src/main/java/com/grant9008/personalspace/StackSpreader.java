@@ -39,7 +39,7 @@ final class StackSpreader
 	static final double WRAP_ARC = Math.toRadians(135);
 
 	/** Most players in one straight row before the next row starts. */
-	static final int ROW_WIDTH = 6;
+	static final int ROW_WIDTH = 8;
 	/** Most players in one curved row before the next row starts. */
 	static final int CURVED_ROW_WIDTH = 10;
 	private static final int ROWS = 3;

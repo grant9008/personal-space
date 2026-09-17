@@ -33,7 +33,7 @@ public class StackSpreaderTest
 		// spot, doesn't go past its sides, and everyone turned to face the same spot faces the anvil.
 		double focusX = 0;
 		double focusZ = StackSpreader.LOOK_AHEAD;
-		for (int[] o : StackSpreader.spots(true, false, Math.PI, false, PersonalSpaceConfig.MAX_SPACING, StackSpreader.ROW_WIDTH, null))
+		for (int[] o : StackSpreader.spots(true, false, Math.PI, false, PersonalSpaceConfig.MAX_SPACING, 6, null))
 		{
 			Assert.assertEquals("everyone is the same distance from the anvil", StackSpreader.LOOK_AHEAD,
 				Math.hypot(o[0] - focusX, o[1] - focusZ), 2);
@@ -195,9 +195,9 @@ public class StackSpreaderTest
 	@Test
 	public void aRowBehindStandsInTheGaps()
 	{
-		List<int[]> spots = StackSpreader.spots(true, true, Math.PI, false, 42, 7, null);
-		Assert.assertEquals("the second row starts straight behind the middle", 0, spots.get(6)[0]);
-		Assert.assertTrue(spots.get(6)[1] < 0);
+		List<int[]> spots = StackSpreader.spots(true, true, Math.PI, false, 42, StackSpreader.ROW_WIDTH + 1, null);
+		Assert.assertEquals("the second row starts straight behind the middle", 0, spots.get(StackSpreader.ROW_WIDTH)[0]);
+		Assert.assertTrue(spots.get(StackSpreader.ROW_WIDTH)[1] < 0);
 	}
 
 	@Test

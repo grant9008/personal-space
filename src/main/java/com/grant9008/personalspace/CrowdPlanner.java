@@ -284,15 +284,227 @@ final class CrowdPlanner
 	private static double counterReach(Map<Long, List<StackSpreader.Entry>> byTile, int plane, int sceneX, int sceneY,
 		int sideX, int sideY, int spacing)
 	{
-		if (byTile.containsKey(StackRegistry.key(plane, sceneX + sideX, sceneY + sideY)))
+		for (int k = 1; k <= LINE_LOOKOUT; k++)
 		{
-			return HALF_TILE - spacing / 2.0;
-		}
-		if (byTile.containsKey(StackRegistry.key(plane, sceneX + 2 * sideX, sceneY + 2 * sideY)))
-		{
-			return 2 * HALF_TILE - spacing / 2.0;
+			if (byTile.containsKey(StackRegistry.key(plane, sceneX + k * sideX, sceneY + k * sideY)))
+			{
+				// Halfway to them, less half a spacing, so their row can reach halfway back.
+				return k * HALF_TILE - spacing / 2.0;
+			}
 		}
 		return Double.MAX_VALUE;
+	}
+
+	/** How many tiles along a counter or bank to look for someone else's row. */
+	private static final int LINE_LOOKOUT = 4;
+
+	/** A tile lined up along a counter or riverbank, waiting to be given its spots. */
+	private static final class Straight
+	{
+		final long tile;
+		final int plane;
+		final int sceneX;
+		final int sceneY;
+		final int sideX;
+		final int sideY;
+		final double angle;
+		final int spacing;
+		final boolean middleTaken;
+		final int wanted;
+		final StackSpreader.SpotCheck check;
+		final int[] blocked;
+		/** Position along the line, in tiles. */
+		final int along;
+		/** Which line this is: the other scene coordinate. */
+		final int across;
+
+		Straight(long tile, int plane, int sceneX, int sceneY, int sideX, int sideY, double angle, int spacing,
+			boolean middleTaken, int wanted, StackSpreader.SpotCheck check, int[] blocked)
+		{
+			this.tile = tile;
+			this.plane = plane;
+			this.sceneX = sceneX;
+			this.sceneY = sceneY;
+			this.sideX = sideX;
+			this.sideY = sideY;
+			this.angle = angle;
+			this.spacing = spacing;
+			this.middleTaken = middleTaken;
+			this.wanted = wanted;
+			this.check = check;
+			this.blocked = blocked;
+			this.along = sceneX * sideX + sceneY * sideY;
+			this.across = sideX != 0 ? sceneY : sceneX;
+		}
+
+		double centre()
+		{
+			return along * 2.0 * HALF_TILE;
+		}
+
+		long keyAt(int alongTiles)
+		{
+			return sideX != 0
+				? StackRegistry.key(plane, alongTiles * sideX, across)
+				: StackRegistry.key(plane, across, alongTiles * sideY);
+		}
+	}
+
+	/**
+	 * Give every counter or riverbank tile its spots. Neighbouring tiles along the same line share one
+	 * line between them, so a busy bank or fishing spot stands side by side all along the edge instead
+	 * of each tile squeezing its people into rows behind. A tile on its own keeps its own row.
+	 */
+	private static void layOutStraightRows(List<Straight> rows, Map<Long, List<StackSpreader.Entry>> byTile, int capacity,
+		Surroundings around, Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile,
+		Map<Long, Integer> spacingByTile, Map<Long, Integer> blockedByTile)
+	{
+		Map<String, List<Straight>> lines = new LinkedHashMap<>();
+		for (Straight r : rows)
+		{
+			lines.computeIfAbsent(r.plane + ":" + r.sideX + ":" + r.sideY + ":" + r.across, k -> new ArrayList<>()).add(r);
+		}
+		for (List<Straight> line : lines.values())
+		{
+			line.sort(Comparator.comparingInt(r -> r.along));
+			int start = 0;
+			for (int i = 1; i <= line.size(); i++)
+			{
+				if (i < line.size() && line.get(i).along == line.get(i - 1).along + 1)
+				{
+					continue;
+				}
+				List<Straight> chain = line.subList(start, i);
+				if (chain.size() < 2 || !shareLine(chain, byTile, around, spotsByTile, shapeByTile, spacingByTile, blockedByTile))
+				{
+					for (Straight r : chain)
+					{
+						spotsByTile.put(r.tile, StackSpreader.spots(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.check));
+						blockedByTile.put(r.tile, r.blocked[0]);
+					}
+				}
+				start = i;
+			}
+		}
+	}
+
+	/**
+	 * Lay neighbouring tiles out along one shared line: spots every spacing along it, on a grid fixed
+	 * to the map so they don't slide about as people come and go, reaching past the ends onto free
+	 * edge. Each tile gets a run of spots in order along the line, as close to its own middle as the
+	 * others allow, so nobody crosses over anyone else. Returns false (and changes nothing) if the line
+	 * can't fit everyone.
+	 */
+	private static boolean shareLine(List<Straight> chain, Map<Long, List<StackSpreader.Entry>> byTile, Surroundings around,
+		Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile, Map<Long, Integer> spacingByTile,
+		Map<Long, Integer> blockedByTile)
+	{
+		int s = Integer.MAX_VALUE;
+		int needed = 0;
+		for (Straight r : chain)
+		{
+			s = Math.min(s, r.spacing);
+			needed += r.wanted;
+		}
+		Straight first = chain.get(0);
+		Straight last = chain.get(chain.size() - 1);
+		double lo = first.centre() - lineEnd(byTile, first, -1, s);
+		double hi = last.centre() + lineEnd(byTile, last, 1, s);
+
+		List<Double> points = new ArrayList<>();
+		List<Double> rejected = new ArrayList<>();
+		for (long j = (long) Math.ceil(lo / s); j * s <= hi; j++)
+		{
+			double p = j * (double) s;
+			Straight owner = first;
+			for (Straight r : chain)
+			{
+				if (Math.abs(p - r.centre()) < Math.abs(p - owner.centre()))
+				{
+					owner = r;
+				}
+			}
+			boolean middleInUse = false;
+			for (Straight r : chain)
+			{
+				middleInUse |= r.middleTaken && Math.abs(p - r.centre()) < 0.75 * s;
+			}
+			double d = p - owner.centre();
+			if (middleInUse || !around.canStand(owner.tile, (int) Math.round(owner.sideX * d), (int) Math.round(owner.sideY * d)))
+			{
+				rejected.add(p);
+				continue;
+			}
+			points.add(p);
+		}
+		if (points.size() < needed)
+		{
+			return false;
+		}
+
+		// The run of spots that keeps everyone closest to their own tile.
+		int bestStart = 0;
+		double bestCost = Double.MAX_VALUE;
+		for (int w = 0; w + needed <= points.size(); w++)
+		{
+			double cost = 0;
+			int index = w;
+			for (Straight r : chain)
+			{
+				double sum = 0;
+				for (int k = 0; k < r.wanted; k++)
+				{
+					sum += points.get(index + k);
+				}
+				cost += Math.abs(sum / r.wanted - r.centre());
+				index += r.wanted;
+			}
+			if (cost < bestCost - 1e-9)
+			{
+				bestCost = cost;
+				bestStart = w;
+			}
+		}
+
+		double from = points.get(bestStart);
+		double to = points.get(bestStart + needed - 1);
+		int blocked = 0;
+		for (double p : rejected)
+		{
+			blocked += p > from && p < to ? 1 : 0;
+		}
+		int index = bestStart;
+		for (Straight r : chain)
+		{
+			List<Double> own = new ArrayList<>(points.subList(index, index + r.wanted));
+			index += r.wanted;
+			double centre = r.centre();
+			own.sort(Comparator.<Double>comparingDouble(p -> Math.abs(p - centre)).thenComparingDouble(p -> p));
+			List<int[]> spots = new ArrayList<>(own.size());
+			for (double p : own)
+			{
+				double d = p - centre;
+				spots.add(new int[]{(int) Math.round(r.sideX * d), (int) Math.round(r.sideY * d)});
+			}
+			spotsByTile.put(r.tile, spots);
+			shapeByTile.put(r.tile, "counter row shared by " + chain.size() + " tiles");
+			spacingByTile.put(r.tile, s);
+			blockedByTile.put(r.tile, blocked);
+		}
+		return true;
+	}
+
+	/** How far a shared line may reach past its end: halfway to the next row along it, or three tiles. */
+	private static double lineEnd(Map<Long, List<StackSpreader.Entry>> byTile, Straight end, int direction, int spacing)
+	{
+		for (int k = 1; k <= LINE_LOOKOUT; k++)
+		{
+			if (byTile.containsKey(end.keyAt(end.along + direction * k)))
+			{
+				return Math.max(0, k * HALF_TILE - spacing / 2.0);
+			}
+		}
+		return StackSpreader.MAX_LINE_EXTENT;
 	}
 
 	/**
@@ -348,6 +560,7 @@ final class CrowdPlanner
 		Map<Long, Integer> spacingByTile = new HashMap<>();
 		Map<Long, Integer> shownByTile = new HashMap<>();
 		Map<Long, Integer> blockedByTile = new HashMap<>();
+		List<Straight> pendingStraight = new ArrayList<>();
 		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
 		{
 			List<StackSpreader.Entry> everyone = e.getValue();
@@ -401,7 +614,8 @@ final class CrowdPlanner
 			// At a bank counter or row of booths, people stand close together in a straight line
 			// along it: spread wide, a bank crowd reads as a queue. Around a fire they stay close
 			// too, or it looks deserted.
-			int tileSpacing = smallGroupsClose ? spacingFor(spacing, sizeFor(tile, group.size(), tick)) : spacing;
+			int lagged = sizeFor(tile, group.size(), tick);
+			int tileSpacing = smallGroupsClose ? spacingFor(spacing, lagged) : spacing;
 			double angle = rowAngle;
 			boolean straight = false;
 			String kind = row ? "curved row" : "crowd";
@@ -482,6 +696,19 @@ final class CrowdPlanner
 					}
 					return true;
 				};
+			if (straight)
+			{
+				// Laid out after every tile is known, so neighbours along the same counter or bank can
+				// share one line.
+				int wanted = Math.min(capacity, Math.max(movable.size(), lagged - (group.size() - movable.size())));
+				pendingStraight.add(new Straight(tile, plane, sceneX, sceneY, sideX, sideY, angle, tileSpacing, middleTaken,
+					wanted, check, blocked));
+				movableByTile.put(tile, movable);
+				shapeByTile.put(tile, kind);
+				spacingByTile.put(tile, tileSpacing);
+				shownByTile.put(tile, group.size());
+				continue;
+			}
 			List<int[]> spots = StackSpreader.spots(row, straight, angle, middleTaken, tileSpacing, capacity, check);
 			if (!row && !middleTaken && spots.size() < movable.size())
 			{
@@ -497,6 +724,8 @@ final class CrowdPlanner
 			shownByTile.put(tile, group.size());
 			blockedByTile.put(tile, blocked[0]);
 		}
+
+		layOutStraightRows(pendingStraight, byTile, capacity, around, spotsByTile, shapeByTile, spacingByTile, blockedByTile);
 
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 

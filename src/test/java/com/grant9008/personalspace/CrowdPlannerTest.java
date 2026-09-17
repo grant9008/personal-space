@@ -298,6 +298,117 @@ public class CrowdPlannerTest
 		Assert.assertFalse(plan.unplaced.isEmpty());
 	}
 
+	/** Where each placed player is drawn, in scene local units: {x, z}. */
+	private static Map<Integer, int[]> drawnAt(CrowdPlanner.Plan plan)
+	{
+		Map<Integer, int[]> at = new HashMap<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			at.put(p.id, new int[]{StackRegistry.sceneX(p.tile) * 128 + p.dx, StackRegistry.sceneY(p.tile) * 128 + p.dz});
+		}
+		return at;
+	}
+
+	@Test
+	public void fishersOnNeighbouringBankTilesShareOneLineAlongTheBank()
+	{
+		// The reported case: four bank tiles in a row, 3 or 4 fishers on each, all facing the water to
+		// the north. Everyone should stand at the edge, nobody in a row behind.
+		CrowdPlanner.Surroundings bank = surroundings(true, true, false);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int id = 1;
+		int[] perTile = {3, 4, 3, 4};
+		for (int t = 0; t < perTile.length; t++)
+		{
+			for (int i = 0; i < perTile[t]; i++)
+			{
+				still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 50 + t, 50), false, NORTH));
+			}
+		}
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, bank);
+		Assert.assertEquals(14, plan.placements.size());
+		Map<Integer, int[]> at = drawnAt(plan);
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertEquals("player " + p.id + " is at the edge, not in a row behind", 0, p.dz);
+		}
+		List<int[]> sorted = new ArrayList<>(at.values());
+		sorted.sort((a, b) -> Integer.compare(a[0], b[0]));
+		for (int i = 1; i < sorted.size(); i++)
+		{
+			Assert.assertTrue("neighbours only " + (sorted.get(i)[0] - sorted.get(i - 1)[0]) + " apart",
+				sorted.get(i)[0] - sorted.get(i - 1)[0] >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+		}
+		Assert.assertTrue(plan.tiles.get(StackRegistry.key(0, 51, 50)).shape.startsWith("counter row shared"));
+	}
+
+	@Test
+	public void aSharedLineKeepsEachTilesPeopleTogetherInOrder()
+	{
+		CrowdPlanner.Surroundings bank = surroundings(true, true, false);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 0; i < 5; i++)
+		{
+			still.add(new StackSpreader.Entry(1 + i, StackRegistry.key(0, 50, 50), false, NORTH));
+			still.add(new StackSpreader.Entry(20 + i, StackRegistry.key(0, 51, 50), false, NORTH));
+		}
+		Map<Integer, int[]> at = drawnAt(new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, bank));
+		for (int a = 1; a <= 5; a++)
+		{
+			for (int b = 20; b <= 24; b++)
+			{
+				Assert.assertTrue("west tile's player " + a + " is west of east tile's player " + b, at.get(a)[0] < at.get(b)[0]);
+			}
+		}
+	}
+
+	@Test
+	public void aSharedLineThatCantFitFallsBackToRows()
+	{
+		// Walls a tile either side of the pair of tiles: not enough edge for ten people in one line.
+		CrowdPlanner.Surroundings cramped = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(tile) * 128 + dx;
+				return x >= 50 * 128 - 40 && x <= 51 * 128 + 40;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 0; i < 5; i++)
+		{
+			still.add(new StackSpreader.Entry(1 + i, StackRegistry.key(0, 50, 50), false, NORTH));
+			still.add(new StackSpreader.Entry(20 + i, StackRegistry.key(0, 51, 50), false, NORTH));
+		}
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, x -> true, 128, 10, true, false, 1, cramped);
+		Assert.assertEquals("counter row", plan.tiles.get(StackRegistry.key(0, 50, 50)).shape);
+	}
+
 	@Test
 	public void aCounterRowRunsAlongTheCounterEvenIfItFormedAtASlant()
 	{
