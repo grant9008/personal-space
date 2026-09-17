@@ -536,6 +536,51 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void peopleOnTwoSidesOfATreeDontEndUpBehindEachOther()
+	{
+		// A tree at (50, 51). Five chop from the tile south of it, facing north; five from the tile west
+		// of it, facing east.
+		long south = StackRegistry.key(0, 50, 50);
+		long west = StackRegistry.key(0, 49, 51);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 0; i < 5; i++)
+		{
+			still.add(new StackSpreader.Entry(1 + i, south, false, NORTH));
+			still.add(new StackSpreader.Entry(20 + i, west, false, 1536));
+		}
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, id -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, 1, ANVIL);
+		Assert.assertEquals(10, plan.placements.size());
+		Map<Integer, int[]> at = new HashMap<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			at.put(p.id, new int[]{StackRegistry.sceneX(p.tile) * 128 + p.dx, StackRegistry.sceneY(p.tile) * 128 + p.dz});
+		}
+		for (int a = 1; a <= 5; a++)
+		{
+			for (int b = 20; b <= 24; b++)
+			{
+				double gap = Math.hypot(at.get(a)[0] - at.get(b)[0], at.get(a)[1] - at.get(b)[1]);
+				Assert.assertTrue("players " + a + " and " + b + " only " + gap + " apart", gap >= PersonalSpaceConfig.COUNTER_SPACING);
+			}
+		}
+	}
+
+	@Test
+	public void aTileAloneAtATreeWrapsRoundItBeforeFormingASecondRow()
+	{
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 0; i < 8; i++)
+		{
+			still.add(new StackSpreader.Entry(1 + i, TILE, false, NORTH));
+		}
+		CrowdPlanner.Plan plan = new CrowdPlanner().plan(still, id -> true, 72, 10, true, false, 1, ANVIL);
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertEquals("player " + p.id + " is in the front ring round the tree", 128, Math.hypot(p.dx, 128 - p.dz), 1.5);
+		}
+	}
+
+	@Test
 	public void aRowAtAnAnvilCurvesAndTurnsPlayersToFaceIt()
 	{
 		CrowdPlanner.Plan plan = new CrowdPlanner().plan(players(1, NORTH, 2, NORTH, 3, NORTH), id -> true, 72, 5, true, false, 1, ANVIL);

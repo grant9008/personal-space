@@ -29,15 +29,23 @@ final class StackSpreader
 	/** How far ahead of a player the thing they're facing is assumed to be: the next tile over. */
 	static final int LOOK_AHEAD = 128;
 
-	/** How far round a row may curve either side of straight ahead, in radians (70 degrees). */
+	/** Most a curved row turns between neighbours is this divided by {@link #ARC_REACH}: 28 degrees. */
 	static final double MAX_ARC = Math.toRadians(70);
+	/**
+	 * How far round what everyone faces a curved row may wrap either side of straight ahead
+	 * (135 degrees). People gather all the way round a tree, fire or anvil before anyone has to stand
+	 * behind someone else, where an axe or hammer would look like it's swinging at them.
+	 */
+	static final double WRAP_ARC = Math.toRadians(135);
 
-	/** Most players in one row before the next row starts. */
+	/** Most players in one straight row before the next row starts. */
 	static final int ROW_WIDTH = 6;
+	/** Most players in one curved row before the next row starts. */
+	static final int CURVED_ROW_WIDTH = 10;
 	private static final int ROWS = 3;
 	/** Furthest a row stands behind the row in front, whatever the spacing: just under a tile. */
 	static final int ROW_DEPTH = 112;
-	/** Furthest a curved row reaches either side of the middle, in spacings. The curve is squeezed so this is at most {@link #MAX_ARC} round. */
+	/** Spacings used to size the largest turn between curved-row neighbours; see {@link #MAX_ARC}. */
 	static final double ARC_REACH = 2.5;
 	/** Furthest a straight row reaches either side of the middle, in spacings: a little further, so a row blocked on one side can grow along the other. */
 	static final double STRAIGHT_REACH = 3.5;
@@ -105,7 +113,8 @@ final class StackSpreader
 	 * else's spot. Spots a player couldn't stand on (a booth, stall, anvil or wall) are skipped.
 	 *
 	 * <p>Rows: a front row, then a row behind it, then another, up to {@link #ROW_WIDTH} usable spots
-	 * each. The front row starts half a spacing either side of the middle, so two players share the
+	 * each in a straight row and {@link #CURVED_ROW_WIDTH} in a curved one, which wraps up to
+	 * {@link #WRAP_ARC} round what everyone faces before a row behind is started. The front row starts half a spacing either side of the middle, so two players share the
 	 * space in front of what they face evenly, and it grows outwards from there. When someone who
 	 * stays put stands in the middle, the front row leaves them a full spacing of room instead. Each
 	 * row behind stands in the gaps of the row in front. A row curves around what everyone faces,
@@ -133,16 +142,17 @@ final class StackSpreader
 			return out;
 		}
 
-		double reach = straight ? STRAIGHT_REACH : ARC_REACH;
+		double reach = straight ? STRAIGHT_REACH : WRAP_ARC / curvedTurn(spacing) + 1e-9;
+		int width = straight ? ROW_WIDTH : CURVED_ROW_WIDTH;
 		for (int rowNumber = 0; rowNumber < ROWS && out.size() < capacity; rowNumber++)
 		{
 			// Rows take turns between spots off the middle line and spots on it, so each row
 			// stands in the gaps of the one in front.
 			boolean offMiddle = (rowNumber % 2 == 0) != middleTaken;
 			int inRow = 0;
-			for (double step = offMiddle ? 0.5 : 0; step <= reach && inRow < ROW_WIDTH && out.size() < capacity; step++)
+			for (double step = offMiddle ? 0.5 : 0; step <= reach && inRow < width && out.size() < capacity; step++)
 			{
-				for (int side = 0; side < (step == 0 ? 1 : 2) && inRow < ROW_WIDTH && out.size() < capacity; side++)
+				for (int side = 0; side < (step == 0 ? 1 : 2) && inRow < width && out.size() < capacity; side++)
 				{
 					if (step == 0 && rowNumber == 0 && middleTaken)
 					{
@@ -166,7 +176,8 @@ final class StackSpreader
 	 *
 	 * <p>A curved row keeps everyone the same distance from what they face ({@link #LOOK_AHEAD}
 	 * ahead of the tile centre, plus a row depth for each row behind). Front-row neighbours are about
-	 * {@code spacing} apart along the curve, never further round than {@link #MAX_ARC}; rows behind
+	 * {@code spacing} apart along the curve, but never more than {@link #MAX_ARC} / {@link #ARC_REACH}
+	 * round from each other; rows behind
 	 * keep the same angle between neighbours, so their half-step offsets land in the gaps. A straight
 	 * row runs sideways across the facing, each row behind a row depth further back.
 	 */
@@ -187,8 +198,7 @@ final class StackSpreader
 			return new int[]{(int) Math.round(x), (int) Math.round(z)};
 		}
 		double radius = LOOK_AHEAD + depth;
-		double turn = Math.min((double) spacing / LOOK_AHEAD, MAX_ARC / ARC_REACH);
-		double phi = step * turn;
+		double phi = step * curvedTurn(spacing);
 		double focusX = fwdX * LOOK_AHEAD;
 		double focusZ = fwdZ * LOOK_AHEAD;
 		double backX = -fwdX * radius;
@@ -196,6 +206,12 @@ final class StackSpreader
 		double x = focusX + backX * Math.cos(phi) - backZ * Math.sin(phi);
 		double z = focusZ + backX * Math.sin(phi) + backZ * Math.cos(phi);
 		return new int[]{(int) Math.round(x), (int) Math.round(z)};
+	}
+
+	/** The angle between neighbours in a curved row, in radians. */
+	static double curvedTurn(int spacing)
+	{
+		return Math.min((double) spacing / LOOK_AHEAD, MAX_ARC / ARC_REACH);
 	}
 
 	/** Crowd spot {@code index}, relative to the tile centre: an inner ring, the middle, then an outer ring. */

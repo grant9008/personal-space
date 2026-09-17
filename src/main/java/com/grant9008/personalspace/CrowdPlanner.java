@@ -229,6 +229,53 @@ final class CrowdPlanner
 		return best != null && bestCount * 2 >= group.size() ? best : null;
 	}
 
+	/** Closest a curved row sharing an object with another side is squeezed to. */
+	static final int MIN_SHARED_SPACING = 32;
+
+	/**
+	 * How far round a curved row on this tile may reach before it meets someone standing on another
+	 * side of the same thing: {anticlockwise, clockwise}, in radians, each half the angle to the
+	 * nearest occupied tile around what the row faces (or {@link Double#MAX_VALUE} if there's none).
+	 */
+	private static double[] arcLimits(Map<Long, List<StackSpreader.Entry>> byTile, int plane, int sceneX, int sceneY, double angle)
+	{
+		int aheadX = (int) Math.round(-Math.sin(angle));
+		int aheadY = (int) Math.round(-Math.cos(angle));
+		double focusX = -Math.sin(angle) * StackSpreader.LOOK_AHEAD;
+		double focusZ = -Math.cos(angle) * StackSpreader.LOOK_AHEAD;
+		double[] limits = {Double.MAX_VALUE, Double.MAX_VALUE};
+		for (int ox = -1; ox <= 1; ox++)
+		{
+			for (int oy = -1; oy <= 1; oy++)
+			{
+				int nx = sceneX + aheadX + ox;
+				int ny = sceneY + aheadY + oy;
+				if ((ox == 0 && oy == 0) || (nx == sceneX && ny == sceneY)
+					|| !byTile.containsKey(StackRegistry.key(plane, nx, ny)))
+				{
+					continue;
+				}
+				double theta = signedAngle(-focusX, -focusZ,
+					(nx - sceneX) * 2.0 * HALF_TILE - focusX, (ny - sceneY) * 2.0 * HALF_TILE - focusZ);
+				if (theta > 0)
+				{
+					limits[0] = Math.min(limits[0], theta / 2);
+				}
+				else if (theta < 0)
+				{
+					limits[1] = Math.min(limits[1], -theta / 2);
+				}
+			}
+		}
+		return limits;
+	}
+
+	/** Angle from direction (ax, az) round to (bx, bz), in (-pi, pi]; positive is anticlockwise seen from above (east to north). */
+	static double signedAngle(double ax, double az, double bx, double bz)
+	{
+		return Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
+	}
+
 	/**
 	 * How far a straight counter row may reach towards one side: short of the next tile along the
 	 * counter if anyone stands there, short of the tile after that if anyone stands there (its row
@@ -403,12 +450,32 @@ final class CrowdPlanner
 			double reachAhead = straight ? counterReach(byTile, plane, sceneX, sceneY, sideX, sideY, tileSpacing) : Double.MAX_VALUE;
 			double reachBehind = straight ? counterReach(byTile, plane, sceneX, sceneY, -sideX, -sideY, tileSpacing) : Double.MAX_VALUE;
 
+			// Around a tree, anvil or fire with people on more than one side, each tile's curve keeps
+			// to its own share of the ring, squeezing its players closer rather than reaching round
+			// behind the people on the next side.
+			double[] arc = row && !straight
+				? arcLimits(byTile, plane, sceneX, sceneY, angle)
+				: new double[]{Double.MAX_VALUE, Double.MAX_VALUE};
+			double tightest = Math.min(arc[0], arc[1]);
+			if (tightest < Double.MAX_VALUE)
+			{
+				tileSpacing = Math.min(tileSpacing,
+					Math.max(MIN_SHARED_SPACING, (int) Math.floor(StackSpreader.LOOK_AHEAD * tightest / 2)));
+			}
+			final double margin = row && !straight ? StackSpreader.curvedTurn(tileSpacing) / 2 : 0;
+			final double focusX = -Math.sin(angle) * StackSpreader.LOOK_AHEAD;
+			final double focusZ = -Math.cos(angle) * StackSpreader.LOOK_AHEAD;
+
 			int[] blocked = {0};
 			StackSpreader.SpotCheck check =
 				(dx, dz) ->
 				{
 					double along = dx * alongX + dz * alongZ;
-					if (along > reachAhead || along < -reachBehind || !around.canStand(tile, dx, dz))
+					double round = arc[0] == Double.MAX_VALUE && arc[1] == Double.MAX_VALUE
+						? 0 : signedAngle(-focusX, -focusZ, dx - focusX, dz - focusZ);
+					boolean inner = Math.abs(round) <= margin + 1e-6;
+					boolean outsideArc = !inner && (round > arc[0] - margin || round < -(arc[1] - margin));
+					if (along > reachAhead || along < -reachBehind || outsideArc || !around.canStand(tile, dx, dz))
 					{
 						blocked[0]++;
 						return false;

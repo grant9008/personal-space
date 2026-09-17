@@ -53,9 +53,9 @@ public class StackSpreaderTest
 	public void curvedRowsBehindKeepTheFrontRowsAngles()
 	{
 		// Facing north: row two's whole steps sit exactly between row one's half steps.
-		List<int[]> spots = StackSpreader.spots(true, false, Math.PI, false, 72, 11, null);
+		List<int[]> spots = StackSpreader.spots(true, false, Math.PI, false, 72, StackSpreader.CURVED_ROW_WIDTH + 2, null);
 		double front = Math.atan2(spots.get(0)[0], StackSpreader.LOOK_AHEAD - spots.get(0)[1]);
-		double back = Math.atan2(spots.get(7)[0], StackSpreader.LOOK_AHEAD - spots.get(7)[1]);
+		double back = Math.atan2(spots.get(StackSpreader.CURVED_ROW_WIDTH + 1)[0], StackSpreader.LOOK_AHEAD - spots.get(StackSpreader.CURVED_ROW_WIDTH + 1)[1]);
 		Assert.assertEquals("row two's first step out is twice row one's half step", 2 * front, back, 0.02);
 	}
 
@@ -180,15 +180,16 @@ public class StackSpreaderTest
 	}
 
 	@Test
-	public void aCurvedRowTakesSixBeforeStartingASecondRow()
+	public void aCurvedRowWrapsRoundTheThingBeforeAnyoneStandsBehind()
 	{
 		// Facing north: what everyone faces is 128 north of the tile centre.
-		List<int[]> spots = StackSpreader.spots(true, false, Math.PI, false, 60, 7, null);
-		for (int i = 0; i < StackSpreader.ROW_WIDTH; i++)
+		List<int[]> spots = StackSpreader.spots(true, false, Math.PI, false, 60, StackSpreader.CURVED_ROW_WIDTH + 1, null);
+		for (int i = 0; i < StackSpreader.CURVED_ROW_WIDTH; i++)
 		{
-			Assert.assertEquals("spot " + i + " is in the front row", 128, Math.hypot(spots.get(i)[0], 128 - spots.get(i)[1]), 1.5);
+			Assert.assertEquals("spot " + i + " is in the front ring", 128, Math.hypot(spots.get(i)[0], 128 - spots.get(i)[1]), 1.5);
 		}
-		Assert.assertTrue("the seventh is in the row behind", Math.hypot(spots.get(6)[0], 128 - spots.get(6)[1]) > 150);
+		Assert.assertTrue("the next one is in the row behind",
+			Math.hypot(spots.get(StackSpreader.CURVED_ROW_WIDTH)[0], 128 - spots.get(StackSpreader.CURVED_ROW_WIDTH)[1]) > 150);
 	}
 
 	@Test
@@ -200,7 +201,7 @@ public class StackSpreaderTest
 	}
 
 	@Test
-	public void aCurvedRowNeverWrapsPastTheMaximumArc()
+	public void aCurvedRowNeverWrapsPastTheWrapLimit()
 	{
 		for (int spacing : new int[]{PersonalSpaceConfig.MIN_SPACING, 72, 160, PersonalSpaceConfig.MAX_SPACING})
 		{
@@ -210,7 +211,7 @@ public class StackSpreaderTest
 				{
 					double round = Math.atan2(Math.abs(s[0]), 128 - s[1]);
 					Assert.assertTrue("spacing " + spacing + ": " + Math.toDegrees(round) + " degrees round",
-						round <= StackSpreader.MAX_ARC + 0.02);
+						round <= StackSpreader.WRAP_ARC + 0.02);
 				}
 			}
 		}
@@ -244,8 +245,9 @@ public class StackSpreaderTest
 	public void backRowsStandBehindTheFrontRow()
 	{
 		// Facing north: the front row is nearer the thing, row two is a spacing further back.
-		List<int[]> spots = StackSpreader.spots(true, false, Math.PI, false, 80, 7, null);
-		Assert.assertTrue("back row is further south: " + spots.get(0)[1] + " vs " + spots.get(6)[1], spots.get(6)[1] < spots.get(0)[1] - 40);
+		int back = StackSpreader.CURVED_ROW_WIDTH;
+		List<int[]> spots = StackSpreader.spots(true, false, Math.PI, false, 80, back + 1, null);
+		Assert.assertTrue("back row is further south: " + spots.get(0)[1] + " vs " + spots.get(back)[1], spots.get(back)[1] < spots.get(0)[1] - 40);
 	}
 
 	@Test
