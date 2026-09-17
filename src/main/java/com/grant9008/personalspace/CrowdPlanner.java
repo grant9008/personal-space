@@ -346,9 +346,13 @@ final class CrowdPlanner
 	 */
 	private static double reachTowards(int people, int tilesAway, int spacing)
 	{
+		// Never less than the least room a squeezed ring needs. Keeping clear of the neighbours is
+		// worth giving up ground for, but not the whole tile: a wide spacing with someone standing
+		// either side used to leave a reach of nothing, no spot anywhere passed the check, and
+		// everybody was drawn stacked on the tile's middle - the very thing this plugin is for.
 		return people == 1
-			? Math.max(0, tilesAway * 2.0 * HALF_TILE - spacing)
-			: Math.max(0, tilesAway * HALF_TILE - spacing / 2.0);
+			? Math.max(MIN_SHARED_SPACING, tilesAway * 2.0 * HALF_TILE - spacing)
+			: Math.max(MIN_SHARED_SPACING, tilesAway * HALF_TILE - spacing / 2.0);
 	}
 
 	/** How many tiles along a counter or bank to look for someone else's row. */

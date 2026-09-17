@@ -230,7 +230,10 @@ final class StackSpreader
 	{
 		double fwdX = -Math.sin(angle);
 		double fwdZ = -Math.cos(angle);
-		double depth = rowNumber * (double) Math.min(spacing, ROW_DEPTH);
+		// A row behind stands half a spacing along from the one in front, so where the row in front
+		// has bowed away from it the gap between the two closes. Give every row behind that much
+		// more depth and the two of them stay exactly as far apart as they were before the bow.
+		double depth = rowNumber * (Math.min(spacing, ROW_DEPTH) + (bow ? BOW_SLOPE * spacing / 2 : 0));
 		if (straight)
 		{
 			double along = step * spacing;

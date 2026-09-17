@@ -1130,6 +1130,42 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void aWideSpacingWithSomeoneEitherSideStillGivesEveryoneASpot()
+	{
+		// Keeping clear of a neighbour who stands alone in the middle of their tile costs ground. At
+		// a wide spacing with someone either side there was none left, no spot passed the check, and
+		// the whole tile was drawn stacked on one point.
+		for (int spacing : new int[]{40, 120, 128, 192, PersonalSpaceConfig.SPACING_WIDE})
+		{
+			for (int people = 2; people <= 5; people++)
+			{
+				List<StackSpreader.Entry> still = new ArrayList<>();
+				int id = 1;
+				for (int i = 0; i < people; i++)
+				{
+					still.add(new StackSpreader.Entry(id++, TILE, false, NORTH));
+				}
+				still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 49, 50), false, NORTH));
+				still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 51, 50), false, NORTH));
+				CrowdPlanner planner = new CrowdPlanner();
+				planner.smallGroupsClose = false;
+				CrowdPlanner.Plan plan = null;
+				for (int t = 1; t <= 3; t++)
+				{
+					plan = planner.plan(still, x -> true, spacing, 10, true, false, t, surroundings(true, true, false));
+				}
+				int placed = 0;
+				for (StackSpreader.Placement p : plan.placements)
+				{
+					placed += p.tile == TILE ? 1 : 0;
+				}
+				Assert.assertTrue("at " + spacing + " with " + people + " of us, only " + placed + " got a spot",
+					placed > 0);
+			}
+		}
+	}
+
+	@Test
 	public void aBankRowCurvesRoundTheBoothAndKeepsItsSpacing()
 	{
 		// Smart's counter rows bow like a crowd round an anvil: the middle stands at the booth and

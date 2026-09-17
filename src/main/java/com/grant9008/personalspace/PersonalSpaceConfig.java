@@ -146,7 +146,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_SPACING,
 		name = "Spacing",
-		description = "How far apart players are drawn, in game units (128 is one tile). With 'Auto-space small groups' on, this is for a big crowd and groups of 2 or 3 stand closer.",
+		description = "How far apart players are drawn, in game units (128 is one tile). With 'Auto-space' on this is a maximum: groups of 2 or 3, and anyone at a bank counter, a wall or a fire, stand closer. Turn 'Auto-space' off and this setting is used everywhere.",
 		position = 2
 	)
 	default int spacing()
