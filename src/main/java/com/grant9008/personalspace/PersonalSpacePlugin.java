@@ -7,11 +7,13 @@ import java.util.EnumSet;
 import java.util.List;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
+import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.CollisionData;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
+import net.runelite.api.NPC;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
 import net.runelite.api.Scene;
@@ -49,7 +51,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.7.4";
+	static final String VERSION = "1.7.5";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -100,6 +102,7 @@ public class PersonalSpacePlugin extends Plugin
 	private boolean warnedNoRenderer;
 	private boolean warnedBadIds;
 	private int tick;
+	private final CombatWatch combat = new CombatWatch();
 
 	/** What the last game tick found, for the sidebar. */
 	private Snapshot.Gate gate = Snapshot.Gate.NOT_LOGGED_IN;
@@ -428,9 +431,11 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return Snapshot.Gate.PVP_ACTIVITY;
 		}
-		if (local.getHealthRatio() != -1)
+		Actor target = local.getInteracting();
+		boolean attacking = target instanceof NPC || target instanceof Player;
+		if (combat.update(local.getHealthRatio() != -1, attacking, attacking && target.getHealthRatio() != -1, tick))
 		{
-			return Snapshot.Gate.IN_COMBAT; // our own health bar is showing
+			return Snapshot.Gate.IN_COMBAT;
 		}
 		return Snapshot.Gate.SAFE;
 	}
