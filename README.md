@@ -54,7 +54,7 @@ Needs the **GPU** plugin (or 117 HD) turned on.
 
 ![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
 
-![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithing.jpg)
+![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithers.jpg)
 
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
