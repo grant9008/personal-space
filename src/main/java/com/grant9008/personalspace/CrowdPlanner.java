@@ -133,6 +133,8 @@ final class CrowdPlanner
 	private Map<Long, Map<Integer, Integer>> lastSlots = new HashMap<>();
 	/** Where you were drawn last tick, east then north in scene units; null when you weren't. */
 	private double[] lastYouAt;
+	/** The tick you were last drawn somewhere new: nobody steps aside until you've stood a moment. */
+	private int youStillSince;
 	/** Tiles further than this from where you were drawn aren't checked for standing in your way. */
 	private static final int VIEW_TILES = 6;
 
@@ -661,6 +663,7 @@ final class CrowdPlanner
 		if (you == null || cameraX == Integer.MIN_VALUE || cameraY == Integer.MIN_VALUE)
 		{
 			viewSector = -1;
+			sectorSeen = -1;
 			return null;
 		}
 		double east = cameraX - (StackRegistry.sceneX(you.tile) * 2.0 * HALF_TILE + HALF_TILE);
@@ -671,7 +674,11 @@ final class CrowdPlanner
 			int sector = Math.floorMod((int) Math.round(Math.atan2(north, east) / slice), VIEW_SECTORS);
 			if (viewSector < 0)
 			{
+				// Start the settling afresh: left over from before you walked, it let a one-tick
+				// glance straight after you stopped count as settled.
 				viewSector = sector;
+				sectorSeen = sector;
+				sectorSince = tick;
 			}
 			else if (sector == viewSector)
 			{
@@ -1058,7 +1065,28 @@ final class CrowdPlanner
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
-		slots.keepClear = spotsInFront(view, spotsByTile);
+		slots.keepClear = tick - youStillSince >= SlotBook.LOCAL_SWAP_DELAY ? spotsInFront(view, spotsByTile) : new HashMap<>();
+		slots.viewKey = viewSector;
+		slots.inFrontOf = (tile, spot) ->
+		{
+			Set<Integer> hide = new HashSet<>();
+			List<int[]> spots = spotsByTile.get(tile);
+			if (view == null || spots == null || spot >= spots.size())
+			{
+				return hide;
+			}
+			for (int s = 0; s < spots.size(); s++)
+			{
+				double east = spots.get(s)[0] - spots.get(spot)[0];
+				double north = spots.get(s)[1] - spots.get(spot)[1];
+				if (s != spot && east * view[0] + north * view[1] > VIEW_IN_FRONT
+					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP)
+				{
+					hide.add(s);
+				}
+			}
+			return hide;
+		};
 		slots.nearestFirst = new HashMap<>();
 		for (long tile : slots.keepClear.keySet())
 		{
@@ -1180,15 +1208,20 @@ final class CrowdPlanner
 				}
 			}
 		}
-		lastYouAt = null;
+		double[] youAt = null;
 		for (StackSpreader.Placement p : plan.placements)
 		{
 			if (p.id == localId)
 			{
-				lastYouAt = new double[]{StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
+				youAt = new double[]{StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
 					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz};
 			}
 		}
+		if (youAt == null || lastYouAt == null || youAt[0] != lastYouAt[0] || youAt[1] != lastYouAt[1])
+		{
+			youStillSince = tick;
+		}
+		lastYouAt = youAt;
 		return plan;
 	}
 

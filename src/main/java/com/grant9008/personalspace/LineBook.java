@@ -271,6 +271,14 @@ final class LineBook
 		return new double[]{line.sideX * along - line.aheadX() * depth, line.sideY * along - line.aheadZ() * depth};
 	}
 
+	/**
+	 * People who stepped aside for you, and where you stood and which way the camera looked when
+	 * they did. They stay put while neither changes: stepped back out of your way and then forward
+	 * into a free place at the counter the next tick, they walked twice.
+	 */
+	private final Set<Integer> asideForYou = new HashSet<>();
+	private String asideAim;
+
 	/** Whether each tile's people curve gently round their own booth, rather than standing dead flat. */
 	boolean bow = true;
 
@@ -488,59 +496,6 @@ final class LineBook
 			}
 		}
 
-		// Personal space for you. From a camera off to one side a straight line is one person half
-		// behind the next, so whoever stands beside you on the camera's side covers you, wherever on
-		// the line you are - and so can someone in the row behind, half a step towards the camera.
-		// Once everyone has a spot, anyone standing between you and the camera moves to a free spot
-		// out of the way, and the spots in front of you are kept empty for the rest of the tick. Only
-		// spots nobody has are ever used, so nobody is left without one for your sake; someone with
-		// nowhere else to go simply stays.
-		Set<String> heldHere = new HashSet<>();
-		for (Spot spot : held.values())
-		{
-			if (spot.line.equals(key))
-			{
-				heldHere.add(spot.point());
-			}
-		}
-		List<String> clear = inFrontOfYou(line, key, tick, heldHere, usable);
-		if (!clear.isEmpty())
-		{
-			Set<String> avoid = new HashSet<>(taken);
-			avoid.addAll(clear);
-			for (int i = 0; i < members.size(); i++)
-			{
-				Member m = members.get(i);
-				for (int id : m.ids)
-				{
-					Spot spot = spotOf.get(id);
-					if (id == localId || spot == null || !clear.contains(spot.point()))
-					{
-						continue;
-					}
-					// A little back, near their own booth, if there's room there: sent to the best spot at
-					// the counter instead, they ended up at the far end of it, against the wall.
-					String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 1);
-					if (best == null)
-					{
-						best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 0);
-					}
-					if (best == null)
-					{
-						continue;
-					}
-					String[] parts = best.split("/");
-					Spot aside = new Spot(key, Integer.parseInt(parts[0]), Long.parseLong(parts[1]), m.tile);
-					spotOf.put(id, aside);
-					taken.remove(spot.point());
-					taken.add(aside.point());
-					avoid.add(aside.point());
-					moves++;
-				}
-			}
-			taken.addAll(clear);
-		}
-
 		// Once you've stood here a moment, you get a place at the edge if anyone from your tile has
 		// one: swap with whoever of them stands nearest your tile's middle. Not while an edge spot is
 		// being held for someone from your tile: when that hold ends you step forward into it instead,
@@ -560,6 +515,8 @@ final class LineBook
 		{
 			edgeHeld |= mine != null && spot.line.equals(key) && spot.row == 0 && spot.tile == mine.tile;
 		}
+		boolean swappedYou = false;
+		int keptAside = -1;
 		// Once you've stood here a moment, a place at the edge if anyone from your tile has one:
 		// swap with whoever of them stands nearest your tile's middle. That is the only time the line
 		// moves you; seeing yourself is taken care of by keeping the spots in front of you empty.
@@ -591,10 +548,112 @@ final class LineBook
 				{
 					Spot theirs = spotOf.get(swapWith);
 					spotOf.put(localId, new Spot(key, 0, theirs.j, m.tile));
-					spotOf.put(swapWith, new Spot(key, mine.row, mine.j, m.tile));
+					Spot partner = new Spot(key, mine.row, mine.j, m.tile);
+					// Your old spot is behind your new one, and from a camera behind the line that's
+					// in front of you: send them straight somewhere out of your way instead, so they
+					// move once rather than to your old spot and then aside again.
+					Set<String> heldNow = new HashSet<>();
+					for (Spot spot : held.values())
+					{
+						if (spot.line.equals(key))
+						{
+							heldNow.add(spot.point());
+						}
+					}
+					List<String> wouldHide = inFrontOfYou(line, key, tick, heldNow, usable);
+					if (wouldHide.contains(partner.point()))
+					{
+						int i = members.indexOf(m);
+						Set<String> avoid = new HashSet<>(taken);
+						avoid.addAll(wouldHide);
+						avoid.add(spotOf.get(localId).point());
+						String best = bestFree(line, i, swapWith, target[i], lo[i], hi[i], usable, avoid, 1);
+						if (best == null)
+						{
+							best = bestFree(line, i, swapWith, target[i], lo[i], hi[i], usable, avoid, 0);
+						}
+						if (best != null)
+						{
+							String[] parts = best.split("/");
+							partner = new Spot(key, Integer.parseInt(parts[0]), Long.parseLong(parts[1]), m.tile);
+							taken.remove(mine.point());
+							taken.add(partner.point());
+							keptAside = swapWith;
+						}
+					}
+					spotOf.put(swapWith, partner);
+					swappedYou = true;
 					moves++;
 				}
 			}
+		}
+
+		// Personal space for you. From a camera off to one side a straight line is one person half
+		// behind the next, so whoever stands beside you on the camera's side covers you, wherever on
+		// the line you are - and so can someone in the row behind, half a step towards the camera.
+		// Once everyone has a spot, anyone standing between you and the camera moves to a free spot
+		// out of the way, and the spots in front of you are kept empty for the rest of the tick. Only
+		// spots nobody has are ever used, so nobody is left without one for your sake; someone with
+		// nowhere else to go simply stays.
+		Set<String> heldHere = new HashSet<>();
+		for (Spot spot : held.values())
+		{
+			if (spot.line.equals(key))
+			{
+				heldHere.add(spot.point());
+			}
+		}
+		// Not on a tick you were swapped to the edge: the spots in front of you are about to change.
+		List<String> clear = swappedYou ? new ArrayList<>() : inFrontOfYou(line, key, tick, heldHere, usable);
+		Spot mineNow = spotOf.get(localId);
+		String aim = mineNow == null || !mineNow.line.equals(key) || view == null
+			? null : mineNow.point() + "@" + Math.round(Math.atan2(view[1], view[0]) * 100);
+		if (aim == null || !aim.equals(asideAim))
+		{
+			// You or the camera changed: whoever stepped aside for the old view may move again.
+			asideForYou.clear();
+			asideAim = aim;
+		}
+		if (keptAside >= 0)
+		{
+			asideForYou.add(keptAside);
+		}
+		if (!clear.isEmpty())
+		{
+			Set<String> avoid = new HashSet<>(taken);
+			avoid.addAll(clear);
+			for (int i = 0; i < members.size(); i++)
+			{
+				Member m = members.get(i);
+				for (int id : m.ids)
+				{
+					Spot spot = spotOf.get(id);
+					if (id == localId || spot == null || !clear.contains(spot.point()))
+					{
+						continue;
+					}
+					// A little back, near their own booth, if there's room there: sent to the best spot at
+					// the counter instead, they ended up at the far end of it, against the wall.
+					String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 1);
+					if (best == null)
+					{
+						best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 0);
+					}
+					if (best == null)
+					{
+						continue;
+					}
+					String[] parts = best.split("/");
+					Spot aside = new Spot(key, Integer.parseInt(parts[0]), Long.parseLong(parts[1]), m.tile);
+					spotOf.put(id, aside);
+					taken.remove(spot.point());
+					taken.add(aside.point());
+					avoid.add(aside.point());
+					asideForYou.add(id);
+					moves++;
+				}
+			}
+			taken.addAll(clear);
 		}
 
 		// One person a tick steps forward into a free spot at the edge in their own stretch.
@@ -611,7 +670,7 @@ final class LineBook
 						continue;
 					}
 					Spot spot = spotOf.get(id);
-					if (spot == null || spot.row == 0)
+					if (spot == null || spot.row == 0 || asideForYou.contains(id))
 					{
 						continue;
 					}

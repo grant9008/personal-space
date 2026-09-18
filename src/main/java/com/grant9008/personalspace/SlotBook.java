@@ -92,19 +92,7 @@ final class SlotBook
 	 */
 	int localId = -1;
 
-	/**
-	 * For the tile you are on, the spot you should have: the one nearest the camera. Missing for a
-	 * tile means the best spot, which is the front.
-	 */
-	Map<Long, Integer> preferred = new HashMap<>();
 
-	/**
-	 * The spot you are making for on the tile you're on, from the last time the planner chose one:
-	 * when you arrived, or when the camera settled somewhere new. People coming and going never
-	 * change it, so they never move you.
-	 */
-	private int localAim;
-	private long localAimTile = Long.MIN_VALUE;
 
 	/**
 	 * For the tile you are on, the spots standing between you and the camera. Nobody is put in one
@@ -118,6 +106,24 @@ final class SlotBook
 	 * counter to the far end of it.
 	 */
 	Map<Long, List<Integer>> nearestFirst = new HashMap<>();
+
+	/**
+	 * People who stepped aside for you, and the spots they stepped out of. They stay put while that
+	 * doesn't change: filling a gap next tick would move them a second time, since stepping aside
+	 * picks the free spot nearest their booth and gap-filling the best spot on the tile.
+	 */
+	private final Set<Integer> asideForYou = new HashSet<>();
+
+	/**
+	 * Given a tile and a spot on it, the spots on that tile that would stand between someone there
+	 * and the camera; empty when the camera isn't known. Whoever you swap places with is sent
+	 * straight to a spot out of your way, rather than to yours and then aside again.
+	 */
+	java.util.function.BiFunction<Long, Integer, Set<Integer>> inFrontOf = (tile, spot) -> Collections.emptySet();
+	/** Which way the camera looks, as the planner rounds it. Whoever stepped aside may move again when it changes. */
+	int viewKey = -1;
+	private int asideView = -2;
+	private long asideTile = Long.MIN_VALUE;
 
 	/**
 	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
@@ -138,6 +144,13 @@ final class SlotBook
 	 */
 	Map<Long, Map<Integer, Integer>> update(Map<Long, List<Integer>> present, ToIntFunction<Long> capacityOf, int tick)
 	{
+		boolean movedYou = false;
+		if (viewKey != asideView || localTile != asideTile)
+		{
+			asideForYou.clear();
+			asideView = viewKey;
+			asideTile = localTile;
+		}
 		// Tiles nobody is on any more: everyone there has left.
 		for (Iterator<Map.Entry<Long, Tile>> it = tiles.entrySet().iterator(); it.hasNext(); )
 		{
@@ -212,13 +225,7 @@ final class SlotBook
 			{
 				arriving.add(0, localId);
 			}
-			Integer given = preferred.get(e.getKey());
-			if (given != null)
-			{
-				localAim = given;
-				localAimTile = e.getKey();
-			}
-			int yours = localAimTile == e.getKey() && localAim < capacity ? localAim : 0;
+			int yours = 0;
 			Set<Integer> inFront = keepClear.getOrDefault(e.getKey(), Collections.emptySet());
 			for (int id : arriving)
 			{
@@ -229,6 +236,7 @@ final class SlotBook
 				if (id == localId && !t.occupant.containsKey(yours) && !t.held(yours, tick))
 				{
 					t.assign(id, yours);
+					movedYou = true;
 					continue;
 				}
 				// The best free spot out of your way, or, when there is none, any free spot.
@@ -247,6 +255,7 @@ final class SlotBook
 				if (spot >= 0)
 				{
 					t.assign(id, spot);
+					movedYou |= id == localId;
 				}
 			}
 			// Once you've stood here a moment you get the best spot going: a free one if there is
@@ -281,9 +290,25 @@ final class SlotBook
 					if (other != null)
 					{
 						t.vacate(other, tick, false);
-						t.assign(other, free >= 0 && free != yours ? free : mine);
+						int to = free >= 0 && free != yours ? free : mine;
+						Set<Integer> wouldHide = inFrontOf.apply(e.getKey(), yours);
+						if (wouldHide.contains(to))
+						{
+							for (int s : order(e.getKey(), capacity))
+							{
+								if (s < capacity && s != yours && !t.occupant.containsKey(s) && !t.held(s, tick)
+									&& !wouldHide.contains(s))
+								{
+									to = s;
+									asideForYou.add(other);
+									break;
+								}
+							}
+						}
+						t.assign(other, to);
 					}
 					t.assign(localId, yours);
+					movedYou = true;
 					moves++;
 				}
 			}
@@ -301,7 +326,7 @@ final class SlotBook
 					// Never you. Other people filling a gap is what keeps a crowd tidy, but you notice
 					// your own character moving far more than anyone else's, so only arriving and
 					// settling the camera somewhere new ever move you.
-					if (t.occupant.get(slot) == localId)
+					if (t.occupant.get(slot) == localId || asideForYou.contains(t.occupant.get(slot)))
 					{
 						continue;
 					}
@@ -320,9 +345,24 @@ final class SlotBook
 				moves++;
 			}
 
-			// Anyone standing between you and the camera steps to a free spot out of the way. Only a
-			// spot nobody has is ever used, so nobody is left without one for your sake; someone with
-			// nowhere else to go simply stays.
+			out.put(e.getKey(), new HashMap<>(t.slotOf));
+		}
+
+		// Anyone standing between you and the camera steps to a free spot out of the way. Only once
+		// you're in your place: on a tick you moved, the spots in front of you are about to change,
+		// and people stepped aside for where you were only to step again for where you are. Only a
+		// spot nobody has is ever used, so nobody is left without one for your sake; someone with
+		// nowhere else to go simply stays.
+		for (Map.Entry<Long, Set<Integer>> c : movedYou ? Collections.<Long, Set<Integer>>emptyMap().entrySet() : keepClear.entrySet())
+		{
+			Tile t = tiles.get(c.getKey());
+			if (t == null || !present.containsKey(c.getKey()))
+			{
+				continue;
+			}
+			int capacity = capacityOf.applyAsInt(c.getKey());
+			Set<Integer> inFront = c.getValue();
+			boolean changed = false;
 			for (int s : inFront)
 			{
 				Integer who = t.occupant.get(s);
@@ -330,24 +370,27 @@ final class SlotBook
 				{
 					continue;
 				}
-				for (int to : order(e.getKey(), capacity))
+				for (int to : order(c.getKey(), capacity))
 				{
 					if (to < capacity && !t.occupant.containsKey(to) && !t.held(to, tick) && !inFront.contains(to))
 					{
 						t.vacate(who, tick, false);
 						t.assign(who, to);
+						asideForYou.add(who);
 						moves++;
+						changed = true;
 						break;
 					}
 				}
 			}
-
-			out.put(e.getKey(), new HashMap<>(t.slotOf));
+			if (changed)
+			{
+				out.put(c.getKey(), new HashMap<>(t.slotOf));
+			}
 		}
 		if (!sawLocal)
 		{
 			localTile = Long.MIN_VALUE;
-			localAimTile = Long.MIN_VALUE;
 		}
 		return out;
 	}
