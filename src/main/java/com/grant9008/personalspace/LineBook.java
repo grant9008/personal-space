@@ -220,15 +220,19 @@ final class LineBook
 		{
 			return out;
 		}
+		// The whole line: seen from the side, everyone between you and the end nearest the camera is
+		// in the way, however far along they stand.
 		double[] at = ground(line, mine.row, mine.j);
-		for (int row = 0; row <= ROWS_BEHIND; row++)
+		for (Map.Entry<String, Boolean> u : usable.entrySet())
 		{
-			for (long j = mine.j - 3; j <= mine.j + 3; j++)
+			String[] rowAndStep = u.getKey().split("/");
+			int row = Integer.parseInt(rowAndStep[0]);
+			long j = Long.parseLong(rowAndStep[1]);
+			if (row == mine.row && j == mine.j || !Boolean.TRUE.equals(u.getValue()))
 			{
-				if (row == mine.row && j == mine.j || !Boolean.TRUE.equals(usable.get(row + "/" + j)))
-				{
-					continue;
-				}
+				continue;
+			}
+			{
 				double[] there = ground(line, row, j);
 				double east = there[0] - at[0];
 				double north = there[1] - at[1];
@@ -249,11 +253,21 @@ final class LineBook
 	/** ...and this close to your line of sight from the side, about a player's width. */
 	private static final double VIEW_OVERLAP = 48;
 
-	/** Where a spot on the line is on the ground, east then north. */
-	private static double[] ground(Line line, int row, long j)
+	/**
+	 * Where a spot on the line is drawn on the ground, east then north, curve round the booth and
+	 * all: judged without the curve, someone placed just out of your line of sight was drawn just
+	 * inside it.
+	 */
+	private double[] ground(Line line, int row, long j)
 	{
 		double along = line.along(row, j);
 		double depth = row * (double) line.rowGap();
+		if (bow && line.bow && !line.members.isEmpty())
+		{
+			double centre = line.members.get(0).centre();
+			double booth = Math.round((along - centre) / TILE) * TILE + centre;
+			depth += StackSpreader.bowBack(along - booth);
+		}
 		return new double[]{line.sideX * along - line.aheadX() * depth, line.sideY * along - line.aheadZ() * depth};
 	}
 
@@ -504,7 +518,13 @@ final class LineBook
 					{
 						continue;
 					}
-					String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 0);
+					// A little back, near their own booth, if there's room there: sent to the best spot at
+					// the counter instead, they ended up at the far end of it, against the wall.
+					String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 1);
+					if (best == null)
+					{
+						best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 0);
+					}
 					if (best == null)
 					{
 						continue;

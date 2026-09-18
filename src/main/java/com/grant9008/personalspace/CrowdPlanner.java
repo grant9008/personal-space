@@ -59,6 +59,11 @@ final class CrowdPlanner
 		final List<StackSpreader.Placement> unplaced = new ArrayList<>();
 		/** Tiles laid out as a curved row, whose players turn to face what the row faces. */
 		final Set<Long> curvedRows = new HashSet<>();
+		/**
+		 * Tiles at a counter: everyone on them turns towards what they face, so the people at the
+		 * ends of a row look round at the booth instead of straight ahead at the wall beside it.
+		 */
+		final Set<Long> facingIn = new HashSet<>();
 		/** Spread tiles gathered round a fire: where the fire is, in local units from the tile centre. Everyone there faces it. */
 		final Map<Long, int[]> fires = new HashMap<>();
 		/** Small groups in the open that are posed (angled or facing each other). */
@@ -126,19 +131,20 @@ final class CrowdPlanner
 
 	/** Last tick's spots on each laid-out tile, so the ones in front of you can be kept clear. */
 	private Map<Long, Map<Integer, Integer>> lastSlots = new HashMap<>();
-
-	/** What your spot was last chosen for: the tile, the camera's direction and the tile's shape. */
-	private long aimedTile = Long.MIN_VALUE;
-	private int aimedSector = -2;
-	private String aimedShape;
+	/** Where you were drawn last tick, east then north in scene units; null when you weren't. */
+	private double[] lastYouAt;
+	/** Tiles further than this from where you were drawn aren't checked for standing in your way. */
+	private static final int VIEW_TILES = 6;
 
 	/** Directions the camera's bearing is rounded to. */
 	static final int VIEW_SECTORS = 8;
 	/**
-	 * Ticks the camera must stay in a new direction before your spot follows it: turning the camera
-	 * doesn't walk you round the crowd, settling it somewhere new does, once.
+	 * Ticks the camera must stay in a new direction, about three seconds, before the people in your
+	 * way step aside for it. Glancing round the room moves nobody; only resting the camera somewhere
+	 * new does, once. Someone busy with an action can't walk, so they glide to their new spot, and
+	 * this keeps that rare.
 	 */
-	static final int VIEW_SETTLE_TICKS = 2;
+	static final int VIEW_SETTLE_TICKS = 5;
 	/** Closer to the camera than this (in units) and the camera's direction from you isn't reliable. */
 	private static final int VIEW_MIN_DISTANCE = 128;
 	/** The "Small group pose" setting. Set by the plugin each tick. */
@@ -690,88 +696,45 @@ final class CrowdPlanner
 	}
 
 	/**
-	 * For the tile you are on, the spot among the ones your crowd will use with the fewest people
-	 * standing between it and the camera; of those, the best spot. Nearest the camera was the wrong
-	 * measure: the curve round a bank booth puts the ends of a row a little nearer a camera straight
-	 * behind it, which walked you to the end for nothing, since nobody was in front of you anyway.
+	 * For every tile near you that is laid out on its own, the spots that stand between where you
+	 * were drawn last tick and the camera. Your own tile and the booths beside it alike: seen from
+	 * the side, a counter is one long row, and the people at the next booth along are the ones in
+	 * the way.
 	 */
-	private static Map<Long, Integer> preferredSpots(double[] view, int localId, Map<Long, List<Integer>> movableByTile,
-		Map<Long, List<int[]>> spotsByTile)
-	{
-		Map<Long, Integer> out = new HashMap<>();
-		if (view == null || localId < 0)
-		{
-			return out;
-		}
-		for (Map.Entry<Long, List<Integer>> e : movableByTile.entrySet())
-		{
-			List<int[]> spots = spotsByTile.get(e.getKey());
-			if (spots == null || !e.getValue().contains(localId))
-			{
-				continue;
-			}
-			int used = Math.min(e.getValue().size(), spots.size());
-			int best = -1;
-			int fewest = Integer.MAX_VALUE;
-			for (int s = 0; s < used; s++)
-			{
-				int[] here = spots.get(s);
-				int inFront = 0;
-				for (int o = 0; o < used; o++)
-				{
-					double east = spots.get(o)[0] - here[0];
-					double north = spots.get(o)[1] - here[1];
-					double nearer = east * view[0] + north * view[1];
-					double across = Math.abs(north * view[0] - east * view[1]);
-					inFront += o != s && nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP ? 1 : 0;
-				}
-				if (inFront < fewest)
-				{
-					fewest = inFront;
-					best = s;
-				}
-			}
-			if (best >= 0)
-			{
-				out.put(e.getKey(), best);
-			}
-		}
-		return out;
-	}
-
-	/**
-	 * For the tile you are on, the spots that stand between your spot and the camera, going by where
-	 * you stood last tick.
-	 */
-	private Map<Long, Set<Integer>> spotsInFront(double[] view, int localId, Map<Long, List<int[]>> spotsByTile)
+	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile)
 	{
 		Map<Long, Set<Integer>> out = new HashMap<>();
-		if (view == null || localId < 0)
+		if (view == null || lastYouAt == null)
 		{
 			return out;
 		}
-		for (Map.Entry<Long, Map<Integer, Integer>> e : lastSlots.entrySet())
+		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{
-			Integer mine = e.getValue().get(localId);
-			List<int[]> spots = spotsByTile.get(e.getKey());
-			if (mine == null || spots == null || mine >= spots.size())
+			long tile = e.getKey();
+			double tileX = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE;
+			double tileY = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE;
+			if (Math.abs(tileX - lastYouAt[0]) > VIEW_TILES * 2 * HALF_TILE
+				|| Math.abs(tileY - lastYouAt[1]) > VIEW_TILES * 2 * HALF_TILE)
 			{
 				continue;
 			}
-			int[] here = spots.get(mine);
 			Set<Integer> clear = new HashSet<>();
+			List<int[]> spots = e.getValue();
 			for (int s = 0; s < spots.size(); s++)
 			{
-				double east = spots.get(s)[0] - here[0];
-				double north = spots.get(s)[1] - here[1];
+				double east = tileX + spots.get(s)[0] - lastYouAt[0];
+				double north = tileY + spots.get(s)[1] - lastYouAt[1];
 				double nearer = east * view[0] + north * view[1];
 				double across = Math.abs(north * view[0] - east * view[1]);
-				if (s != mine && nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP)
+				if (nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP)
 				{
 					clear.add(s);
 				}
 			}
-			out.put(e.getKey(), clear);
+			if (!clear.isEmpty())
+			{
+				out.put(tile, clear);
+			}
 		}
 		return out;
 	}
@@ -965,6 +928,10 @@ final class CrowdPlanner
 				angle = Math.round(rowAngle / (Math.PI / 2)) * (Math.PI / 2);
 				straight = true;
 				kind = counter ? "counter row" : "line";
+				if (counter)
+				{
+					plan.facingIn.add(tile);
+				}
 			}
 			else
 			{
@@ -1091,21 +1058,19 @@ final class CrowdPlanner
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
-		// Your spot is chosen when you arrive, when the camera settles somewhere new, or when your
-		// tile changes shape - never just because someone came or went, which would walk you about.
-		long yourTile = Long.MIN_VALUE;
-		for (Map.Entry<Long, List<Integer>> e : movableByTile.entrySet())
+		slots.keepClear = spotsInFront(view, spotsByTile);
+		slots.nearestFirst = new HashMap<>();
+		for (long tile : slots.keepClear.keySet())
 		{
-			yourTile = e.getValue().contains(localId) ? e.getKey() : yourTile;
+			List<int[]> spots = spotsByTile.get(tile);
+			List<Integer> order = new ArrayList<>();
+			for (int s = 0; s < spots.size(); s++)
+			{
+				order.add(s);
+			}
+			order.sort(Comparator.comparingDouble(s -> Math.hypot(spots.get(s)[0], spots.get(s)[1])));
+			slots.nearestFirst.put(tile, order);
 		}
-		List<int[]> yourSpots = spotsByTile.get(yourTile);
-		String yourShape = shapeByTile.get(yourTile) + "/" + (yourSpots == null ? 0 : yourSpots.size());
-		boolean aim = yourTile != aimedTile || viewSector != aimedSector || !yourShape.equals(aimedShape);
-		slots.preferred = aim ? preferredSpots(view, localId, movableByTile, spotsByTile) : new HashMap<>();
-		aimedTile = yourTile;
-		aimedSector = viewSector;
-		aimedShape = yourShape;
-		slots.keepClear = spotsInFront(view, localId, spotsByTile);
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 		lastSlots = assigned;
 
@@ -1213,6 +1178,15 @@ final class CrowdPlanner
 						plan.unplaced.add(new StackSpreader.Placement(en.id, e.getKey(), 0, 0));
 					}
 				}
+			}
+		}
+		lastYouAt = null;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (p.id == localId)
+			{
+				lastYouAt = new double[]{StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
+					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz};
 			}
 		}
 		return plan;

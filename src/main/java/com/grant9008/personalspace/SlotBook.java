@@ -113,6 +113,13 @@ final class SlotBook
 	Map<Long, Set<Integer>> keepClear = new HashMap<>();
 
 	/**
+	 * For those tiles, the order to try free spots in when someone must go elsewhere: nearest the
+	 * tile's middle first, so they step a little back near their own booth rather than along the
+	 * counter to the far end of it.
+	 */
+	Map<Long, List<Integer>> nearestFirst = new HashMap<>();
+
+	/**
 	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
 	 * seconds. Stopping for a moment on your way past doesn't push anyone around.
 	 */
@@ -226,9 +233,12 @@ final class SlotBook
 				}
 				// The best free spot out of your way, or, when there is none, any free spot.
 				int spot = -1;
-				for (int s = 0; s < capacity && spot < 0; s++)
+				for (int s : order(e.getKey(), capacity))
 				{
-					spot = !t.occupant.containsKey(s) && !t.held(s, tick) && !inFront.contains(s) ? s : -1;
+					if (spot < 0 && s < capacity && !t.occupant.containsKey(s) && !t.held(s, tick) && !inFront.contains(s))
+					{
+						spot = s;
+					}
 				}
 				for (int s = 0; s < capacity && spot < 0; s++)
 				{
@@ -320,9 +330,9 @@ final class SlotBook
 				{
 					continue;
 				}
-				for (int to = 0; to < capacity; to++)
+				for (int to : order(e.getKey(), capacity))
 				{
-					if (!t.occupant.containsKey(to) && !t.held(to, tick) && !inFront.contains(to))
+					if (to < capacity && !t.occupant.containsKey(to) && !t.held(to, tick) && !inFront.contains(to))
 					{
 						t.vacate(who, tick, false);
 						t.assign(who, to);
@@ -340,6 +350,22 @@ final class SlotBook
 			localAimTile = Long.MIN_VALUE;
 		}
 		return out;
+	}
+
+	/** The spots of a tile in the order to try them: nearest its middle first where that's known. */
+	private List<Integer> order(long tile, int capacity)
+	{
+		List<Integer> known = nearestFirst.get(tile);
+		if (known != null)
+		{
+			return known;
+		}
+		List<Integer> plain = new ArrayList<>(capacity);
+		for (int s = 0; s < capacity; s++)
+		{
+			plain.add(s);
+		}
+		return plain;
 	}
 
 	void clear()

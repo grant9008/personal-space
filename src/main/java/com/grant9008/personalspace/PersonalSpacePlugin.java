@@ -4,7 +4,9 @@ import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.Actor;
@@ -51,7 +53,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.18";
+	static final String VERSION = "1.8.19";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -410,7 +412,10 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			unplacedIds.add(pl.id);
 		}
-		stacks.rebuild(members, plan.curvedRows, unplacedIds, plan.fires, plan.poses);
+		// Curved rows and counter rows alike: everyone turns towards what they are facing.
+		Set<Long> turnIn = new HashSet<>(plan.curvedRows);
+		turnIn.addAll(plan.facingIn);
+		stacks.rebuild(members, turnIn, unplacedIds, plan.fires, plan.poses);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
