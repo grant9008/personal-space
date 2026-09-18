@@ -123,7 +123,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_ACTIVE,
 		name = "Spread out crowds",
-		description = "Untick to pause without turning the plugin off. Everyone goes back to where they really stand.",
+		description = "Untick to pause. Everyone goes back to where they really stand.",
 		position = 0
 	)
 	default boolean active()
@@ -134,7 +134,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_ARRANGEMENT,
 		name = "Arrangement",
-		description = "How everyone on a tile is drawn up. Smart: they line up along whatever they are facing, such as a bank counter, a wall or a fire, and stand in a ring out in the open where there is nothing to line up along. Circle: always a ring. Line: always side by side, even in the open, for a group photo. Arc: a curve, like the crowd round an anvil. Smart always keeps people out of booths, stalls, anvils and walls; the other three keep out of them too, but choose the shape themselves.",
+		description = "Smart: lines up at counters, anvils and fires, and makes a ring in the open. Circle: always a ring. Line: side by side. Arc: a curve.",
 		position = 1
 	)
 	default Arrangement arrangement()
@@ -146,7 +146,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_SPACING,
 		name = "Spacing",
-		description = "How far apart players are drawn, in game units (128 is one tile). With 'Auto-space' on this is a maximum: groups of 2 or 3, and anyone at a bank counter, a wall or a fire, stand closer. Turn 'Auto-space' off and this setting is used everywhere.",
+		description = "How far apart players stand. 128 is one tile. With Auto-space on, banks, walls and fires stay close.",
 		position = 2
 	)
 	default int spacing()
@@ -158,7 +158,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_MAX_STACK,
 		name = "Players per tile",
-		description = "Spread out at most this many players on one tile (5 is the sweet spot). Anyone past that stays hidden in the middle, as in the normal game. A busy bank booth can have a dozen people on one tile, so raise it if you keep seeing a heap in the middle; the higher it goes, the further out the crowd reaches to make room.",
+		description = "How many players on one tile get their own spot. 5 suits most places. Raise it if a busy bank leaves a heap in the middle.",
 		position = 3
 	)
 	default int maxStack()
@@ -169,7 +169,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_INCLUDE_LOCAL,
 		name = "Move my character too",
-		description = "Off: your own character always stays exactly where it really is and other players step around you. On: you take a spot too, at the front, so what you're doing looks right.",
+		description = "Off: you stay put and others step around you. On: you take a spot too, at the front.",
 		position = 4
 	)
 	default boolean includeLocalPlayer()
@@ -180,7 +180,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_PAUSE_IN_COMBAT,
 		name = "Pause while I'm fighting",
-		description = "On: everyone is shown where they really stand while you fight, and for a few seconds after. Keep this on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer.",
+		description = "On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses.",
 		position = 7
 	)
 	default boolean pauseInCombat()
@@ -191,7 +191,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_SMALL_GROUPS_CLOSE,
 		name = "Auto-space",
-		description = "On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn off to unlock the slider: it then sets exactly how far apart everyone stands, anywhere, handy for photos.",
+		description = "On: small groups, banks, walls and fires stay close whatever the slider says. Off: the slider decides everywhere.",
 		position = 5
 	)
 	default boolean smallGroupsClose()
@@ -202,7 +202,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_POSE,
 		name = "Small group pose",
-		description = "How two or three players standing together in the open are turned. Natural: the way they really face. Angled: turned halfway towards each other, like a photo. Facing: towards each other. Players at an anvil, booth or fire keep facing it.",
+		description = "How two or three players in the open are turned. Natural: as they really face. Angled: half towards each other. Facing: towards each other.",
 		position = 6
 	)
 	default Pose pose()
@@ -213,7 +213,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_MODE,
 		name = "Mode",
-		description = "Normal use is 'Spread stacked players'. The test mode ignores everyone else and just draws your own character a fixed distance east of where it really is, so you can check the basic effect on your own.",
+		description = "Leave on 'Spread stacked players'. The test mode moves just your own character, to check the plugin works.",
 		position = 11,
 		section = TROUBLESHOOTING
 	)
@@ -226,7 +226,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_TEST_OFFSET,
 		name = "Test offset (units)",
-		description = "Only used by the test mode. Draws your own character this many local units east of its real spot. 128 units is one tile, so 32 is a quarter tile.",
+		description = "Test mode only. How far east to draw your own character. 128 is one tile.",
 		position = 12,
 		section = TROUBLESHOOTING
 	)

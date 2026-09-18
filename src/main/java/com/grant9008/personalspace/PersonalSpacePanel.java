@@ -58,6 +58,8 @@ final class PersonalSpacePanel extends PluginPanel
 	static final String ISSUES_URL = "https://github.com/grant9008/personal-space/issues";
 
 	private static final int TEXT_WIDTH_PX = 150;
+	/** Tooltips wrap at this width, rather than running in one line across the whole screen. */
+	private static final int TIP_WIDTH_PX = 220;
 	private static final Color SELECTED_TEXT = new Color(30, 30, 30);
 	private static final Color CARD = ColorScheme.DARKER_GRAY_COLOR;
 
@@ -232,7 +234,7 @@ final class PersonalSpacePanel extends PluginPanel
 			// no icon, no problem
 		}
 		p.add(title, BorderLayout.WEST);
-		activeSwitch.setToolTipText("Turn spreading out crowds on or off");
+		activeSwitch.setToolTipText(tip("Spread out crowds, or show the game as normal."));
 		p.add(activeSwitch, BorderLayout.EAST);
 
 		JPanel live = new JPanel(new BorderLayout(5, 0));
@@ -243,13 +245,13 @@ final class PersonalSpacePanel extends PluginPanel
 		live.add(liveDot, BorderLayout.WEST);
 		liveLine.setFont(FontManager.getRunescapeSmallFont());
 		liveLine.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		liveLine.setToolTipText("What Personal Space is doing right now. Open Troubleshooting for details.");
+		liveLine.setToolTipText(tip("What Personal Space is doing right now."));
 		live.add(liveLine, BorderLayout.CENTER);
 
 		shapeLine.setFont(FontManager.getRunescapeSmallFont());
 		shapeLine.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
 		shapeLine.setBorder(new EmptyBorder(3, 13, 0, 0));
-		shapeLine.setToolTipText("The shape your own tile is using. Change it with Arrangement, or with the Spacing slider and Auto-space.");
+		shapeLine.setToolTipText(tip("The shape your own tile is using right now."));
 		shapeLine.setVisible(false);
 
 		JPanel lines = new JPanel(new BorderLayout());
@@ -289,7 +291,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 		card.add(labelWithValue("Players per tile", perTileValue), c);
 		c.gridy++;
-		perTileSlider.setToolTipText("How many players on one tile get their own spot. 5 is the sweet spot; raise it if you see a heap left in the middle at a busy bank, up to 16 for drop-party chaos. The higher it goes, the further out the crowd reaches.");
+		perTileSlider.setToolTipText(tip("How many players on one tile get their own spot. 5 suits most places. Raise it if a busy bank leaves a heap in the middle."));
 		card.add(slider(perTileSlider), c);
 
 		c.gridy++;
@@ -297,10 +299,10 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(labelWithValue("Spacing", spacingValue), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		spacingPills.setToolTipText("Quick picks. Fine-tune with the slider below.");
+		spacingPills.setToolTipText(tip("Quick picks. Fine-tune with the slider."));
 		card.add(spacingPills, c);
 		c.gridy++;
-		spacingSlider.setToolTipText("How far apart players are drawn. Changes show up live. At bank counters, walls and fires, Auto-space keeps people close: turn it off to use this slider everywhere.");
+		spacingSlider.setToolTipText(tip("How far apart players stand. With Auto-space on, banks, walls and fires stay close whatever this says."));
 		card.add(slider(spacingSlider), c);
 
 		c.gridy++;
@@ -308,7 +310,7 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(fieldLabel("Arrangement"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		arrangementPills.setToolTipText("How everyone on a tile is drawn up. Smart: along whatever they're facing - a counter, a wall, an anvil, a fire - and a ring out in the open, where there's nothing to line up along. Circle: always a ring. Line: side by side anywhere. Arc: a curve, like the crowd round an anvil.");
+		arrangementPills.setToolTipText(tip("Smart: lines up at counters, anvils and fires, and makes a ring in the open. Circle: always a ring. Line: side by side. Arc: a curve."));
 		card.add(arrangementPills, c);
 
 		c.gridy++;
@@ -316,23 +318,23 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(fieldLabel("Pose for 2 or 3 players"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		posePills.setToolTipText("Natural: the way they really face. Angled: turned halfway towards each other, like a photo. Facing: towards each other. Players at an anvil, booth or fire keep facing it.");
+		posePills.setToolTipText(tip("How two or three players in the open are turned. Natural: as they really face. Angled: half towards each other. Facing: towards each other."));
 		card.add(posePills, c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
 		card.add(switchRow("Auto-space", smallGroupsSwitch,
-			"On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn off to unlock the slider: it then sets exactly how far apart everyone stands, anywhere, handy for photos."), c);
+			"On: small groups, banks, walls and fires stay close whatever the slider says. Off: the slider decides everywhere."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
-			"Off: you stay where you are and others step around you. On: you take a spot too, at the front, so what you're doing looks right."), c);
+			"Off: you stay put and others step around you. On: you take a spot too, at the front."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Pause while I'm fighting", combatSwitch,
-			"On: everyone is shown where they really stand while you fight, and for a few seconds after. Keep this on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer."), c);
+			"On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses."), c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
@@ -373,13 +375,13 @@ final class PersonalSpacePanel extends PluginPanel
 		b.gridy++;
 		b.insets = new Insets(4, 0, 0, 0);
 		troubleshootingBody.add(switchRow("Test: shift only me", testModeSwitch,
-			"Ignores everyone else and draws your own character a little to the east, to check the effect works."), b);
+			"Moves just your own character a little east, to check the plugin is working."), b);
 
 		b.gridy++;
 		troubleshootingBody.add(labelWithValue("Test distance", testOffsetValue), b);
 		b.gridy++;
 		b.insets = new Insets(0, 0, 0, 0);
-		testOffsetSlider.setToolTipText("How far test mode shifts your character. 128 units is one tile.");
+		testOffsetSlider.setToolTipText(tip("How far test mode moves you. 128 is one tile."));
 		troubleshootingBody.add(slider(testOffsetSlider), b);
 
 		b.gridy++;
@@ -390,7 +392,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 		b.gridy++;
 		copyButton.setFocusable(false);
-		copyButton.setToolTipText("Copies everything above as text, to paste into a bug report.");
+		copyButton.setToolTipText(tip("Copies this report, ready to paste into a bug report."));
 		copyButton.addActionListener(e -> copyReport());
 		troubleshootingBody.add(copyButton, b);
 
@@ -411,7 +413,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 		JLabel support = new JLabel("Support the developer", new HeartIcon(ColorScheme.BRAND_ORANGE), SwingConstants.CENTER);
 		support.setIconTextGap(6);
-		support.setToolTipText("Personal Space is free. If you enjoy it, you can chip in here.");
+		support.setToolTipText(tip("Personal Space is free. If you enjoy it, you can chip in here."));
 		link(support, ColorScheme.LIGHT_GRAY_COLOR, () -> LinkBrowser.browse(SUPPORT_URL));
 		p.add(support, c);
 
@@ -644,8 +646,8 @@ final class PersonalSpacePanel extends PluginPanel
 		JLabel label = new JLabel(text);
 		label.setFont(FontManager.getRunescapeFont());
 		label.setForeground(Color.WHITE);
-		label.setToolTipText(tooltip);
-		toggle.setToolTipText(tooltip);
+		label.setToolTipText(tip(tooltip));
+		toggle.setToolTipText(tip(tooltip));
 		row.add(label, BorderLayout.WEST);
 		row.add(toggle, BorderLayout.EAST);
 		// Clicking the words flips the switch too.
@@ -721,6 +723,13 @@ final class PersonalSpacePanel extends PluginPanel
 	}
 
 	/** HTML so long text wraps inside the narrow sidebar. */
+	/** A tooltip that wraps at a readable width: Swing draws a plain one as a single line. */
+	private static String tip(String text)
+	{
+		String escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+		return "<html><div style='width:" + TIP_WIDTH_PX + "px'>" + escaped + "</div></html>";
+	}
+
 	private static String wrap(String text)
 	{
 		String escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
