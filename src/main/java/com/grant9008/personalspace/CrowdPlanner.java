@@ -118,8 +118,8 @@ final class CrowdPlanner
 
 	/**
 	 * Where the camera is on the ground, in scene units, or {@link Integer#MIN_VALUE} when unknown.
-	 * Your own character is given whichever of your crowd's spots is nearest it, so you aren't
-	 * buried in the middle of a crowd seen end on.
+	 * It never moves you: once you've stood a moment, whoever would stand between you and it steps
+	 * aside to a free spot, so you aren't buried in the middle of a crowd seen end on.
 	 */
 	int cameraX = Integer.MIN_VALUE;
 	int cameraY = Integer.MIN_VALUE;
@@ -133,8 +133,12 @@ final class CrowdPlanner
 	private Map<Long, Map<Integer, Integer>> lastSlots = new HashMap<>();
 	/** Where you were drawn last tick, east then north in scene units; null when you weren't. */
 	private double[] lastYouAt;
-	/** The tick you were last drawn somewhere new: nobody steps aside until you've stood a moment. */
+	/** The tick you last changed spot: nobody steps aside until you've stood a moment. */
 	private int youStillSince;
+	/** Which spot you had last tick, as tile and spot, so a crowd's spacing changing isn't a move. */
+	private String lastYouKey;
+	private long lastYouTile;
+	private int lastYouSlot = -1;
 	/** Tiles further than this from where you were drawn aren't checked for standing in your way. */
 	private static final int VIEW_TILES = 6;
 
@@ -433,6 +437,8 @@ final class CrowdPlanner
 		final int sideY;
 		final double angle;
 		final int spacing;
+		/** The spacing if it ends up sharing a line with its neighbours: closer at a busy counter. */
+		final int lineSpacing;
 		final boolean middleTaken;
 		final int wanted;
 		final StackSpreader.SpotCheck check;
@@ -443,8 +449,9 @@ final class CrowdPlanner
 		final int across;
 
 		Straight(long tile, int plane, int sceneX, int sceneY, int sideX, int sideY, double angle, int spacing,
-			boolean middleTaken, int wanted, StackSpreader.SpotCheck check, int[] blocked)
+			int lineSpacing, boolean middleTaken, int wanted, StackSpreader.SpotCheck check, int[] blocked)
 		{
+			this.lineSpacing = lineSpacing;
 			this.tile = tile;
 			this.plane = plane;
 			this.sceneX = sceneX;
@@ -522,7 +529,7 @@ final class CrowdPlanner
 				}
 				loneId.put(next, lone.id);
 				withLone.add(new Straight(next, r.plane, StackRegistry.sceneX(next), StackRegistry.sceneY(next), r.sideX, r.sideY,
-					r.angle, r.spacing, false, 1, r.check, new int[1]));
+					r.angle, r.spacing, r.lineSpacing, false, 1, r.check, new int[1]));
 			}
 		}
 		rows = withLone;
@@ -583,7 +590,7 @@ final class CrowdPlanner
 					int spacing = Integer.MAX_VALUE;
 					for (Straight r : chain)
 					{
-						spacing = Math.min(spacing, r.spacing);
+						spacing = Math.min(spacing, r.lineSpacing);
 					}
 					List<LineBook.Member> members = new ArrayList<>(chain.size());
 					for (Straight r : chain)
@@ -714,6 +721,14 @@ final class CrowdPlanner
 		if (view == null || lastYouAt == null)
 		{
 			return out;
+		}
+		double[] lastYouAt = this.lastYouAt;
+		List<int[]> yours = lastYouSlot < 0 ? null : spotsByTile.get(lastYouTile);
+		if (yours != null && lastYouSlot < yours.size())
+		{
+			// Where your spot is drawn this tick, so a change of spacing isn't judged from the old one.
+			lastYouAt = new double[]{StackRegistry.sceneX(lastYouTile) * 2.0 * HALF_TILE + HALF_TILE + yours.get(lastYouSlot)[0],
+				StackRegistry.sceneY(lastYouTile) * 2.0 * HALF_TILE + HALF_TILE + yours.get(lastYouSlot)[1]};
 		}
 		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{
@@ -1029,8 +1044,12 @@ final class CrowdPlanner
 				// Laid out after every tile is known, so neighbours along the same counter or bank can
 				// share one line.
 				int wanted = Math.min(capacity, Math.max(movable.size(), lagged - (group.size() - movable.size())));
-				pendingStraight.add(new Straight(tile, plane, sceneX, sceneY, sideX, sideY, angle, tileSpacing, middleTaken,
-					wanted, check, blocked));
+				// A booth with its own row closes up by itself when it runs short of room, but a line
+				// shared along a busy counter doesn't: at 50 apart it ran out of spots and left people
+				// hidden in the middle, so a shared line keeps 1.8.14's spacing.
+				int lineSpacing = counter && smallGroupsClose ? Math.min(tileSpacing, PersonalSpaceConfig.LINE_SPACING) : tileSpacing;
+				pendingStraight.add(new Straight(tile, plane, sceneX, sceneY, sideX, sideY, angle, tileSpacing, lineSpacing,
+					middleTaken, wanted, check, blocked));
 				movableByTile.put(tile, movable);
 				shapeByTile.put(tile, kind);
 				spacingByTile.put(tile, tileSpacing);
@@ -1065,7 +1084,8 @@ final class CrowdPlanner
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
-		slots.keepClear = tick - youStillSince >= SlotBook.LOCAL_SWAP_DELAY ? spotsInFront(view, spotsByTile) : new HashMap<>();
+		slots.keepClear = spotsInFront(view, spotsByTile);
+		slots.stepAside = tick - youStillSince >= SlotBook.LOCAL_SWAP_DELAY;
 		slots.viewKey = viewSector;
 		slots.inFrontOf = (tile, spot) ->
 		{
@@ -1217,10 +1237,29 @@ final class CrowdPlanner
 					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz};
 			}
 		}
-		if (youAt == null || lastYouAt == null || youAt[0] != lastYouAt[0] || youAt[1] != lastYouAt[1])
+		// Your spot's identity, not where it is drawn: a crowd's spacing growing and shrinking as
+		// people come and go moves where your spot is drawn without you going anywhere.
+		String youKey = null;
+		lastYouSlot = -1;
+		for (Map.Entry<Long, Map<Integer, Integer>> e : assigned.entrySet())
+		{
+			Integer s = e.getValue().get(localId);
+			if (s != null)
+			{
+				youKey = e.getKey() + "/" + s;
+				lastYouTile = e.getKey();
+				lastYouSlot = s;
+			}
+		}
+		if (youKey == null && youAt != null)
+		{
+			youKey = youAt[0] + "," + youAt[1];
+		}
+		if (youKey == null || !youKey.equals(lastYouKey))
 		{
 			youStillSince = tick;
 		}
+		lastYouKey = youKey;
 		lastYouAt = youAt;
 		return plan;
 	}

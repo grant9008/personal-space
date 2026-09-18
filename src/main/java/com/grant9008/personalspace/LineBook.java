@@ -200,9 +200,9 @@ final class LineBook
 	int localId = -1;
 
 	/**
-	 * Which way the camera is from you on the ground (east, north), or null when unknown. At the
-	 * edge you take whichever of your tile's places there is nearest it, so you aren't hidden behind
-	 * the rest of the line when it is seen end on.
+	 * Which way the camera is from you on the ground (east, north), or null when unknown. It never
+	 * moves you: whoever on the line would stand between you and it steps aside to a free spot, so
+	 * you aren't hidden behind the rest of the line when it is seen end on.
 	 */
 	double[] view;
 
@@ -608,7 +608,9 @@ final class LineBook
 		Spot mineNow = spotOf.get(localId);
 		String aim = mineNow == null || !mineNow.line.equals(key) || view == null
 			? null : mineNow.point() + "@" + Math.round(Math.atan2(view[1], view[0]) * 100);
-		if (aim == null || !aim.equals(asideAim))
+		// Only the line you're on decides this: every line is laid out in turn, and one you aren't
+		// on used to wipe the memory, so people who had stepped aside for you stepped forward again.
+		if ((mineNow == null || mineNow.line.equals(key)) && (aim == null || !aim.equals(asideAim)))
 		{
 			// You or the camera changed: whoever stepped aside for the old view may move again.
 			asideForYou.clear();

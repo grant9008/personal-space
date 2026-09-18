@@ -101,6 +101,12 @@ final class SlotBook
 	Map<Long, Set<Integer>> keepClear = new HashMap<>();
 
 	/**
+	 * Whether you've stood still long enough for people in front of you to step aside. Until then
+	 * nobody is moved for you, but newcomers and gap-filling still keep out of those spots.
+	 */
+	boolean stepAside = true;
+
+	/**
 	 * For those tiles, the order to try free spots in when someone must go elsewhere: nearest the
 	 * tile's middle first, so they step a little back near their own booth rather than along the
 	 * counter to the far end of it.
@@ -353,7 +359,7 @@ final class SlotBook
 		// and people stepped aside for where you were only to step again for where you are. Only a
 		// spot nobody has is ever used, so nobody is left without one for your sake; someone with
 		// nowhere else to go simply stays.
-		for (Map.Entry<Long, Set<Integer>> c : movedYou ? Collections.<Long, Set<Integer>>emptyMap().entrySet() : keepClear.entrySet())
+		for (Map.Entry<Long, Set<Integer>> c : movedYou || !stepAside ? Collections.<Long, Set<Integer>>emptyMap().entrySet() : keepClear.entrySet())
 		{
 			Tile t = tiles.get(c.getKey());
 			if (t == null || !present.containsKey(c.getKey()))

@@ -53,6 +53,12 @@ public interface PersonalSpaceConfig extends Config
 	 * stretch of counter runs out of room, leaving people stacked in the middle.
 	 */
 	int COUNTER_SPACING = 50;
+	/**
+	 * The same for a line shared by several busy booths or along a riverbank, with Auto-space on.
+	 * A shared line only has so much counter, and at 50 a busy one ran out of spots and left people
+	 * hidden in the middle; a booth with its own row closes up by itself when it has to.
+	 */
+	int LINE_SPACING = 42;
 	/** Smart keeps people around a fire at most this far apart, whatever the slider says. */
 	int FIRE_SPACING = 46;
 
@@ -174,7 +180,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_INCLUDE_LOCAL,
 		name = "Move my character too",
-		description = "Off: you stay put and others step around you. On: you take a spot too, where nobody blocks your view of yourself.",
+		description = "Off: you stay put and others step around you. On: you take a spot too, and people step out of your view where there's room.",
 		position = 4
 	)
 	default boolean includeLocalPlayer()

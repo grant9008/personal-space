@@ -210,7 +210,7 @@ public class CrowdPlannerTest
 						{
 							double gap = Math.hypot(at.get(a.id)[0] - at.get(b.id)[0], at.get(a.id)[1] - at.get(b.id)[1]);
 							Assert.assertTrue(onA + " and " + onB + ": players " + a.id + " and " + b.id + " only " + gap + " apart",
-								gap >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+								gap >= PersonalSpaceConfig.LINE_SPACING - 1);
 						}
 					}
 				}
@@ -342,7 +342,7 @@ public class CrowdPlannerTest
 		for (int i = 1; i < sorted.size(); i++)
 		{
 			Assert.assertTrue("neighbours only " + (sorted.get(i)[0] - sorted.get(i - 1)[0]) + " apart",
-				sorted.get(i)[0] - sorted.get(i - 1)[0] >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+				sorted.get(i)[0] - sorted.get(i - 1)[0] >= PersonalSpaceConfig.LINE_SPACING - 1);
 		}
 		Assert.assertTrue(plan.tiles.get(StackRegistry.key(0, 51, 50)).shape.startsWith("counter row shared"));
 	}
@@ -794,7 +794,7 @@ public class CrowdPlannerTest
 				{
 					double gap = Math.hypot(a.getValue()[0] - b.getValue()[0], a.getValue()[1] - b.getValue()[1]);
 					Assert.assertTrue("fisher " + a.getKey() + " is " + gap + " from " + b.getKey() + " on the tile behind",
-						gap >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+						gap >= PersonalSpaceConfig.LINE_SPACING - 1);
 				}
 			}
 		}
@@ -892,7 +892,7 @@ public class CrowdPlannerTest
 						}
 						double away = Math.hypot(a.getValue()[0] - b.getValue()[0], a.getValue()[1] - b.getValue()[1]);
 						Assert.assertTrue("gap " + gap + " at " + spacing + ": players " + a.getKey() + " and "
-							+ b.getKey() + " only " + away + " apart", away >= Math.min(Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING), LineBook.ROW_GAP) - 1);
+							+ b.getKey() + " only " + away + " apart", away >= Math.min(Math.min(spacing, PersonalSpaceConfig.LINE_SPACING), LineBook.ROW_GAP) - 1);
 					}
 				}
 			}
