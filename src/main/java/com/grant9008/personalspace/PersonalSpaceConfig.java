@@ -25,6 +25,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_POSE = "smallGroupPose";
 	String KEY_PAUSE_IN_COMBAT = "pauseInCombat";
 	String KEY_TEST_OFFSET = "testOffset";
+	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
 	int MIN_STACK = 2;
 	int MAX_STACK = 16;
@@ -195,6 +196,17 @@ public interface PersonalSpaceConfig extends Config
 		position = 7
 	)
 	default boolean pauseInCombat()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = KEY_SHOW_SIDEBAR,
+		name = "Show sidebar button",
+		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
+		position = 8
+	)
+	default boolean showSidebarButton()
 	{
 		return true;
 	}

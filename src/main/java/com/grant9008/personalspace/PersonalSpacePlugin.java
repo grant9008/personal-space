@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.22";
+	static final String VERSION = "1.8.23";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -147,7 +147,10 @@ public class PersonalSpacePlugin extends Plugin
 			.priority(7)
 			.panel(newPanel)
 			.build();
-		clientToolbar.addNavigation(navButton);
+		if (config.showSidebarButton())
+		{
+			clientToolbar.addNavigation(navButton);
+		}
 		panel = newPanel;
 
 		clientThread.invoke(() ->
@@ -193,6 +196,27 @@ public class PersonalSpacePlugin extends Plugin
 		if (p != null)
 		{
 			SwingUtilities.invokeLater(p::refreshControls);
+		}
+		NavigationButton button = navButton;
+		if (PersonalSpaceConfig.KEY_SHOW_SIDEBAR.equals(event.getKey()) && button != null)
+		{
+			// For anyone who likes a tidy sidebar; the settings stay in the plugin's config.
+			boolean show = config.showSidebarButton();
+			SwingUtilities.invokeLater(() ->
+			{
+				if (navButton != button)
+				{
+					return; // switched off meanwhile
+				}
+				if (show)
+				{
+					clientToolbar.addNavigation(button);
+				}
+				else
+				{
+					clientToolbar.removeNavigation(button);
+				}
+			});
 		}
 		if (PersonalSpaceConfig.KEY_ACTIVE.equals(event.getKey()) && !config.active())
 		{
