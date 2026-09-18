@@ -124,6 +124,9 @@ final class CrowdPlanner
 	private int sectorSeen = -1;
 	private int sectorSince;
 
+	/** Last tick's spots on each laid-out tile, so the ones in front of you can be kept clear. */
+	private Map<Long, Map<Integer, Integer>> lastSlots = new HashMap<>();
+
 	/** What your spot was last chosen for: the tile, the camera's direction and the tile's shape. */
 	private long aimedTile = Long.MIN_VALUE;
 	private int aimedSector = -2;
@@ -736,6 +739,43 @@ final class CrowdPlanner
 		return out;
 	}
 
+	/**
+	 * For the tile you are on, the spots that stand between your spot and the camera, going by where
+	 * you stood last tick.
+	 */
+	private Map<Long, Set<Integer>> spotsInFront(double[] view, int localId, Map<Long, List<int[]>> spotsByTile)
+	{
+		Map<Long, Set<Integer>> out = new HashMap<>();
+		if (view == null || localId < 0)
+		{
+			return out;
+		}
+		for (Map.Entry<Long, Map<Integer, Integer>> e : lastSlots.entrySet())
+		{
+			Integer mine = e.getValue().get(localId);
+			List<int[]> spots = spotsByTile.get(e.getKey());
+			if (mine == null || spots == null || mine >= spots.size())
+			{
+				continue;
+			}
+			int[] here = spots.get(mine);
+			Set<Integer> clear = new HashSet<>();
+			for (int s = 0; s < spots.size(); s++)
+			{
+				double east = spots.get(s)[0] - here[0];
+				double north = spots.get(s)[1] - here[1];
+				double nearer = east * view[0] + north * view[1];
+				double across = Math.abs(north * view[0] - east * view[1]);
+				if (s != mine && nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP)
+				{
+					clear.add(s);
+				}
+			}
+			out.put(e.getKey(), clear);
+		}
+		return out;
+	}
+
 	/** Someone is in front of you when they are at least this much nearer the camera, in units. */
 	private static final double VIEW_IN_FRONT = 24;
 	/** ...and this close to your line of sight from the side, about a player's width. */
@@ -1065,7 +1105,9 @@ final class CrowdPlanner
 		aimedTile = yourTile;
 		aimedSector = viewSector;
 		aimedShape = yourShape;
+		slots.keepClear = spotsInFront(view, localId, spotsByTile);
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
+		lastSlots = assigned;
 
 		Set<Integer> placed = new HashSet<>();
 		Map<Long, LineBook.LineReport> lineReports = new HashMap<>();

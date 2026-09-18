@@ -1191,6 +1191,42 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void onABusyBoothOfItsOwnNobodyStandsBetweenYouAndTheCamera()
+	{
+		// Eight people on one booth's own counter row, you among them, the camera off to one side:
+		// whoever would stand between you and it steps to one of the free spots instead.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		for (int side : new int[]{1, -1})
+		{
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int i = 1; i <= 7; i++)
+			{
+				still.add(new StackSpreader.Entry(i, TILE, false, NORTH));
+			}
+			still.add(new StackSpreader.Entry(99, TILE, true, NORTH));
+			CrowdPlanner planner = new CrowdPlanner();
+			cameraAt(planner, side, -1);
+			CrowdPlanner.Plan plan = null;
+			for (int t = 1; t <= 12; t++)
+			{
+				plan = planner.plan(still, x -> true, 128, 16, true, true, t, counter);
+			}
+			Assert.assertEquals("everyone still has a spot", 8, plan.placements.size());
+			int[] me = yours(plan);
+			double vx = side * Math.sqrt(0.5);
+			double vy = -Math.sqrt(0.5);
+			for (Map.Entry<Integer, int[]> e : spots(plan).entrySet())
+			{
+				double east = e.getValue()[0] - me[0];
+				double north = e.getValue()[1] - me[1];
+				Assert.assertFalse("camera " + (side > 0 ? "south-east" : "south-west") + ": player " + e.getKey()
+					+ " stands between you and the camera",
+					e.getKey() != 99 && east * vx + north * vy > 24 && Math.abs(north * vx - east * vy) < 48);
+			}
+		}
+	}
+
+	@Test
 	public void aDiagonalCameraKeepsTheSpotBesideYouOnABankLineEmpty()
 	{
 		// Four busy booths share one line. From a camera off to one side a straight line is one

@@ -107,6 +107,12 @@ final class SlotBook
 	private long localAimTile = Long.MIN_VALUE;
 
 	/**
+	 * For the tile you are on, the spots standing between you and the camera. Nobody is put in one
+	 * while there is anywhere else, and anyone found in one steps to a free spot if there is one.
+	 */
+	Map<Long, Set<Integer>> keepClear = new HashMap<>();
+
+	/**
 	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
 	 * seconds. Stopping for a moment on your way past doesn't push anyone around.
 	 */
@@ -206,6 +212,7 @@ final class SlotBook
 				localAimTile = e.getKey();
 			}
 			int yours = localAimTile == e.getKey() && localAim < capacity ? localAim : 0;
+			Set<Integer> inFront = keepClear.getOrDefault(e.getKey(), Collections.emptySet());
 			for (int id : arriving)
 			{
 				if (t.slotOf.containsKey(id))
@@ -217,13 +224,19 @@ final class SlotBook
 					t.assign(id, yours);
 					continue;
 				}
-				for (int s = 0; s < capacity; s++)
+				// The best free spot out of your way, or, when there is none, any free spot.
+				int spot = -1;
+				for (int s = 0; s < capacity && spot < 0; s++)
 				{
-					if (!t.occupant.containsKey(s) && !t.held(s, tick))
-					{
-						t.assign(id, s);
-						break;
-					}
+					spot = !t.occupant.containsKey(s) && !t.held(s, tick) && !inFront.contains(s) ? s : -1;
+				}
+				for (int s = 0; s < capacity && spot < 0; s++)
+				{
+					spot = !t.occupant.containsKey(s) && !t.held(s, tick) ? s : -1;
+				}
+				if (spot >= 0)
+				{
+					t.assign(id, spot);
 				}
 			}
 			// Once you've stood here a moment you get the best spot going: a free one if there is
@@ -264,10 +277,11 @@ final class SlotBook
 					moves++;
 				}
 			}
-			// Fill gaps from the back: the player in the worst spot moves into the best free one.
+			// Fill gaps from the back: the player in the worst spot moves into the best free one -
+			// never one standing between you and the camera.
 			for (int s = 0; s < capacity; s++)
 			{
-				if (t.occupant.containsKey(s) || t.held(s, tick))
+				if (t.occupant.containsKey(s) || t.held(s, tick) || inFront.contains(s))
 				{
 					continue;
 				}
@@ -294,6 +308,28 @@ final class SlotBook
 				t.vacate(mover, tick, false);
 				t.assign(mover, s);
 				moves++;
+			}
+
+			// Anyone standing between you and the camera steps to a free spot out of the way. Only a
+			// spot nobody has is ever used, so nobody is left without one for your sake; someone with
+			// nowhere else to go simply stays.
+			for (int s : inFront)
+			{
+				Integer who = t.occupant.get(s);
+				if (who == null || who == localId)
+				{
+					continue;
+				}
+				for (int to = 0; to < capacity; to++)
+				{
+					if (!t.occupant.containsKey(to) && !t.held(to, tick) && !inFront.contains(to))
+					{
+						t.vacate(who, tick, false);
+						t.assign(who, to);
+						moves++;
+						break;
+					}
+				}
 			}
 
 			out.put(e.getKey(), new HashMap<>(t.slotOf));

@@ -65,10 +65,19 @@ final class StackSpreader
 	/** Furthest back from its middle a bowed counter row reaches, in local units. */
 	static final int MAX_BOW = 48;
 	/**
-	 * Steepest a bow gets. A row behind stands half a spacing along from the one in front, so a
-	 * steeper curve than this would close the gap between them until the two of them touched.
+	 * The circle a bowed row follows, in local units: two and a half tiles across, so the whole row
+	 * is one gentle curve round the booth. A tighter one, eased into straight lines to keep rows
+	 * apart, drew a row as a V: the further along, the further from the counter.
 	 */
-	static final double BOW_SLOPE = 0.45;
+	static final int BOW_RADIUS = 320;
+	/** How far along the row the curve goes before it is {@link #MAX_BOW} back and stays there. */
+	static final double BOW_REACH = Math.sqrt(2.0 * BOW_RADIUS * MAX_BOW - (double) MAX_BOW * MAX_BOW);
+	/**
+	 * Steepest the bow gets, where it levels off. A row behind stands half a spacing along from the
+	 * one in front, where the row in front has bowed away from it by up to this much per unit, so
+	 * each row behind gets that much more depth to keep the gap between them.
+	 */
+	static final double BOW_SLOPE = BOW_REACH / (BOW_RADIUS - MAX_BOW);
 
 	/** One standing-still player on a tile. */
 	static final class Entry
@@ -264,22 +273,13 @@ final class StackSpreader
 
 	/**
 	 * How far back from the middle of a bowed row a spot {@code along} it stands, so a crowd at a
-	 * bank booth curves round it the way one round an anvil does, instead of standing in a flat line.
-	 * It is the same circle a curved row hugs, flattened out at {@link #MAX_BOW} so a wide row's ends
-	 * don't curl back into the row behind.
+	 * bank booth curves gently round it instead of standing in a flat line: one circle of
+	 * {@link #BOW_RADIUS}, levelling off at {@link #MAX_BOW} so a very long row doesn't curl away.
 	 */
 	static int bowBack(double along)
 	{
-		// The circle, while it is shallow enough that the row behind keeps its gap over a half step,
-		// then a straight taper at that same slope, then flat at MAX_BOW.
-		double turn = BOW_SLOPE / Math.sqrt(1 + BOW_SLOPE * BOW_SLOPE);
-		double straightFrom = LOOK_AHEAD * turn;
-		double d = Math.abs(along);
-		double back = d <= straightFrom
-			? LOOK_AHEAD - Math.sqrt(LOOK_AHEAD * (double) LOOK_AHEAD - d * d)
-			: LOOK_AHEAD - Math.sqrt(LOOK_AHEAD * (double) LOOK_AHEAD - straightFrom * straightFrom)
-				+ BOW_SLOPE * (d - straightFrom);
-		return (int) Math.round(Math.min(MAX_BOW, back));
+		double d = Math.min(Math.abs(along), BOW_REACH);
+		return (int) Math.round(Math.min(MAX_BOW, BOW_RADIUS - Math.sqrt(BOW_RADIUS * (double) BOW_RADIUS - d * d)));
 	}
 
 	/** The angle between neighbours in a curved row, in radians. */
