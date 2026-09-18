@@ -1157,6 +1157,121 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void peopleComingAndGoingNeverMoveYouOnceYouveSettled()
+	{
+		// At a busy bank people come and go all the time. Your spot is chosen when you arrive, and
+		// after that only settling the camera somewhere new moves you: nobody else's comings and
+		// goings, and no gap-filling.
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		cameraAt(planner, 1, -1);
+		int tick = 0;
+		int[] settled = null;
+		for (int t = 0; t < 10; t++)
+		{
+			settled = yours(planner.plan(youAtTheCounter(), x -> true, 128, 10, true, true, ++tick, counter));
+		}
+		java.util.Random churn = new java.util.Random(7);
+		for (int t = 0; t < 120; t++)
+		{
+			List<StackSpreader.Entry> now = new ArrayList<>(youAtTheCounter());
+			int others = churn.nextInt(7);
+			for (int i = 0; i < others; i++)
+			{
+				now.add(new StackSpreader.Entry(10 + churn.nextInt(12), TILE, false, NORTH));
+			}
+			Map<Integer, StackSpreader.Entry> unique = new java.util.LinkedHashMap<>();
+			for (StackSpreader.Entry e : now)
+			{
+				unique.putIfAbsent(e.id, e);
+			}
+			int[] you = yours(planner.plan(new ArrayList<>(unique.values()), x -> true, 128, 10, true, true, ++tick, counter));
+			Assert.assertArrayEquals("tick " + tick + ": you moved because other people came and went", settled, you);
+		}
+	}
+
+	@Test
+	public void aDiagonalCameraKeepsTheSpotBesideYouOnABankLineEmpty()
+	{
+		// Four busy booths share one line. From a camera off to one side a straight line is one
+		// person half behind the next, so the person beside you on the camera's side covered you,
+		// wherever on the line you were. That spot is now kept empty, and nobody loses a spot for it.
+		CrowdPlanner.Surroundings counter = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return dz <= 0;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return facesObstacle(tile, angle);
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		for (int yourBooth = 50; yourBooth <= 52; yourBooth++)
+		{
+			for (int side : new int[]{1, -1})
+			{
+				List<StackSpreader.Entry> still = new ArrayList<>();
+				int id = 1;
+				for (int x = 50; x <= 53; x++)
+				{
+					for (int i = 0; i < 3; i++)
+					{
+						boolean you = x == yourBooth && i == 0;
+						still.add(new StackSpreader.Entry(you ? 99 : id++, StackRegistry.key(0, x, 50), you, NORTH));
+					}
+				}
+				CrowdPlanner planner = new CrowdPlanner();
+				planner.cameraX = 51 * 128 + 64 + side * 2500;
+				planner.cameraY = 50 * 128 + 64 - 2500;
+				CrowdPlanner.Plan plan = null;
+				for (int t = 1; t <= 16; t++)
+				{
+					plan = planner.plan(still, x -> true, 128, 16, true, true, t, counter);
+				}
+				Assert.assertEquals("everyone still has a spot", still.size(), plan.placements.size());
+				Map<Integer, double[]> at = new HashMap<>();
+				for (StackSpreader.Placement pl : plan.placements)
+				{
+					at.put(pl.id, new double[]{StackRegistry.sceneX(pl.tile) * 128 + pl.dx, pl.dz});
+				}
+				double[] me = at.get(99);
+				double vx = side * Math.sqrt(0.5);
+				double vy = -Math.sqrt(0.5);
+				for (Map.Entry<Integer, double[]> e : at.entrySet())
+				{
+					double east = e.getValue()[0] - me[0];
+					double north = e.getValue()[1] - me[1];
+					boolean inFront = e.getKey() != 99 && east * vx + north * vy > 24 && Math.abs(north * vx - east * vy) < 48;
+					Assert.assertFalse("booth " + (yourBooth - 49) + ", camera " + (side > 0 ? "south-east" : "south-west")
+						+ ": player " + e.getKey() + " stands between you and the camera", inFront);
+				}
+			}
+		}
+	}
+
+	@Test
 	public void youStandAtTheEndOfTheRowNearestTheCamera()
 	{
 		// Seen from the side, a bank row is one person behind another, and whoever you had in front

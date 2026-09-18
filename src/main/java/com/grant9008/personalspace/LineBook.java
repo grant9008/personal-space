@@ -206,6 +206,57 @@ final class LineBook
 	 */
 	double[] view;
 
+	/**
+	 * The usable spots on this line that stand between you and the camera, to keep empty. None when
+	 * there is no camera to go by, you aren't on this line or haven't stood here a moment yet, and
+	 * never one being held for someone coming back to it.
+	 */
+	private List<String> inFrontOfYou(Line line, String key, int tick, Set<String> heldHere, Map<String, Boolean> usable)
+	{
+		List<String> out = new ArrayList<>();
+		Spot mine = spotOf.get(localId);
+		if (view == null || mine == null || !mine.line.equals(key) || mine.tile != localTile
+			|| tick - localSince < SlotBook.LOCAL_SWAP_DELAY)
+		{
+			return out;
+		}
+		double[] at = ground(line, mine.row, mine.j);
+		for (int row = 0; row <= ROWS_BEHIND; row++)
+		{
+			for (long j = mine.j - 3; j <= mine.j + 3; j++)
+			{
+				if (row == mine.row && j == mine.j || !Boolean.TRUE.equals(usable.get(row + "/" + j)))
+				{
+					continue;
+				}
+				double[] there = ground(line, row, j);
+				double east = there[0] - at[0];
+				double north = there[1] - at[1];
+				double nearer = east * view[0] + north * view[1];
+				double across = Math.abs(north * view[0] - east * view[1]);
+				String point = new Spot(key, row, j, mine.tile).point();
+				if (nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP && !heldHere.contains(point))
+				{
+					out.add(point);
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Someone is in front of you when they are at least this much nearer the camera, in units. */
+	private static final double VIEW_IN_FRONT = 24;
+	/** ...and this close to your line of sight from the side, about a player's width. */
+	private static final double VIEW_OVERLAP = 48;
+
+	/** Where a spot on the line is on the ground, east then north. */
+	private static double[] ground(Line line, int row, long j)
+	{
+		double along = line.along(row, j);
+		double depth = row * (double) line.rowGap();
+		return new double[]{line.sideX * along - line.aheadX() * depth, line.sideY * along - line.aheadZ() * depth};
+	}
+
 	/** Whether each tile's people curve gently round their own booth, rather than standing dead flat. */
 	boolean bow = true;
 
@@ -319,6 +370,7 @@ final class LineBook
 				taken.add(spot.point());
 			}
 		}
+
 		Map<Member, List<Integer>> newcomers = new HashMap<>();
 		for (Member m : members)
 		{
@@ -422,6 +474,53 @@ final class LineBook
 			}
 		}
 
+		// Personal space for you. From a camera off to one side a straight line is one person half
+		// behind the next, so whoever stands beside you on the camera's side covers you, wherever on
+		// the line you are - and so can someone in the row behind, half a step towards the camera.
+		// Once everyone has a spot, anyone standing between you and the camera moves to a free spot
+		// out of the way, and the spots in front of you are kept empty for the rest of the tick. Only
+		// spots nobody has are ever used, so nobody is left without one for your sake; someone with
+		// nowhere else to go simply stays.
+		Set<String> heldHere = new HashSet<>();
+		for (Spot spot : held.values())
+		{
+			if (spot.line.equals(key))
+			{
+				heldHere.add(spot.point());
+			}
+		}
+		List<String> clear = inFrontOfYou(line, key, tick, heldHere, usable);
+		if (!clear.isEmpty())
+		{
+			Set<String> avoid = new HashSet<>(taken);
+			avoid.addAll(clear);
+			for (int i = 0; i < members.size(); i++)
+			{
+				Member m = members.get(i);
+				for (int id : m.ids)
+				{
+					Spot spot = spotOf.get(id);
+					if (id == localId || spot == null || !clear.contains(spot.point()))
+					{
+						continue;
+					}
+					String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 0);
+					if (best == null)
+					{
+						continue;
+					}
+					String[] parts = best.split("/");
+					Spot aside = new Spot(key, Integer.parseInt(parts[0]), Long.parseLong(parts[1]), m.tile);
+					spotOf.put(id, aside);
+					taken.remove(spot.point());
+					taken.add(aside.point());
+					avoid.add(aside.point());
+					moves++;
+				}
+			}
+			taken.addAll(clear);
+		}
+
 		// Once you've stood here a moment, you get a place at the edge if anyone from your tile has
 		// one: swap with whoever of them stands nearest your tile's middle. Not while an edge spot is
 		// being held for someone from your tile: when that hold ends you step forward into it instead,
@@ -441,15 +540,10 @@ final class LineBook
 		{
 			edgeHeld |= mine != null && spot.line.equals(key) && spot.row == 0 && spot.tile == mine.tile;
 		}
-		// Along the line, how much nearer the camera each step takes you: nothing when the camera is
-		// straight behind or in front of the line, where every place at the edge is as good.
-		double towardsCamera = view == null ? 0 : line.sideX * view[0] + line.sideY * view[1];
-		if (Math.abs(towardsCamera) < 0.2)
-		{
-			towardsCamera = 0;
-		}
-		if (mine != null && mine.line.equals(key) && !edgeHeld && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY
-			&& (mine.row > 0 || towardsCamera != 0))
+		// Once you've stood here a moment, a place at the edge if anyone from your tile has one:
+		// swap with whoever of them stands nearest your tile's middle. That is the only time the line
+		// moves you; seeing yourself is taken care of by keeping the spots in front of you empty.
+		if (mine != null && mine.line.equals(key) && mine.row > 0 && !edgeHeld && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
 		{
 			for (Member m : members)
 			{
@@ -457,31 +551,13 @@ final class LineBook
 				{
 					continue;
 				}
-				// Behind the line, the place at the edge nearest your tile's middle, or nearest the
-				// camera when it looks along the line. Already at the edge, only a place a good half
-				// step nearer the camera than yours is worth swapping for.
-				double mineScore = mine.row == 0
-					? line.along(0, mine.j) * towardsCamera
-					: -Double.MAX_VALUE;
-				double bar = mine.row == 0 ? mineScore + line.spacing / 2.0 : -Double.MAX_VALUE;
 				int swapWith = -1;
 				double nearest = Double.MAX_VALUE;
-				double best = bar;
 				for (int id : m.ids)
 				{
 					Spot theirs = spotOf.get(id);
 					if (id == localId || theirs == null || theirs.row != 0)
 					{
-						continue;
-					}
-					if (towardsCamera != 0)
-					{
-						double score = line.along(0, theirs.j) * towardsCamera;
-						if (score > best)
-						{
-							best = score;
-							swapWith = id;
-						}
 						continue;
 					}
 					double distance = Math.abs(line.along(0, theirs.j) - m.centre());

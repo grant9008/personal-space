@@ -99,6 +99,14 @@ final class SlotBook
 	Map<Long, Integer> preferred = new HashMap<>();
 
 	/**
+	 * The spot you are making for on the tile you're on, from the last time the planner chose one:
+	 * when you arrived, or when the camera settled somewhere new. People coming and going never
+	 * change it, so they never move you.
+	 */
+	private int localAim;
+	private long localAimTile = Long.MIN_VALUE;
+
+	/**
 	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
 	 * seconds. Stopping for a moment on your way past doesn't push anyone around.
 	 */
@@ -191,8 +199,13 @@ final class SlotBook
 			{
 				arriving.add(0, localId);
 			}
-			Integer wanted = preferred.get(e.getKey());
-			int yours = wanted != null && wanted < capacity ? wanted : 0;
+			Integer given = preferred.get(e.getKey());
+			if (given != null)
+			{
+				localAim = given;
+				localAimTile = e.getKey();
+			}
+			int yours = localAimTile == e.getKey() && localAim < capacity ? localAim : 0;
 			for (int id : arriving)
 			{
 				if (t.slotOf.containsKey(id))
@@ -217,7 +230,6 @@ final class SlotBook
 			// one, else whoever has the front spot takes yours. Not while a better spot is being held
 			// for someone: they may come back, and a swap now would only be undone later.
 			Integer mine = t.slotOf.get(localId);
-			boolean waiting = false;
 			if (mine != null)
 			{
 				sawLocal = true;
@@ -236,7 +248,6 @@ final class SlotBook
 						free = s;
 					}
 				}
-				waiting = mine != yours && tick - localSince < LOCAL_SWAP_DELAY;
 				boolean clear = yours == 0 ? !holdAhead : !t.held(yours, tick);
 				if (mine != yours && clear && tick - localSince >= LOCAL_SWAP_DELAY)
 				{
@@ -263,9 +274,10 @@ final class SlotBook
 				int worst = -1;
 				for (int slot : t.occupant.keySet())
 				{
-					// Not you, while you're waiting out the moment before you take the front spot:
-					// filling a gap now would only mean walking twice.
-					if (waiting && t.occupant.get(slot) == localId)
+					// Never you. Other people filling a gap is what keeps a crowd tidy, but you notice
+					// your own character moving far more than anyone else's, so only arriving and
+					// settling the camera somewhere new ever move you.
+					if (t.occupant.get(slot) == localId)
 					{
 						continue;
 					}
@@ -289,6 +301,7 @@ final class SlotBook
 		if (!sawLocal)
 		{
 			localTile = Long.MIN_VALUE;
+			localAimTile = Long.MIN_VALUE;
 		}
 		return out;
 	}

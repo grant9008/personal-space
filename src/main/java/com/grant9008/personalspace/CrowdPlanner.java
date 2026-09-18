@@ -124,6 +124,11 @@ final class CrowdPlanner
 	private int sectorSeen = -1;
 	private int sectorSince;
 
+	/** What your spot was last chosen for: the tile, the camera's direction and the tile's shape. */
+	private long aimedTile = Long.MIN_VALUE;
+	private int aimedSector = -2;
+	private String aimedShape;
+
 	/** Directions the camera's bearing is rounded to. */
 	static final int VIEW_SECTORS = 8;
 	/**
@@ -1046,7 +1051,20 @@ final class CrowdPlanner
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
-		slots.preferred = preferredSpots(view, localId, movableByTile, spotsByTile);
+		// Your spot is chosen when you arrive, when the camera settles somewhere new, or when your
+		// tile changes shape - never just because someone came or went, which would walk you about.
+		long yourTile = Long.MIN_VALUE;
+		for (Map.Entry<Long, List<Integer>> e : movableByTile.entrySet())
+		{
+			yourTile = e.getValue().contains(localId) ? e.getKey() : yourTile;
+		}
+		List<int[]> yourSpots = spotsByTile.get(yourTile);
+		String yourShape = shapeByTile.get(yourTile) + "/" + (yourSpots == null ? 0 : yourSpots.size());
+		boolean aim = yourTile != aimedTile || viewSector != aimedSector || !yourShape.equals(aimedShape);
+		slots.preferred = aim ? preferredSpots(view, localId, movableByTile, spotsByTile) : new HashMap<>();
+		aimedTile = yourTile;
+		aimedSector = viewSector;
+		aimedShape = yourShape;
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 
 		Set<Integer> placed = new HashSet<>();
