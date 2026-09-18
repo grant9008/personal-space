@@ -133,6 +133,173 @@ final class CrowdPlanner
 	private Map<Long, Map<Integer, Integer>> lastSlots = new HashMap<>();
 	/** Where you were drawn last tick, east then north in scene units; null when you weren't. */
 	private double[] lastYouAt;
+	/** Where everyone drawn last tick stood, by tile, in scene units from the scene's corner. */
+	private Map<Long, List<int[]>> lastDrawn = new HashMap<>();
+	/** The tick each tile last began to have two or more people standing on it. */
+	private final Map<Long, Integer> groupSince = new HashMap<>();
+	/** This tick's spots and people so far, for a group that has only just formed. */
+	private Map<Long, List<int[]>> placingNow = new HashMap<>();
+	private Map<Long, List<Integer>> movingNow = new HashMap<>();
+
+	/** A ring's spots last tick, and the spacing and middle they were laid out with. */
+	private static final class Ring
+	{
+		final int spacing;
+		final boolean middle;
+		final List<int[]> spots;
+
+		Ring(int spacing, boolean middle, List<int[]> spots)
+		{
+			this.spacing = spacing;
+			this.middle = middle;
+			this.spots = spots;
+		}
+	}
+
+	private Map<Long, Ring> lastRings = new HashMap<>();
+	private Map<Long, Ring> currentRings = new HashMap<>();
+
+	/**
+	 * A ring's spots, kept where they were while its spacing stays the same. Spots that can still
+	 * be stood on keep their number. Someone whose spot was shut off, usually by people stopping on
+	 * the next tile, takes whichever spot nobody has is nearest it, and only they move. Without this
+	 * the ring was laid out afresh each tick: one spot shut off moved everyone after it in the list
+	 * round the crowd, and it came back when the neighbours left, moving them all again.
+	 */
+	private List<int[]> keepSpots(long tile, List<int[]> laidOut, int spacing, boolean middle, StackSpreader.SpotCheck check,
+		List<int[]> givingWay)
+	{
+		Ring before = lastRings.get(tile);
+		boolean same = before != null && before.spacing == spacing && before.middle == middle;
+		List<int[]> kept = keep(same ? before.spots : laidOut, laidOut.size(),
+			StackSpreader.spots(false, false, 0, middle, spacing, StackSpreader.CROWD_PATTERN_SIZE, check),
+			lastSlots.getOrDefault(tile, new HashMap<>()).values(),
+			spot -> clearOfNeighbours(givingWay, spot[0], spot[1]), !same);
+		List<int[]> out = kept == null ? laidOut : kept;
+		currentRings.put(tile, new Ring(spacing, middle, out));
+		return out;
+	}
+
+	/**
+	 * {@code size} spots chosen from {@code candidates} (in the pattern's order), keeping each of
+	 * {@code before} where it is if it's still a candidate. Where one isn't and someone stood on it,
+	 * the nearest candidate nobody stands on replaces it; the rest are filled in the pattern's
+	 * order. Spots nobody stands on that {@code roomy} turns down are swapped for ones it doesn't,
+	 * where there are enough, and so are the ones people stand on when they are {@code moving}
+	 * anyway. Null if there aren't enough candidates.
+	 */
+	static List<int[]> keep(List<int[]> before, int size, List<int[]> candidates, java.util.Collection<Integer> standing,
+		java.util.function.Predicate<int[]> roomy, boolean moving)
+	{
+		Set<Long> can = new HashSet<>();
+		for (int[] c : candidates)
+		{
+			can.add(spotKey(c));
+		}
+		int[][] out = new int[size][];
+		Set<Long> used = new HashSet<>();
+		for (int i = 0; i < size && i < before.size(); i++)
+		{
+			long k = spotKey(before.get(i));
+			if (can.contains(k) && used.add(k))
+			{
+				out[i] = before.get(i);
+			}
+		}
+		Set<Integer> occupied = new HashSet<>(standing);
+		for (int i = 0; i < size; i++)
+		{
+			if (out[i] != null && (moving || !occupied.contains(i)) && !roomy.test(out[i]))
+			{
+				used.remove(spotKey(out[i]));
+				out[i] = null;
+			}
+		}
+		for (int i = 0; i < size && i < before.size(); i++)
+		{
+			if (out[i] != null || !occupied.contains(i))
+			{
+				continue;
+			}
+			// The nearest spot nobody stands on: a candidate not in use, or one in use that's empty.
+			int[] was = before.get(i);
+			int[] best = null;
+			int from = -1;
+			double nearest = Double.MAX_VALUE;
+			for (int[] c : candidates)
+			{
+				double d = Math.hypot(c[0] - was[0], c[1] - was[1]) + (roomy.test(c) ? 0 : 10000);
+				if (d >= nearest)
+				{
+					continue;
+				}
+				long k = spotKey(c);
+				int at = -1;
+				for (int j = 0; j < size && at < 0; j++)
+				{
+					at = out[j] != null && spotKey(out[j]) == k ? j : -1;
+				}
+				if (!used.contains(k) || (at >= 0 && !occupied.contains(at)))
+				{
+					nearest = d;
+					best = c;
+					from = at;
+				}
+			}
+			if (best == null)
+			{
+				continue;
+			}
+			if (from >= 0)
+			{
+				out[from] = null;
+			}
+			out[i] = best;
+			used.add(spotKey(best));
+		}
+		// The rest in the pattern's order, those nobody has to make way for first.
+		List<int[]> order = new ArrayList<>();
+		for (int[] c : candidates)
+		{
+			if (roomy.test(c))
+			{
+				order.add(c);
+			}
+		}
+		for (int[] c : candidates)
+		{
+			if (!roomy.test(c))
+			{
+				order.add(c);
+			}
+		}
+		int next = 0;
+		for (int i = 0; i < size; i++)
+		{
+			while (out[i] == null && next < order.size())
+			{
+				int[] c = order.get(next++);
+				if (used.add(spotKey(c)))
+				{
+					out[i] = c;
+				}
+			}
+			if (out[i] == null)
+			{
+				return null;
+			}
+		}
+		return new ArrayList<>(java.util.Arrays.asList(out));
+	}
+
+	/** Each tile's spots last tick, to tell a spot that was only renumbered from one that moved. */
+	private Map<Long, List<int[]>> lastSpotsByTile = new HashMap<>();
+
+	private static long spotKey(int[] spot)
+	{
+		return ((long) spot[0] << 32) ^ (spot[1] & 0xffffffffL);
+	}
+
 	/** The tick you last changed spot: nobody steps aside until you've stood a moment. */
 	private int youStillSince;
 	/** Which spot you had last tick, as tile and spot, so a crowd's spacing changing isn't a move. */
@@ -282,6 +449,112 @@ final class CrowdPlanner
 
 	/** Closest a curved row sharing an object with another side is squeezed to. */
 	static final int MIN_SHARED_SPACING = 32;
+
+	/**
+	 * Closest anyone is drawn to the people on the tiles around them: about a body's width, so
+	 * nobody is drawn inside anybody else.
+	 */
+	static final int NEIGHBOUR_GAP = 48;
+
+	/**
+	 * Where people stand on the tiles around this one that it must keep clear of, within two tiles,
+	 * relative to this tile's middle. Someone standing alone stays in the middle of their tile, and
+	 * always counts. A group counts if it was there first (or, starting together, has the lower
+	 * key): a group that has settled keeps its places, and one forming beside it fits in around
+	 * them. Crowds in the open used to take no notice of each other, and two groups side by side
+	 * each spread into the gap between them until people were drawn inside each other.
+	 *
+	 * @param after filled with where the people who give way to this tile stand: spots near them
+	 *              are left empty while there's anywhere else, so nobody has to make way at all
+	 */
+	private List<int[]> neighboursOf(long tile, Map<Long, List<StackSpreader.Entry>> byTile, List<int[]> after)
+	{
+		List<int[]> out = new ArrayList<>();
+		int plane = StackRegistry.plane(tile);
+		int sceneX = StackRegistry.sceneX(tile);
+		int sceneY = StackRegistry.sceneY(tile);
+		for (int ox = -2; ox <= 2; ox++)
+		{
+			for (int oy = -2; oy <= 2; oy++)
+			{
+				long other = StackRegistry.key(plane, sceneX + ox, sceneY + oy);
+				List<StackSpreader.Entry> there = ox == 0 && oy == 0 ? null : byTile.get(other);
+				if (there == null)
+				{
+					continue;
+				}
+				if (there.size() == 1)
+				{
+					out.add(new int[]{ox * 2 * HALF_TILE, oy * 2 * HALF_TILE});
+					continue;
+				}
+				Integer theirs = groupSince.get(other);
+				Integer ours = groupSince.get(tile);
+				boolean first = theirs != null && ours != null && (theirs < ours || (theirs.equals(ours) && other < tile));
+				List<int[]> drawn = lastDrawn.get(other);
+				List<int[]> placing = placingNow.get(other);
+				if (first && placing != null && movingNow.containsKey(other))
+				{
+					// Laid out already this tick, being the older group: where its people will stand
+					// now, which may not be where they stood last tick. Everyone keeps their spot's
+					// number, and anyone new takes the first free one.
+					int n = Math.min(placing.size(), movingNow.get(other).size());
+					Set<Integer> taken = new HashSet<>();
+					for (int s : lastSlots.getOrDefault(other, new HashMap<>()).values())
+					{
+						if (s < placing.size() && taken.size() < n && taken.add(s))
+						{
+							out.add(new int[]{ox * 2 * HALF_TILE + placing.get(s)[0], oy * 2 * HALF_TILE + placing.get(s)[1]});
+						}
+					}
+					for (int s = 0; s < placing.size() && taken.size() < n; s++)
+					{
+						if (taken.add(s))
+						{
+							out.add(new int[]{ox * 2 * HALF_TILE + placing.get(s)[0], oy * 2 * HALF_TILE + placing.get(s)[1]});
+						}
+					}
+					if (n < there.size())
+					{
+						out.add(new int[]{ox * 2 * HALF_TILE, oy * 2 * HALF_TILE});
+					}
+					continue;
+				}
+				int middleX = (sceneX + ox) * 2 * HALF_TILE;
+				int middleZ = (sceneY + oy) * 2 * HALF_TILE;
+				boolean middle = drawn == null;
+				for (int[] d : drawn == null ? new ArrayList<int[]>() : drawn)
+				{
+					boolean inMiddle = d[0] == middleX && d[1] == middleZ;
+					middle |= inMiddle;
+					if (!inMiddle)
+					{
+						(first ? out : after).add(new int[]{d[0] - sceneX * 2 * HALF_TILE, d[1] - sceneY * 2 * HALF_TILE});
+					}
+				}
+				if (middle)
+				{
+					// Someone is drawn in the middle of their tile, or will be: anyone there without a
+					// spot, and a group just forming. Nobody can make way from there.
+					out.add(new int[]{ox * 2 * HALF_TILE, oy * 2 * HALF_TILE});
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Whether a spot {@code (dx, dz)} from a tile's middle keeps a gap clear of those people. */
+	static boolean clearOfNeighbours(List<int[]> neighbours, int dx, int dz)
+	{
+		for (int[] n : neighbours)
+		{
+			if (Math.hypot(dx - n[0], dz - n[1]) < NEIGHBOUR_GAP)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * How far round a curved row on this tile may reach before it meets someone standing on another
@@ -834,6 +1107,14 @@ final class CrowdPlanner
 		{
 			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>(4)).add(e);
 		}
+		groupSince.keySet().removeIf(t -> !byTile.containsKey(t) || byTile.get(t).size() < 2);
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			if (e.getValue().size() >= 2)
+			{
+				groupSince.putIfAbsent(e.getKey(), tick);
+			}
+		}
 
 		int localId = -1;
 		if (includeLocal)
@@ -864,7 +1145,20 @@ final class CrowdPlanner
 		Map<Long, Integer> shownByTile = new HashMap<>();
 		Map<Long, Integer> blockedByTile = new HashMap<>();
 		List<Straight> pendingStraight = new ArrayList<>();
-		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		Map<Long, List<int[]>> givingWayByTile = new HashMap<>();
+		// Oldest groups first, so a group forming this very tick beside another one sees where that
+		// one's people will stand. Straight rows go back into their usual order afterwards.
+		List<Map.Entry<Long, List<StackSpreader.Entry>>> oldestFirst = new ArrayList<>(byTile.entrySet());
+		Map<Long, Integer> usualOrder = new HashMap<>();
+		for (int i = 0; i < oldestFirst.size(); i++)
+		{
+			usualOrder.put(oldestFirst.get(i).getKey(), i);
+		}
+		oldestFirst.sort(Comparator.comparingInt((Map.Entry<Long, List<StackSpreader.Entry>> e) ->
+			groupSince.getOrDefault(e.getKey(), tick)).thenComparingLong(Map.Entry::getKey));
+		placingNow = spotsByTile;
+		movingNow = movableByTile;
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : oldestFirst)
 		{
 			List<StackSpreader.Entry> everyone = e.getValue();
 			if (everyone.size() < 2)
@@ -1022,6 +1316,9 @@ final class CrowdPlanner
 			final double margin = row && !straight ? StackSpreader.curvedTurn(tileSpacing, arcRadius) / 2 : 0;
 			final double focusX = -Math.sin(angle) * StackSpreader.LOOK_AHEAD;
 			final double focusZ = -Math.cos(angle) * StackSpreader.LOOK_AHEAD;
+			final List<int[]> givingWay = new ArrayList<>();
+			final List<int[]> neighbours = neighboursOf(tile, byTile, givingWay);
+			givingWayByTile.put(tile, givingWay);
 
 			int[] blocked = {0};
 			StackSpreader.SpotCheck check =
@@ -1032,7 +1329,8 @@ final class CrowdPlanner
 						? 0 : signedAngle(-focusX, -focusZ, dx - focusX, dz - focusZ);
 					boolean inner = Math.abs(round) <= margin + 1e-6;
 					boolean outsideArc = !inner && (round > arc[0] - margin || round < -(arc[1] - margin));
-					if (along > reachAhead || along < -reachBehind || outsideArc || !around.canStand(tile, dx, dz))
+					if (along > reachAhead || along < -reachBehind || outsideArc || !around.canStand(tile, dx, dz)
+						|| !clearOfNeighbours(neighbours, dx, dz))
 					{
 						blocked[0]++;
 						return false;
@@ -1058,6 +1356,7 @@ final class CrowdPlanner
 			}
 			boolean[] squeezed = {false};
 			int[] used = {tileSpacing};
+			boolean ringMiddle = middleTaken;
 			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
 				Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
@@ -1068,10 +1367,17 @@ final class CrowdPlanner
 				spots = spotsWithRoom(false, false, angle, true, tileSpacing, capacity,
 					Math.min(capacity, movable.size()), check, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 				squeezed[0] |= wasRow;
+				ringMiddle = true;
 			}
 			if (squeezed[0])
 			{
 				kind += ", squeezed into a ring";
+			}
+			if (!row || squeezed[0])
+			{
+				int wasBlocked = blocked[0];
+				spots = keepSpots(tile, spots, used[0], ringMiddle, check, givingWay);
+				blocked[0] = wasBlocked;
 			}
 			spotsByTile.put(tile, spots);
 			movableByTile.put(tile, movable);
@@ -1081,10 +1387,23 @@ final class CrowdPlanner
 			blockedByTile.put(tile, blocked[0]);
 		}
 
+		pendingStraight.sort(Comparator.comparingInt(r -> usualOrder.get(r.tile)));
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
 		slots.keepClear = spotsInFront(view, spotsByTile);
+		slots.tight = new HashMap<>();
+		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
+		{
+			List<int[]> nextDoor = givingWayByTile.get(e.getKey());
+			for (int s = 0; nextDoor != null && s < e.getValue().size(); s++)
+			{
+				if (!clearOfNeighbours(nextDoor, e.getValue().get(s)[0], e.getValue().get(s)[1]))
+				{
+					slots.tight.computeIfAbsent(e.getKey(), k -> new HashSet<>()).add(s);
+				}
+			}
+		}
 		slots.stepAside = tick - youStillSince >= SlotBook.LOCAL_SWAP_DELAY;
 		slots.viewKey = viewSector;
 		slots.inFrontOf = (tile, spot) ->
@@ -1119,6 +1438,38 @@ final class CrowdPlanner
 			order.sort(Comparator.comparingDouble(s -> Math.hypot(spots.get(s)[0], spots.get(s)[1])));
 			slots.nearestFirst.put(tile, order);
 		}
+		// Spots that stayed where they were but changed number keep their people.
+		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
+		{
+			List<int[]> before = lastSpotsByTile.get(e.getKey());
+			if (before == null)
+			{
+				continue;
+			}
+			Map<Long, Integer> nowAt = new HashMap<>();
+			for (int s = 0; s < e.getValue().size(); s++)
+			{
+				nowAt.putIfAbsent(spotKey(e.getValue().get(s)), s);
+			}
+			Map<Integer, Integer> stillThere = new HashMap<>();
+			boolean renumbered = false;
+			for (int s = 0; s < before.size(); s++)
+			{
+				Integer to = nowAt.get(spotKey(before.get(s)));
+				if (to != null)
+				{
+					stillThere.put(s, to);
+					renumbered |= to != s;
+				}
+			}
+			if (renumbered)
+			{
+				slots.renumber(e.getKey(), stillThere, before, e.getValue());
+			}
+		}
+		lastSpotsByTile = spotsByTile;
+		lastRings = currentRings;
+		currentRings = new HashMap<>();
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 		lastSlots = assigned;
 
@@ -1228,6 +1579,27 @@ final class CrowdPlanner
 				}
 			}
 		}
+		lastDrawn = new HashMap<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			lastDrawn.computeIfAbsent(p.tile, k -> new ArrayList<>()).add(new int[]{
+				StackRegistry.sceneX(p.tile) * 2 * HALF_TILE + p.dx, StackRegistry.sceneY(p.tile) * 2 * HALF_TILE + p.dz});
+		}
+		for (StackSpreader.Placement p : plan.unplaced)
+		{
+			// Only one of them is drawn, in the middle of their tile.
+			List<int[]> there = lastDrawn.computeIfAbsent(p.tile, k -> new ArrayList<>());
+			int[] middle = {StackRegistry.sceneX(p.tile) * 2 * HALF_TILE, StackRegistry.sceneY(p.tile) * 2 * HALF_TILE};
+			boolean already = false;
+			for (int[] d : there)
+			{
+				already |= d[0] == middle[0] && d[1] == middle[1];
+			}
+			if (!already)
+			{
+				there.add(middle);
+			}
+		}
 		double[] youAt = null;
 		for (StackSpreader.Placement p : plan.placements)
 		{
@@ -1287,5 +1659,10 @@ final class CrowdPlanner
 		currentMostFaced.clear();
 		previousLineTiles.clear();
 		currentLineTiles.clear();
+		lastSpotsByTile.clear();
+		lastRings.clear();
+		currentRings.clear();
+		lastDrawn.clear();
+		groupSince.clear();
 	}
 }

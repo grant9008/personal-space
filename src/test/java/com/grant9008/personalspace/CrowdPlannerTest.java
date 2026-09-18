@@ -3,8 +3,10 @@ package com.grant9008.personalspace;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -2063,5 +2065,171 @@ public class CrowdPlannerTest
 			id -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, 1, surroundings(false, false, true));
 		Assert.assertEquals(PersonalSpaceConfig.FIRE_SPACING, plan.tiles.get(TILE).spacing);
 		Assert.assertTrue(plan.curvedRows.contains(TILE));
+	}
+
+	/** Where everyone is drawn, in scene units: placed people at their spot, one person at the middle of each other tile. */
+	private static Map<Integer, double[]> drawnAt(CrowdPlanner.Plan plan, List<StackSpreader.Entry> still)
+	{
+		Map<Integer, double[]> at = new HashMap<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			at.put(p.id, new double[]{StackRegistry.sceneX(p.tile) * 128 + p.dx, StackRegistry.sceneY(p.tile) * 128 + p.dz});
+		}
+		Set<Long> middleDrawn = new HashSet<>();
+		for (StackSpreader.Entry e : still)
+		{
+			if (!at.containsKey(e.id) && middleDrawn.add(e.tile))
+			{
+				at.put(e.id, new double[]{StackRegistry.sceneX(e.tile) * 128, StackRegistry.sceneY(e.tile) * 128});
+			}
+		}
+		return at;
+	}
+
+	@Test
+	public void groupsOnNeighbouringTilesInTheOpenAreNeverDrawnInsideEachOther()
+	{
+		// Groups side by side in the open, as on the Grand Exchange floor. Each used to spread into
+		// the gap between them, and people from the two were drawn inside each other, one poking
+		// through the other as the camera turned.
+		java.util.Random rnd = new java.util.Random(1822);
+		for (int trial = 0; trial < 200; trial++)
+		{
+			int w = 2 + rnd.nextInt(2);
+			int h = 1 + rnd.nextInt(2);
+			int[][] count = new int[w][h];
+			for (int x = 0; x < w; x++)
+			{
+				for (int y = 0; y < h; y++)
+				{
+					count[x][y] = rnd.nextInt(4) == 0 ? 1 : 2 + rnd.nextInt(5);
+				}
+			}
+			int spacing = new int[]{72, 128, 256}[rnd.nextInt(3)];
+			CrowdPlanner planner = new CrowdPlanner();
+			planner.smallGroupsClose = rnd.nextBoolean();
+			for (int t = 1; t <= 6; t++)
+			{
+				List<StackSpreader.Entry> still = new ArrayList<>();
+				Map<Integer, Long> tileOf = new HashMap<>();
+				int id = 1;
+				for (int x = 0; x < w; x++)
+				{
+					for (int y = 0; y < h; y++)
+					{
+						for (int i = 0; i < count[x][y]; i++, id++)
+						{
+							long tile = StackRegistry.key(0, 50 + x, 50 + y);
+							still.add(new StackSpreader.Entry(id, tile, false, (x * 700 + y * 300 + i * 97) % 2048));
+							tileOf.put(id, tile);
+						}
+					}
+				}
+				CrowdPlanner.Plan plan = planner.plan(still, q -> true, spacing, 10, true, false, t, OPEN);
+				Map<Integer, double[]> at = drawnAt(plan, still);
+				for (int a : at.keySet())
+				{
+					for (int b : at.keySet())
+					{
+						if (a < b && !tileOf.get(a).equals(tileOf.get(b)))
+						{
+							double gap = Math.hypot(at.get(a)[0] - at.get(b)[0], at.get(a)[1] - at.get(b)[1]);
+							Assert.assertTrue("trial " + trial + " tick " + t + ": " + a + " and " + b + " from tiles next to each other only "
+								+ gap + " apart", gap >= CrowdPlanner.NEIGHBOUR_GAP - 1);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	public void aSettledGroupKeepsItsPlacesWhilePeopleComeAndGoNextDoor()
+	{
+		// People stopping on the tiles around a group fit in around it. The group was there first
+		// and doesn't move for them, and nobody walks back when they leave.
+		CrowdPlanner planner = new CrowdPlanner();
+		java.util.Random rnd = new java.util.Random(5);
+		int[][] around = new int[5][5];
+		Map<Integer, double[]> settled = null;
+		for (int t = 1; t <= 150; t++)
+		{
+			if (t > 8 && t % 3 == 0)
+			{
+				int x = rnd.nextInt(5);
+				int y = rnd.nextInt(5);
+				if (x != 2 || y != 2)
+				{
+					around[x][y] = rnd.nextInt(4);
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int i = 1; i <= 5; i++)
+			{
+				still.add(new StackSpreader.Entry(i, TILE, false, NORTH));
+			}
+			int id = 100;
+			for (int x = 0; x < 5; x++)
+			{
+				for (int y = 0; y < 5; y++)
+				{
+					for (int i = 0; i < around[x][y]; i++)
+					{
+						still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 48 + x, 48 + y), false, SOUTH));
+					}
+				}
+			}
+			Map<Integer, double[]> at = drawnAt(planner.plan(still, q -> true, 128, 5, true, false, t, OPEN), still);
+			Map<Integer, double[]> group = new HashMap<>();
+			for (int i = 1; i <= 5; i++)
+			{
+				group.put(i, at.get(i));
+			}
+			if (t == 8)
+			{
+				settled = group;
+			}
+			for (int i = 1; t > 8 && i <= 5; i++)
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + i + " moved for the people next door", settled.get(i), group.get(i), 0);
+			}
+		}
+	}
+
+	@Test
+	public void aGroupFormingBesideAnotherFitsInAroundIt()
+	{
+		// Five already standing; three stop on the tile next door. The five stay exactly where they
+		// were, and the three stand clear of them.
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> five = new ArrayList<>();
+		for (int i = 1; i <= 5; i++)
+		{
+			five.add(new StackSpreader.Entry(i, TILE, false, NORTH));
+		}
+		Map<Integer, double[]> before = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			before = drawnAt(planner.plan(five, q -> true, 128, 5, true, false, t, OPEN), five);
+		}
+		List<StackSpreader.Entry> both = new ArrayList<>(five);
+		long east = StackRegistry.key(0, 51, 50);
+		for (int i = 6; i <= 8; i++)
+		{
+			both.add(new StackSpreader.Entry(i, east, false, NORTH));
+		}
+		for (int t = 6; t <= 10; t++)
+		{
+			Map<Integer, double[]> at = drawnAt(planner.plan(both, q -> true, 128, 5, true, false, t, OPEN), both);
+			for (int i = 1; i <= 5; i++)
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + i + " made way", before.get(i), at.get(i), 0);
+				for (int j = 6; j <= 8; j++)
+				{
+					double gap = Math.hypot(at.get(i)[0] - at.get(j)[0], at.get(i)[1] - at.get(j)[1]);
+					Assert.assertTrue("tick " + t + ": " + i + " and " + j + " only " + gap + " apart", gap >= CrowdPlanner.NEIGHBOUR_GAP - 1);
+				}
+			}
+		}
 	}
 }

@@ -40,6 +40,9 @@ turns out to be four friends hanging out.
 - **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
   seconds for someone who steps away, and only players at the back move forward to fill a gap.
   When a crowd shrinks to one player, they step back to the middle of their tile.
+- **Groups side by side don't merge.** On a busy square, a group that was there first keeps its
+  places, and a group forming on the next tile fits in around it, so nobody is drawn inside
+  anybody else.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.

@@ -196,4 +196,24 @@ public class SlotBookTest
 		Map<Integer, Integer> m = step(book, 2, 2);
 		Assert.assertEquals(0, (int) m.get(2));
 	}
+
+	@Test
+	public void renumberedSpotsKeepTheirPeopleAndWhoeverLostTheirsTakesTheNearest()
+	{
+		// Four spots in a row; the first is shut off, so the rest move up a number without moving.
+		SlotBook book = new SlotBook();
+		step(book, 1, 1, 2, 3);
+		List<int[]> before = Arrays.asList(new int[]{0, 0}, new int[]{10, 0}, new int[]{20, 0}, new int[]{30, 0}, new int[]{40, 0});
+		List<int[]> now = Arrays.asList(new int[]{10, 0}, new int[]{20, 0}, new int[]{30, 0}, new int[]{40, 0}, new int[]{-50, 0});
+		Map<Integer, Integer> stillThere = new HashMap<>();
+		stillThere.put(1, 0);
+		stillThere.put(2, 1);
+		stillThere.put(3, 2);
+		stillThere.put(4, 3);
+		book.renumber(TILE, stillThere, before, now);
+		Map<Integer, Integer> after = step(book, 2, 1, 2, 3);
+		Assert.assertEquals("2 is where it was, under its new number", 0, (int) after.get(2));
+		Assert.assertEquals("3 is where it was, under its new number", 1, (int) after.get(3));
+		Assert.assertEquals("1 lost its spot and takes the free one nearest it", 2, (int) after.get(1));
+	}
 }
