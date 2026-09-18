@@ -2413,4 +2413,107 @@ public class CrowdPlannerTest
 			}
 		}
 	}
+
+	/** A bank counter along three booths, with these many people on each, everyone facing it. */
+	private static List<StackSpreader.Entry> atThreeBooths(int... counts)
+	{
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int id = 1;
+		for (int b = 0; b < counts.length; b++)
+		{
+			for (int i = 0; i < counts[b]; i++)
+			{
+				still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 50 + b, 50), false, NORTH));
+			}
+		}
+		return still;
+	}
+
+	private static double closestPair(CrowdPlanner.Plan plan)
+	{
+		double closest = Double.MAX_VALUE;
+		for (StackSpreader.Placement a : plan.placements)
+		{
+			for (StackSpreader.Placement b : plan.placements)
+			{
+				if (a.id < b.id)
+				{
+					closest = Math.min(closest, Math.hypot(StackRegistry.sceneX(a.tile) * 128 + a.dx - StackRegistry.sceneX(b.tile) * 128 - b.dx,
+						a.dz - b.dz));
+				}
+			}
+		}
+		return closest;
+	}
+
+	@Test
+	public void aBankLineStandsABodysWidthApartUnlessItIsPacked()
+	{
+		// Along a counter shared by three booths, people stand a body's width apart, so seen from
+		// the side nobody runs into the person beside them. Only when a booth gets packed does the
+		// line close up, to fit everyone rather than leave someone hidden in the middle.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		CrowdPlanner quiet = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = quiet.plan(atThreeBooths(4, 4, 3), q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, false, t, counter);
+		}
+		Assert.assertEquals(11, plan.placements.size());
+		Assert.assertTrue("quiet line only " + closestPair(plan) + " apart", closestPair(plan) >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+
+		CrowdPlanner packed = new CrowdPlanner();
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = packed.plan(atThreeBooths(4, CrowdPlanner.ROOMY_LINE_MAX + 2, 4), q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, false, t, counter);
+		}
+		Assert.assertEquals("everyone on the packed line has a spot", CrowdPlanner.ROOMY_LINE_MAX + 10, plan.placements.size());
+		Assert.assertEquals(PersonalSpaceConfig.LINE_SPACING, plan.tiles.get(TILE).spacing);
+	}
+
+	@Test
+	public void whenABankLineClosesUpEveryoneKeepsTheirPlaceInIt()
+	{
+		// A quiet line at a body's width; then a booth fills up and the line closes up. Everyone
+		// slides a little along the counter and nobody passes anyone.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, Double> before = new HashMap<>();
+		for (int t = 1; t <= 5; t++)
+		{
+			CrowdPlanner.Plan plan = planner.plan(atThreeBooths(3, 3, 3), q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, false, t, counter);
+			before.clear();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				if (p.dz > -24)
+				{
+					before.put(p.id, StackRegistry.sceneX(p.tile) * 128.0 + p.dx);
+				}
+			}
+		}
+		List<StackSpreader.Entry> busier = atThreeBooths(3, 3, 3);
+		for (int i = 0; i < CrowdPlanner.ROOMY_LINE_MAX; i++)
+		{
+			busier.add(new StackSpreader.Entry(100 + i, StackRegistry.key(0, 51, 50), false, NORTH));
+		}
+		CrowdPlanner.Plan plan = planner.plan(busier, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, false, 6, counter);
+		Map<Integer, Double> after = new HashMap<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (before.containsKey(p.id))
+			{
+				after.put(p.id, StackRegistry.sceneX(p.tile) * 128.0 + p.dx);
+			}
+		}
+		List<Integer> order = new ArrayList<>(before.keySet());
+		order.sort(Comparator.comparingDouble(before::get));
+		for (int i = 1; i < order.size(); i++)
+		{
+			if (after.containsKey(order.get(i - 1)) && after.containsKey(order.get(i)))
+			{
+				Assert.assertTrue(order.get(i - 1) + " and " + order.get(i) + " swapped places along the counter",
+					after.get(order.get(i - 1)) < after.get(order.get(i)));
+			}
+		}
+	}
 }

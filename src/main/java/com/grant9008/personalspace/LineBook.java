@@ -1,6 +1,7 @@
 package com.grant9008.personalspace;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -170,6 +171,19 @@ final class LineBook
 		}
 	}
 
+	/** A line's key without its spacing: the same stretch of counter at another spacing. */
+	private static String withoutSpacing(String key)
+	{
+		return key.substring(0, key.lastIndexOf(':'));
+	}
+
+	/** How far along its line a spot is, whatever spacing that line had. */
+	private static double alongAt(Spot spot)
+	{
+		int spacing = Integer.parseInt(spot.line.substring(spot.line.lastIndexOf(':') + 1));
+		return spot.j * (double) spacing + (spot.row % 2 == 1 ? spacing / 2.0 : 0);
+	}
+
 	/** What happened on a line this tick, for the troubleshooting report. */
 	static final class LineReport
 	{
@@ -309,6 +323,47 @@ final class LineBook
 					lineOf.put(id, line);
 				}
 			}
+		}
+
+		// A line whose spacing changed (it closed up for being busy, or eased back out): everyone
+		// keeps their place in its order, at the nearest spot of the new spacing, rather than the
+		// whole line being laid out afresh. That filled every spot at once, the ones in front of
+		// you included, and whoever had stepped aside for you had nowhere left to step to.
+		List<Integer> respaced = new ArrayList<>();
+		for (Map.Entry<Integer, Spot> e : spotOf.entrySet())
+		{
+			Member m = memberOf.get(e.getKey());
+			Line line = lineOf.get(e.getKey());
+			Spot spot = e.getValue();
+			if (m != null && m.tile == spot.tile && !line.key().equals(spot.line)
+				&& withoutSpacing(line.key()).equals(withoutSpacing(spot.line)))
+			{
+				respaced.add(e.getKey());
+			}
+		}
+		respaced.sort(Comparator.comparing((Integer id) -> spotOf.get(id).line)
+			.thenComparingInt(id -> spotOf.get(id).row)
+			.thenComparingDouble(id -> alongAt(spotOf.get(id))));
+		Map<String, Long> lastStep = new HashMap<>();
+		for (int id : respaced)
+		{
+			Spot spot = spotOf.get(id);
+			Line line = lineOf.get(id);
+			double offset = spot.row % 2 == 1 ? line.spacing / 2.0 : 0;
+			long j = Math.round((alongAt(spot) - offset) / line.spacing);
+			String row = line.key() + "/" + spot.row;
+			Long before = lastStep.get(row);
+			if (before != null && j <= before)
+			{
+				j = before + 1;
+			}
+			lastStep.put(row, j);
+			Spot moved = new Spot(line.key(), spot.row, j, spot.tile);
+			if (id == localId && asideAim != null && asideAim.startsWith(spot.point() + "@"))
+			{
+				asideAim = moved.point() + asideAim.substring(asideAim.indexOf('@'));
+			}
+			spotOf.put(id, moved);
 		}
 
 		// People who left, or moved to another tile or line.

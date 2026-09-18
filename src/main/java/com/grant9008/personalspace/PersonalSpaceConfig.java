@@ -49,15 +49,17 @@ public interface PersonalSpaceConfig extends Config
 	int FULL_CROWD = 8;
 	/**
 	 * With Auto-space on, people at a bank counter or row of booths stand at most this far apart,
-	 * whatever the slider says. Close enough to read as a busy bank rather than a queue, far enough
-	 * that a kiteshield doesn't land on the person beside you, as it did at 42. Much wider and a short
-	 * stretch of counter runs out of room, leaving people stacked in the middle.
+	 * whatever the slider says: a body's width, so seen from the side nobody runs into the person
+	 * beside them, as they did at 42. Close enough to read as a busy bank rather than a queue; much
+	 * wider and a short stretch of counter runs out of room, leaving people stacked in the middle.
 	 */
-	int COUNTER_SPACING = 50;
+	int COUNTER_SPACING = 48;
 	/**
-	 * The same for a line shared by several busy booths or along a riverbank, with Auto-space on.
-	 * A shared line only has so much counter, and at 50 a busy one ran out of spots and left people
-	 * hidden in the middle; a booth with its own row closes up by itself when it has to.
+	 * How close a line shared by several booths or along a riverbank closes up when it gets busy
+	 * (more than {@code CrowdPlanner.ROOMY_LINE_MAX} people on one of its tiles), with Auto-space on.
+	 * Otherwise it keeps {@link #COUNTER_SPACING}: at 42 bodies and capes ran into each other seen
+	 * from the side, but a packed line only has so much counter, and at 50 one ran out of spots and
+	 * left people hidden in the middle.
 	 */
 	int LINE_SPACING = 42;
 	/** Smart keeps people around a fire at most this far apart, whatever the slider says. */

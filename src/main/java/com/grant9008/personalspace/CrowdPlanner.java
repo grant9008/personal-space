@@ -878,6 +878,23 @@ final class CrowdPlanner
 			: Math.max(MIN_SHARED_SPACING, tilesAway * HALF_TILE - spacing / 2.0);
 	}
 
+	/**
+	 * A line shared along a counter or riverbank stands {@link PersonalSpaceConfig#COUNTER_SPACING}
+	 * apart until one of its tiles has more people than this, when it closes up to
+	 * {@link PersonalSpaceConfig#LINE_SPACING} to fit them, and stays that way for
+	 * {@link #BUSY_LINE_TICKS} after it thins out again: changing the spacing lays the whole line
+	 * out afresh, so a bank where people keep coming and going stays compact rather than
+	 * rearranging itself every few seconds.
+	 */
+	static final int ROOMY_LINE_MAX = 8;
+	/** A closed-up line only starts counting down to easing back out once no tile on it has more than this. */
+	static final int ROOMY_LINE_CALM = 6;
+	/** How long a line that had to close up stays that way: about half a minute. */
+	static final int BUSY_LINE_TICKS = 50;
+
+	/** Tiles on a line that is closed up for being busy, and the tick until which it stays so. */
+	private final Map<Long, Integer> busyLineUntil = new HashMap<>();
+
 	/** How many tiles along a counter or bank to look for someone else's row. */
 	private static final int LINE_LOOKOUT = 4;
 
@@ -945,8 +962,9 @@ final class CrowdPlanner
 	private List<LineBook.Line> layOutStraightRows(List<Straight> rows, Map<Long, List<StackSpreader.Entry>> byTile, int capacity,
 		Map<Long, List<Integer>> movableByTile, Map<Long, List<int[]>> spotsByTile, Map<Long, String> shapeByTile,
 		Map<Long, Integer> spacingByTile, Map<Long, Integer> blockedByTile, Map<Long, Integer> shownByTile,
-		Surroundings around, IntPredicate shown, boolean includeLocal)
+		Surroundings around, IntPredicate shown, boolean includeLocal, int tick)
 	{
+		busyLineUntil.values().removeIf(until -> until < tick);
 		boolean bowRows = arrangement != PersonalSpaceConfig.Arrangement.ROW;
 		List<LineBook.Line> shared = new ArrayList<>();
 		Map<String, List<Straight>> lines = new LinkedHashMap<>();
@@ -1042,10 +1060,23 @@ final class CrowdPlanner
 				}
 				else
 				{
+					// Roomy, unless one of its tiles is busy now or was a moment ago.
+					boolean busy = false;
+					for (Straight r : chain)
+					{
+						busy |= r.wanted > ROOMY_LINE_MAX || busyLineUntil.getOrDefault(r.tile, Integer.MIN_VALUE) >= tick;
+					}
 					int spacing = Integer.MAX_VALUE;
 					for (Straight r : chain)
 					{
-						spacing = Math.min(spacing, r.lineSpacing);
+						if (r.wanted > (busy ? ROOMY_LINE_CALM : ROOMY_LINE_MAX))
+						{
+							for (Straight other : chain)
+							{
+								busyLineUntil.put(other.tile, tick + BUSY_LINE_TICKS);
+							}
+						}
+						spacing = Math.min(spacing, busy ? r.lineSpacing : r.spacing);
 					}
 					List<LineBook.Member> members = new ArrayList<>(chain.size());
 					for (Straight r : chain)
@@ -1514,8 +1545,7 @@ final class CrowdPlanner
 				// share one line.
 				int wanted = Math.min(capacity, Math.max(movable.size(), lagged - (group.size() - movable.size())));
 				// A booth with its own row closes up by itself when it runs short of room, but a line
-				// shared along a busy counter doesn't: at 50 apart it ran out of spots and left people
-				// hidden in the middle, so a shared line keeps 1.8.14's spacing.
+				// shared along a busy counter doesn't: when it gets busy it closes up to this instead.
 				int lineSpacing = counter && smallGroupsClose ? Math.min(tileSpacing, PersonalSpaceConfig.LINE_SPACING) : tileSpacing;
 				pendingStraight.add(new Straight(tile, plane, sceneX, sceneY, sideX, sideY, angle, tileSpacing, lineSpacing,
 					middleTaken, wanted, check, blocked));
@@ -1645,7 +1675,7 @@ final class CrowdPlanner
 		rooms = roomsNow;
 		roomsNow = new HashMap<>();
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
-			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
+			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal, tick);
 
 		slots.keepClear = spotsInFront(view, spotsByTile);
 		slots.stepAside = tick - youStillSince >= SlotBook.LOCAL_SWAP_DELAY;
@@ -1760,6 +1790,23 @@ final class CrowdPlanner
 			placed.add(p.id);
 			placedOnTile.merge(p.tile, 1, Integer::sum);
 		}
+		// A roomy line that left anyone without a spot closes up: headcounts alone don't tell when a
+		// line has less room than usual, such as with people standing right behind it.
+		for (LineBook.Line line : shared)
+		{
+			boolean short_ = false;
+			for (LineBook.Member m : line.members)
+			{
+				short_ |= placedOnTile.getOrDefault(m.tile, 0) < Math.min(m.capacity, m.ids.size());
+			}
+			for (LineBook.Member m : line.members)
+			{
+				if (short_ && line.spacing > PersonalSpaceConfig.LINE_SPACING)
+				{
+					busyLineUntil.put(m.tile, tick + BUSY_LINE_TICKS);
+				}
+			}
+		}
 		for (Map.Entry<Long, LineBook.LineReport> e : lineReports.entrySet())
 		{
 			long tile = e.getKey();
@@ -1862,5 +1909,6 @@ final class CrowdPlanner
 		roomsNow.clear();
 		presence.clear();
 		waited.clear();
+		busyLineUntil.clear();
 	}
 }
