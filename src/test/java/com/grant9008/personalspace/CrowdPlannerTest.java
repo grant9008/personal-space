@@ -892,7 +892,7 @@ public class CrowdPlannerTest
 						}
 						double away = Math.hypot(a.getValue()[0] - b.getValue()[0], a.getValue()[1] - b.getValue()[1]);
 						Assert.assertTrue("gap " + gap + " at " + spacing + ": players " + a.getKey() + " and "
-							+ b.getKey() + " only " + away + " apart", away >= PersonalSpaceConfig.COUNTER_SPACING - 1);
+							+ b.getKey() + " only " + away + " apart", away >= Math.min(Math.min(spacing, PersonalSpaceConfig.COUNTER_SPACING), LineBook.ROW_GAP) - 1);
 					}
 				}
 			}

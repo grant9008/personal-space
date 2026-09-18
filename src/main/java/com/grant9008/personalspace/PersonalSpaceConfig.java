@@ -46,8 +46,13 @@ public interface PersonalSpaceConfig extends Config
 	 */
 	int PAIR_SPACING = 72;
 	int FULL_CROWD = 8;
-	/** Smart keeps people at a bank counter or row of booths at most this far apart, whatever the slider says. */
-	int COUNTER_SPACING = 42;
+	/**
+	 * With Auto-space on, people at a bank counter or row of booths stand at most this far apart,
+	 * whatever the slider says. Close enough to read as a busy bank rather than a queue, far enough
+	 * that a kiteshield doesn't land on the person beside you, as it did at 42. Much wider and a short
+	 * stretch of counter runs out of room, leaving people stacked in the middle.
+	 */
+	int COUNTER_SPACING = 50;
 	/** Smart keeps people around a fire at most this far apart, whatever the slider says. */
 	int FIRE_SPACING = 46;
 
