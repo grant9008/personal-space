@@ -93,6 +93,12 @@ final class SlotBook
 	int localId = -1;
 
 	/**
+	 * For the tile you are on, the spot you should have: the one nearest the camera. Missing for a
+	 * tile means the best spot, which is the front.
+	 */
+	Map<Long, Integer> preferred = new HashMap<>();
+
+	/**
 	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
 	 * seconds. Stopping for a moment on your way past doesn't push anyone around.
 	 */
@@ -185,10 +191,17 @@ final class SlotBook
 			{
 				arriving.add(0, localId);
 			}
+			Integer wanted = preferred.get(e.getKey());
+			int yours = wanted != null && wanted < capacity ? wanted : 0;
 			for (int id : arriving)
 			{
 				if (t.slotOf.containsKey(id))
 				{
+					continue;
+				}
+				if (id == localId && !t.occupant.containsKey(yours) && !t.held(yours, tick))
+				{
+					t.assign(id, yours);
 					continue;
 				}
 				for (int s = 0; s < capacity; s++)
@@ -223,19 +236,20 @@ final class SlotBook
 						free = s;
 					}
 				}
-				waiting = mine > 0 && tick - localSince < LOCAL_SWAP_DELAY;
-				if (mine > 0 && !holdAhead && tick - localSince >= LOCAL_SWAP_DELAY)
+				waiting = mine != yours && tick - localSince < LOCAL_SWAP_DELAY;
+				boolean clear = yours == 0 ? !holdAhead : !t.held(yours, tick);
+				if (mine != yours && clear && tick - localSince >= LOCAL_SWAP_DELAY)
 				{
-					// Straight to the front in one step. Whoever was there takes the best free spot if
+					// Straight to your spot in one step. Whoever was there takes the best free spot if
 					// there is one, else yours, so neither of you is moved again next tick.
-					Integer other = t.occupant.get(0);
+					Integer other = t.occupant.get(yours);
 					t.vacate(localId, tick, false);
 					if (other != null)
 					{
 						t.vacate(other, tick, false);
-						t.assign(other, free > 0 ? free : mine);
+						t.assign(other, free >= 0 && free != yours ? free : mine);
 					}
-					t.assign(localId, 0);
+					t.assign(localId, yours);
 					moves++;
 				}
 			}

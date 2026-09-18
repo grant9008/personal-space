@@ -110,6 +110,29 @@ final class CrowdPlanner
 
 	/** How the sidebar says crowds should be drawn up. Only Line and Arc change what happens here. */
 	PersonalSpaceConfig.Arrangement arrangement = PersonalSpaceConfig.Arrangement.AUTO;
+
+	/**
+	 * Where the camera is on the ground, in scene units, or {@link Integer#MIN_VALUE} when unknown.
+	 * Your own character is given whichever of your crowd's spots is nearest it, so you aren't
+	 * buried in the middle of a crowd seen end on.
+	 */
+	int cameraX = Integer.MIN_VALUE;
+	int cameraY = Integer.MIN_VALUE;
+
+	/** The camera's direction from you, as one of eight, once it has settled there; -1 when unknown. */
+	private int viewSector = -1;
+	private int sectorSeen = -1;
+	private int sectorSince;
+
+	/** Directions the camera's bearing is rounded to. */
+	static final int VIEW_SECTORS = 8;
+	/**
+	 * Ticks the camera must stay in a new direction before your spot follows it: turning the camera
+	 * doesn't walk you round the crowd, settling it somewhere new does, once.
+	 */
+	static final int VIEW_SETTLE_TICKS = 2;
+	/** Closer to the camera than this (in units) and the camera's direction from you isn't reliable. */
+	private static final int VIEW_MIN_DISTANCE = 128;
 	/** The "Small group pose" setting. Set by the plugin each tick. */
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
 
@@ -610,6 +633,110 @@ final class CrowdPlanner
 	}
 
 	/**
+	 * Which way the camera is from you, as a unit vector on the ground (east, north), rounded to one
+	 * of {@link #VIEW_SECTORS} and only changed once it has settled; null when there is no camera to
+	 * go by or you aren't standing still.
+	 */
+	private double[] viewFrom(List<StackSpreader.Entry> still, int tick)
+	{
+		StackSpreader.Entry you = null;
+		for (StackSpreader.Entry e : still)
+		{
+			you = e.local ? e : you;
+		}
+		if (you == null || cameraX == Integer.MIN_VALUE || cameraY == Integer.MIN_VALUE)
+		{
+			viewSector = -1;
+			return null;
+		}
+		double east = cameraX - (StackRegistry.sceneX(you.tile) * 2.0 * HALF_TILE + HALF_TILE);
+		double north = cameraY - (StackRegistry.sceneY(you.tile) * 2.0 * HALF_TILE + HALF_TILE);
+		if (Math.hypot(east, north) >= VIEW_MIN_DISTANCE)
+		{
+			double slice = 2 * Math.PI / VIEW_SECTORS;
+			int sector = Math.floorMod((int) Math.round(Math.atan2(north, east) / slice), VIEW_SECTORS);
+			if (viewSector < 0)
+			{
+				viewSector = sector;
+			}
+			else if (sector == viewSector)
+			{
+				sectorSeen = sector;
+			}
+			else if (sector != sectorSeen)
+			{
+				sectorSeen = sector;
+				sectorSince = tick;
+			}
+			else if (tick - sectorSince >= VIEW_SETTLE_TICKS)
+			{
+				viewSector = sector;
+			}
+		}
+		if (viewSector < 0)
+		{
+			return null;
+		}
+		double a = viewSector * 2 * Math.PI / VIEW_SECTORS;
+		return new double[]{Math.cos(a), Math.sin(a)};
+	}
+
+	/**
+	 * For the tile you are on, the spot among the ones your crowd will use with the fewest people
+	 * standing between it and the camera; of those, the best spot. Nearest the camera was the wrong
+	 * measure: the curve round a bank booth puts the ends of a row a little nearer a camera straight
+	 * behind it, which walked you to the end for nothing, since nobody was in front of you anyway.
+	 */
+	private static Map<Long, Integer> preferredSpots(double[] view, int localId, Map<Long, List<Integer>> movableByTile,
+		Map<Long, List<int[]>> spotsByTile)
+	{
+		Map<Long, Integer> out = new HashMap<>();
+		if (view == null || localId < 0)
+		{
+			return out;
+		}
+		for (Map.Entry<Long, List<Integer>> e : movableByTile.entrySet())
+		{
+			List<int[]> spots = spotsByTile.get(e.getKey());
+			if (spots == null || !e.getValue().contains(localId))
+			{
+				continue;
+			}
+			int used = Math.min(e.getValue().size(), spots.size());
+			int best = -1;
+			int fewest = Integer.MAX_VALUE;
+			for (int s = 0; s < used; s++)
+			{
+				int[] here = spots.get(s);
+				int inFront = 0;
+				for (int o = 0; o < used; o++)
+				{
+					double east = spots.get(o)[0] - here[0];
+					double north = spots.get(o)[1] - here[1];
+					double nearer = east * view[0] + north * view[1];
+					double across = Math.abs(north * view[0] - east * view[1]);
+					inFront += o != s && nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP ? 1 : 0;
+				}
+				if (inFront < fewest)
+				{
+					fewest = inFront;
+					best = s;
+				}
+			}
+			if (best >= 0)
+			{
+				out.put(e.getKey(), best);
+			}
+		}
+		return out;
+	}
+
+	/** Someone is in front of you when they are at least this much nearer the camera, in units. */
+	private static final double VIEW_IN_FRONT = 24;
+	/** ...and this close to your line of sight from the side, about a player's width. */
+	private static final double VIEW_OVERLAP = 48;
+
+	/**
 	 * The way most of a group is facing, rounded to a quarter turn, so a line runs square across it;
 	 * {@code fallback} when nobody's facing is known.
 	 */
@@ -688,6 +815,8 @@ final class CrowdPlanner
 		}
 		slots.localId = localId;
 		lineBook.localId = localId;
+		double[] view = viewFrom(still, tick);
+		lineBook.view = view;
 		lineBook.bow = arrangement != PersonalSpaceConfig.Arrangement.ROW;
 
 		Plan plan = new Plan();
@@ -917,6 +1046,7 @@ final class CrowdPlanner
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal);
 
+		slots.preferred = preferredSpots(view, localId, movableByTile, spotsByTile);
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 
 		Set<Integer> placed = new HashSet<>();

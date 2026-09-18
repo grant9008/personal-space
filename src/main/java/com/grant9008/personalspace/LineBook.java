@@ -199,6 +199,13 @@ final class LineBook
 	 */
 	int localId = -1;
 
+	/**
+	 * Which way the camera is from you on the ground (east, north), or null when unknown. At the
+	 * edge you take whichever of your tile's places there is nearest it, so you aren't hidden behind
+	 * the rest of the line when it is seen end on.
+	 */
+	double[] view;
+
 	/** Whether each tile's people curve gently round their own booth, rather than standing dead flat. */
 	boolean bow = true;
 
@@ -434,7 +441,15 @@ final class LineBook
 		{
 			edgeHeld |= mine != null && spot.line.equals(key) && spot.row == 0 && spot.tile == mine.tile;
 		}
-		if (mine != null && mine.line.equals(key) && mine.row > 0 && !edgeHeld && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
+		// Along the line, how much nearer the camera each step takes you: nothing when the camera is
+		// straight behind or in front of the line, where every place at the edge is as good.
+		double towardsCamera = view == null ? 0 : line.sideX * view[0] + line.sideY * view[1];
+		if (Math.abs(towardsCamera) < 0.2)
+		{
+			towardsCamera = 0;
+		}
+		if (mine != null && mine.line.equals(key) && !edgeHeld && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY
+			&& (mine.row > 0 || towardsCamera != 0))
 		{
 			for (Member m : members)
 			{
@@ -442,13 +457,31 @@ final class LineBook
 				{
 					continue;
 				}
+				// Behind the line, the place at the edge nearest your tile's middle, or nearest the
+				// camera when it looks along the line. Already at the edge, only a place a good half
+				// step nearer the camera than yours is worth swapping for.
+				double mineScore = mine.row == 0
+					? line.along(0, mine.j) * towardsCamera
+					: -Double.MAX_VALUE;
+				double bar = mine.row == 0 ? mineScore + line.spacing / 2.0 : -Double.MAX_VALUE;
 				int swapWith = -1;
 				double nearest = Double.MAX_VALUE;
+				double best = bar;
 				for (int id : m.ids)
 				{
 					Spot theirs = spotOf.get(id);
 					if (id == localId || theirs == null || theirs.row != 0)
 					{
+						continue;
+					}
+					if (towardsCamera != 0)
+					{
+						double score = line.along(0, theirs.j) * towardsCamera;
+						if (score > best)
+						{
+							best = score;
+							swapWith = id;
+						}
 						continue;
 					}
 					double distance = Math.abs(line.along(0, theirs.j) - m.centre());

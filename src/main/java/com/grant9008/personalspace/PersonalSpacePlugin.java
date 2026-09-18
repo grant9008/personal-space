@@ -51,7 +51,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.14";
+	static final String VERSION = "1.8.15";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -390,6 +390,8 @@ public class PersonalSpacePlugin extends Plugin
 
 		planner.smallGroupsClose = config.smallGroupsClose();
 		planner.pose = config.pose();
+		planner.cameraX = client.getCameraX();
+		planner.cameraY = client.getCameraY();
 		planner.arrangement = config.arrangement();
 		CrowdPlanner.Plan plan = planner.plan(entries, id -> shownTick[id] == tick, config.spacing(), config.maxStack(),
 			config.arrangement() != PersonalSpaceConfig.Arrangement.CIRCLE, config.includeLocalPlayer(), tick, surroundings(wv));

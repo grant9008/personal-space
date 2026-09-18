@@ -1134,6 +1134,113 @@ public class CrowdPlannerTest
 		Assert.assertEquals(3, plan.placements.size());
 	}
 
+	/** Three people at a bank counter on your tile, you among them. */
+	private static List<StackSpreader.Entry> youAtTheCounter()
+	{
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		still.add(new StackSpreader.Entry(1, TILE, false, NORTH));
+		still.add(new StackSpreader.Entry(2, TILE, false, NORTH));
+		still.add(new StackSpreader.Entry(99, TILE, true, NORTH));
+		return still;
+	}
+
+	/** Puts the camera a long way off from the tile, towards (east, north). */
+	private static void cameraAt(CrowdPlanner planner, int east, int north)
+	{
+		planner.cameraX = StackRegistry.sceneX(TILE) * 128 + 64 + east * 2000;
+		planner.cameraY = StackRegistry.sceneY(TILE) * 128 + 64 + north * 2000;
+	}
+
+	private static int[] yours(CrowdPlanner.Plan plan)
+	{
+		return spots(plan).get(99);
+	}
+
+	@Test
+	public void youStandAtTheEndOfTheRowNearestTheCamera()
+	{
+		// Seen from the side, a bank row is one person behind another, and whoever you had in front
+		// of you covered you up. You now get whichever of your crowd's spots is nearest the camera.
+		CrowdPlanner planner = new CrowdPlanner();
+		cameraAt(planner, 1, 0);
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			plan = planner.plan(youAtTheCounter(), x -> true, 128, 10, true, true, t, surroundings(true, true, false));
+		}
+		int[] you = yours(plan);
+		for (int[] other : spots(plan).values())
+		{
+			Assert.assertTrue("someone stands nearer the camera than you: " + other[0] + " east of you at " + you[0],
+				other[0] <= you[0]);
+		}
+	}
+
+	@Test
+	public void youWalkOnceWhenTheCameraSettlesSomewhereNewAndNotAgain()
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		cameraAt(planner, 1, 0);
+		int tick = 0;
+		int[] before = null;
+		for (int t = 0; t < 8; t++)
+		{
+			before = yours(planner.plan(youAtTheCounter(), x -> true, 128, 10, true, true, ++tick, counter));
+		}
+		cameraAt(planner, -1, 0);
+		int walks = 0;
+		int[] last = before;
+		for (int t = 0; t < 12; t++)
+		{
+			int[] now = yours(planner.plan(youAtTheCounter(), x -> true, 128, 10, true, true, ++tick, counter));
+			walks += java.util.Arrays.equals(now, last) ? 0 : 1;
+			last = now;
+		}
+		Assert.assertEquals("you walk to the other end once", 1, walks);
+		Assert.assertTrue("and end up at the end nearest the camera", last[0] < before[0]);
+	}
+
+	@Test
+	public void turningTheCameraDoesntWalkYouRoundTheCrowd()
+	{
+		// Only a camera that stays somewhere new moves you; one being turned back and forth doesn't.
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		cameraAt(planner, 1, 0);
+		int tick = 0;
+		int[] settled = null;
+		for (int t = 0; t < 8; t++)
+		{
+			settled = yours(planner.plan(youAtTheCounter(), x -> true, 128, 10, true, true, ++tick, counter));
+		}
+		for (int t = 0; t < 12; t++)
+		{
+			cameraAt(planner, t % 2 == 0 ? -1 : 1, 0);
+			Assert.assertArrayEquals("you moved while the camera was still turning", settled,
+				yours(planner.plan(youAtTheCounter(), x -> true, 128, 10, true, true, ++tick, counter)));
+		}
+	}
+
+	@Test
+	public void fromStraightBehindYouKeepTheBestSpotAtTheCounter()
+	{
+		// Every spot along the counter is as near a camera straight behind the row as any other, so
+		// nothing changes: you keep the best one, exactly as with no camera at all.
+		CrowdPlanner withCamera = new CrowdPlanner();
+		cameraAt(withCamera, 0, -1);
+		CrowdPlanner without = new CrowdPlanner();
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		int[] seen = null;
+		int[] unseen = null;
+		for (int t = 1; t <= 6; t++)
+		{
+			seen = yours(withCamera.plan(youAtTheCounter(), x -> true, 128, 10, true, true, t, counter));
+			unseen = yours(without.plan(youAtTheCounter(), x -> true, 128, 10, true, true, t, counter));
+		}
+		Assert.assertArrayEquals(unseen, seen);
+	}
+
 	@Test
 	public void aBankCrowdFacingTheBoothAtASlantStillLinesUpAlongTheCounter()
 	{

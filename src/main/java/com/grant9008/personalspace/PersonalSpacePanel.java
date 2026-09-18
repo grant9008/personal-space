@@ -329,7 +329,7 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
-			"Off: you stay put and others step around you. On: you take a spot too, at the front."), c);
+			"Off: you stay put and others step around you. On: you take a spot too, where nobody blocks your view of yourself."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);

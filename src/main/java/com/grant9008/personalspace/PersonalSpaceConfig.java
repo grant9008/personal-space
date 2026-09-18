@@ -169,7 +169,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_INCLUDE_LOCAL,
 		name = "Move my character too",
-		description = "Off: you stay put and others step around you. On: you take a spot too, at the front.",
+		description = "Off: you stay put and others step around you. On: you take a spot too, where nobody blocks your view of yourself.",
 		position = 4
 	)
 	default boolean includeLocalPlayer()
