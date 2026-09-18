@@ -299,6 +299,98 @@ final class CrowdPlanner
 	static final int ROOM_FLOOR = 50;
 	/** How long a crowd that made room stays that way after its neighbours leave, about 6 seconds. */
 	static final int RELAX_TICKS = 10;
+	/**
+	 * How long someone must have stood by a settled crowd before it makes room for them, on top of
+	 * the moment it takes to count as standing still at all: a passer-by pausing for a second
+	 * doesn't set a whole group sliding over and back.
+	 */
+	static final int SETTLE_TICKS = 2;
+
+	/** Who stands on a tile, as a crowd making room sees it: nobody (0), someone alone (1) or a group (2). */
+	private static final class Presence
+	{
+		int state;
+		int since;
+		/** The state once it has lasted {@link #SETTLE_TICKS}; fewer people count at once. */
+		int settled;
+		int lastAlone = Integer.MIN_VALUE / 2;
+		int lastGroup = Integer.MIN_VALUE / 2;
+
+		void observe(int now, int tick)
+		{
+			if (now != state)
+			{
+				state = now;
+				since = tick;
+			}
+			if (tick - since >= SETTLE_TICKS || now < settled)
+			{
+				settled = now;
+			}
+			if (settled >= 1)
+			{
+				lastAlone = tick;
+			}
+			if (settled >= 2)
+			{
+				lastGroup = tick;
+			}
+		}
+
+		/**
+		 * Who counts as standing here: whoever has settled, and whoever left less than
+		 * {@link #RELAX_TICKS} ago. A crowd that has only just formed takes them as they are, so
+		 * two groups arriving together make room for each other at once.
+		 */
+		int counted(int tick, boolean justFormed)
+		{
+			int remembered = tick - lastGroup <= RELAX_TICKS ? 2 : tick - lastAlone <= RELAX_TICKS ? 1 : 0;
+			return justFormed ? Math.max(remembered, state) : remembered;
+		}
+	}
+
+	private final Map<Long, Presence> presence = new HashMap<>();
+
+	/**
+	 * Note who stands on each tile this tick. Only players the game is drawing count: a group
+	 * doesn't make room for people another plugin or the game itself keeps hidden.
+	 */
+	private void observePresence(Map<Long, List<StackSpreader.Entry>> byTile, IntPredicate shown, int tick)
+	{
+		Set<Long> seen = new HashSet<>();
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			int n = 0;
+			for (StackSpreader.Entry en : e.getValue())
+			{
+				n += shown.test(en.id) ? 1 : 0;
+			}
+			if (n > 0)
+			{
+				seen.add(e.getKey());
+				presence.computeIfAbsent(e.getKey(), k -> new Presence()).observe(Math.min(n, 2), tick);
+			}
+		}
+		for (java.util.Iterator<Map.Entry<Long, Presence>> it = presence.entrySet().iterator(); it.hasNext(); )
+		{
+			Map.Entry<Long, Presence> e = it.next();
+			if (!seen.contains(e.getKey()))
+			{
+				e.getValue().observe(0, tick);
+				if (e.getValue().counted(tick, false) == 0)
+				{
+					it.remove();
+				}
+			}
+		}
+	}
+
+	/** Whether this tile's group has only just formed. */
+	private boolean justFormed(long tile, int tick)
+	{
+		Presence p = presence.get(tile);
+		return p != null && p.state >= 2 && tick - p.since < SETTLE_TICKS;
+	}
 
 	/**
 	 * The ground a tile shares with the people on the tiles around it, as half-planes {ux, uz, b}:
@@ -306,29 +398,36 @@ final class CrowdPlanner
 	 * group, that is halfway less half of {@link #NEIGHBOUR_GAP}, so each keeps to its own side of
 	 * the ground between them. Towards someone standing alone, who stays in the middle of their
 	 * tile, it is a gap short of them. Only neighbours near enough to matter to spots within
-	 * {@code reach} are included.
+	 * {@code reach} are included, and only those who count ({@link Presence#counted}).
 	 *
-	 * @param skip tiles to leave out, which the layout already shares ground with some other way
+	 * @param skip      tiles to leave out, which the layout already shares ground with some other way
+	 * @param aloneAsPoint give someone standing alone as {x, z, NaN}: keep a gap from that point,
+	 *                  rather than a straight line a gap short of it
 	 */
-	static List<double[]> sharesOf(long tile, Map<Long, List<StackSpreader.Entry>> byTile, double reach,
-		java.util.function.LongPredicate skip)
+	List<double[]> sharesOf(long tile, double reach, java.util.function.LongPredicate skip, int tick, boolean aloneAsPoint)
 	{
 		List<double[]> out = new ArrayList<>();
 		int plane = StackRegistry.plane(tile);
-		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		boolean fresh = justFormed(tile, tick);
+		for (Map.Entry<Long, Presence> e : presence.entrySet())
 		{
 			long other = e.getKey();
 			if (other == tile || StackRegistry.plane(other) != plane || (skip != null && skip.test(other)))
 			{
 				continue;
 			}
+			int who = e.getValue().counted(tick, fresh);
+			if (who == 0)
+			{
+				continue;
+			}
 			double x = (StackRegistry.sceneX(other) - StackRegistry.sceneX(tile)) * 2.0 * HALF_TILE;
 			double z = (StackRegistry.sceneY(other) - StackRegistry.sceneY(tile)) * 2.0 * HALF_TILE;
 			double d = Math.hypot(x, z);
-			double b = e.getValue().size() == 1 ? d - NEIGHBOUR_GAP : d / 2 - NEIGHBOUR_GAP / 2.0;
+			double b = who == 1 ? d - NEIGHBOUR_GAP : d / 2 - NEIGHBOUR_GAP / 2.0;
 			if (b < reach)
 			{
-				out.add(new double[]{x / d, z / d, b});
+				out.add(who == 1 && aloneAsPoint ? new double[]{x, z, Double.NaN} : new double[]{x / d, z / d, b});
 			}
 		}
 		return out;
@@ -339,7 +438,7 @@ final class CrowdPlanner
 	{
 		for (double[] h : shares)
 		{
-			if (h[0] * dx + h[1] * dz > h[2] + 1)
+			if (Double.isNaN(h[2]) ? Math.hypot(dx - h[0], dz - h[1]) < NEIGHBOUR_GAP - 1 : h[0] * dx + h[1] * dz > h[2] + 1)
 			{
 				return false;
 			}
@@ -353,19 +452,17 @@ final class CrowdPlanner
 		final double x;
 		final double z;
 		final int spacing;
-		/** The spacing it would have with nobody around, and the tick it last changed. */
+		/** The spacing it would have with nobody around. */
 		final int wanted;
-		final int since;
 		/** Whether its people keep to their share of the ground; false when there's no way they can. */
 		final boolean fits;
 
-		Room(double x, double z, int spacing, int wanted, int since, boolean fits)
+		Room(double x, double z, int spacing, int wanted, boolean fits)
 		{
 			this.x = x;
 			this.z = z;
 			this.spacing = spacing;
 			this.wanted = wanted;
-			this.since = since;
 			this.fits = fits;
 		}
 
@@ -377,6 +474,8 @@ final class CrowdPlanner
 
 	private Map<Long, Room> rooms = new HashMap<>();
 	private Map<Long, Room> roomsNow = new HashMap<>();
+	/** Tiles where someone the game shows was left in the middle without a spot last tick. */
+	private Set<Long> waited = new HashSet<>();
 
 	/**
 	 * How a crowd of {@code people} makes room for the groups and people on the tiles around it.
@@ -386,31 +485,36 @@ final class CrowdPlanner
 	 * Crowds in the open used to take no notice of each other, and two groups side by side each
 	 * spread into the gap between them until people were drawn inside each other.
 	 *
-	 * <p>Once it has made room it stays that way for {@link #RELAX_TICKS} after the neighbours
-	 * leave, so someone stopping beside a group for a moment doesn't set it swaying.
+	 * <p>It stays as it is while that still keeps to its shares and moving would gain it nothing:
+	 * it only eases back out once the neighbours have gone for {@link #RELAX_TICKS} (their shares
+	 * are remembered that long), and it never slides over just to stand a little nearer its tile.
+	 *
+	 * @param middle whether the middle of the tile is left out of its spots
+	 * @param guard  whether anyone may be standing in the middle of the tile, whom its ring must
+	 *               keep clear of however it moves over
 	 */
-	Room roomFor(long tile, List<double[]> shares, int wanted, boolean middle, int people, int tick)
+	Room roomFor(long tile, List<double[]> shares, int wanted, boolean middle, boolean guard, int people)
 	{
 		Room best;
 		if (shares.isEmpty())
 		{
-			best = new Room(0, 0, wanted, wanted, tick, true);
+			best = new Room(0, 0, wanted, wanted, true);
 		}
 		else
 		{
 			int floor = Math.min(wanted, ROOM_FLOOR);
 			int spacing = wanted;
-			List<double[]> area = roomAt(shares, middle, spacing, people);
+			List<double[]> area = roomAt(shares, middle, guard, spacing, people);
 			if (area.isEmpty())
 			{
-				// The widest spacing that fits, found by halving: a closer ring always fits where a
-				// wider one does.
+				// The widest spacing that fits, found by halving: a closer ring nearly always fits
+				// where a wider one does.
 				int lo = floor;
 				int hi = wanted;
 				while (hi - lo > 1)
 				{
 					int mid = (lo + hi) / 2;
-					if (roomAt(shares, middle, mid, people).isEmpty())
+					if (roomAt(shares, middle, guard, mid, people).isEmpty())
 					{
 						hi = mid;
 					}
@@ -420,44 +524,40 @@ final class CrowdPlanner
 					}
 				}
 				spacing = lo;
-				area = roomAt(shares, middle, spacing, people);
+				area = roomAt(shares, middle, guard, spacing, people);
 			}
 			if (area.isEmpty())
 			{
 				double[] c = leastCrowded(shares, StackSpreader.spots(false, false, 0, middle, spacing, people, null),
-					middle ? Math.max(0, Math.min(MAX_SHIFT, (0.8 * spacing - NEIGHBOUR_GAP) / Math.sqrt(2))) : MAX_SHIFT);
-				best = new Room(c[0], c[1], spacing, wanted, tick, false);
+					farAt(guard, spacing));
+				best = new Room(c[0], c[1], spacing, wanted, false);
 			}
 			else
 			{
 				double[] c = nearestTo(area, 0, 0);
-				best = new Room(Math.round(c[0]), Math.round(c[1]), spacing, wanted, tick, true);
+				best = new Room(Math.round(c[0]), Math.round(c[1]), spacing, wanted, true);
 			}
 		}
 
 		// Tightening happens at once, or people would stand inside each other, and by as little as
-		// will do from where the crowd stands now. Easing back out waits a moment, as long as the
-		// way the crowd stands now still keeps to its share.
+		// will do from where the crowd stands now. Otherwise it stays put unless moving gains it
+		// more room or lets it stop making room altogether.
 		Room was = rooms.get(tile);
 		Room chosen = best;
 		if (was != null && was.wanted == wanted && best.fits)
 		{
-			if (was.spacing == best.spacing && was.x == best.x && was.z == best.z)
+			if (was.fits && fitsAt(shares, middle, guard, was, people))
 			{
-				chosen = was;
-			}
-			else if (was.fits && fitsAt(shares, middle, was, people))
-			{
-				chosen = tick - was.since < RELAX_TICKS ? was : best;
+				chosen = best.spacing > was.spacing || !best.moved() ? best : was;
 			}
 			else
 			{
 				int spacing = Math.min(was.spacing, best.spacing);
-				List<double[]> area = roomAt(shares, middle, spacing, people);
+				List<double[]> area = roomAt(shares, middle, guard, spacing, people);
 				if (!area.isEmpty())
 				{
 					double[] c = nearestTo(area, was.x, was.z);
-					chosen = new Room(Math.round(c[0]), Math.round(c[1]), spacing, wanted, tick, true);
+					chosen = new Room(Math.round(c[0]), Math.round(c[1]), spacing, wanted, true);
 				}
 			}
 		}
@@ -466,15 +566,28 @@ final class CrowdPlanner
 	}
 
 	/**
+	 * A crowd's spot check, for spots laid out around its moved middle: the ground there, its
+	 * shares, and when it has moved over with someone in the middle of the tile, a gap clear of them.
+	 */
+	private static StackSpreader.SpotCheck movedOver(StackSpreader.SpotCheck check, List<double[]> shares, Room room, boolean guard)
+	{
+		final double mx = room.x;
+		final double mz = room.z;
+		final boolean keepToShares = room.fits;
+		final boolean clearOfMiddle = guard && room.moved();
+		return (dx, dz) -> check.canStand((int) Math.round(dx + mx), (int) Math.round(dz + mz))
+			&& (!keepToShares || withinShares(shares, dx + mx, dz + mz))
+			&& (!clearOfMiddle || Math.hypot(dx + mx, dz + mz) >= NEIGHBOUR_GAP - 1);
+	}
+
+	/**
 	 * Where a crowd's middle may be moved to, within half a tile, for its first {@code people}
 	 * spots at this spacing to keep to their shares: a convex polygon, empty if nowhere will do.
 	 */
-	private static List<double[]> roomAt(List<double[]> shares, boolean middle, int spacing, int people)
+	private static List<double[]> roomAt(List<double[]> shares, boolean middle, boolean guard, int spacing, int people)
 	{
 		List<int[]> spots = StackSpreader.spots(false, false, 0, middle, spacing, people, null);
-		// With someone left standing in the middle of the tile, moving the ring over would bring
-		// its near side onto them: it may only move as far as keeps its ring a gap clear of them.
-		double far = middle ? Math.max(0, Math.min(MAX_SHIFT, (0.8 * spacing - NEIGHBOUR_GAP) / Math.sqrt(2))) : MAX_SHIFT;
+		double far = farAt(guard, spacing);
 		List<double[]> poly = new ArrayList<>();
 		poly.add(new double[]{-far, -far});
 		poly.add(new double[]{far, -far});
@@ -496,9 +609,24 @@ final class CrowdPlanner
 		return poly;
 	}
 
-	/** Whether a crowd standing as {@code room} says keeps to its shares. */
-	private static boolean fitsAt(List<double[]> shares, boolean middle, Room room, int people)
+	/**
+	 * How far a ring at this spacing may move over. With someone standing in the middle of the tile
+	 * (you, when your character stays put, or someone without a spot), moving the ring over would
+	 * bring its near side onto them: it may only move as far as keeps its ring a gap clear of them.
+	 */
+	private static double farAt(boolean guard, int spacing)
 	{
+		return guard ? Math.max(0, Math.min(MAX_SHIFT, (0.8 * spacing - NEIGHBOUR_GAP) / Math.sqrt(2))) : MAX_SHIFT;
+	}
+
+	/** Whether a crowd standing as {@code room} says keeps to its shares, moved over no further than it may. */
+	private static boolean fitsAt(List<double[]> shares, boolean middle, boolean guard, Room room, int people)
+	{
+		double far = farAt(guard, room.spacing);
+		if (Math.abs(room.x) > far + 1 || Math.abs(room.z) > far + 1)
+		{
+			return false;
+		}
 		for (int[] p : StackSpreader.spots(false, false, 0, middle, room.spacing, people, null))
 		{
 			if (!withinShares(shares, p[0] + room.x, p[1] + room.z))
@@ -1161,6 +1289,7 @@ final class CrowdPlanner
 		{
 			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>(4)).add(e);
 		}
+		observePresence(byTile, shown, tick);
 
 		int localId = -1;
 		if (includeLocal)
@@ -1356,10 +1485,11 @@ final class CrowdPlanner
 			int lookX = (int) Math.round(-Math.sin(angle));
 			int lookY = (int) Math.round(-Math.cos(angle));
 			final boolean alongCounter = straight;
-			final List<double[]> rowShares = !row ? new ArrayList<>() : sharesOf(tile, byTile, StackSpreader.MAX_LINE_EXTENT,
+			final List<double[]> rowShares = !row ? new ArrayList<>() : sharesOf(tile, StackSpreader.MAX_LINE_EXTENT,
 				other -> alongCounter
 					? (StackRegistry.sceneX(other) - sceneX) * sideY == (StackRegistry.sceneY(other) - sceneY) * sideX
-					: Math.abs(StackRegistry.sceneX(other) - sceneX - lookX) <= 1 && Math.abs(StackRegistry.sceneY(other) - sceneY - lookY) <= 1);
+					: Math.abs(StackRegistry.sceneX(other) - sceneX - lookX) <= 1 && Math.abs(StackRegistry.sceneY(other) - sceneY - lookY) <= 1,
+				tick, true);
 
 			int[] blocked = {0};
 			StackSpreader.SpotCheck check =
@@ -1400,29 +1530,31 @@ final class CrowdPlanner
 			// others to get anywhere.
 			StackSpreader.SpotCheck laidOut = check;
 			double[] moveOver = {0, 0};
+			List<double[]> shares = null;
+			Room room = null;
+			// Someone may be standing in the middle of the tile: you, when your character stays put,
+			// anyone past the players-per-tile limit, or someone who was left waiting for a spot.
+			boolean guard = middleTaken || waited.contains(tile);
+			int people = Math.min(capacity, Math.max(lagged, movable.size()));
 			if (!row)
 			{
 				// Everyone near enough to matter to any of this crowd's spots, moved over as far as it
 				// may go (to a corner of its half-tile square): the same list for choosing how it
 				// makes room and for checking its spots, or a spot the choice allowed could be turned
 				// down and everyone after it in the list renumbered.
-				final List<double[]> shares = sharesOf(tile, byTile, StackSpreader.MAX_LINE_EXTENT + MAX_SHIFT * Math.sqrt(2) + 1, null);
-				Room room = roomFor(tile, shares, tileSpacing, middleTaken,
-					Math.min(capacity, Math.max(lagged, movable.size())), tick);
+				shares = sharesOf(tile, StackSpreader.MAX_LINE_EXTENT + MAX_SHIFT * Math.sqrt(2) + 1, null, tick, false);
+				room = roomFor(tile, shares, tileSpacing, middleTaken, guard, people);
 				moveOver = new double[]{room.x, room.z};
 				if (room.spacing < tileSpacing || room.moved())
 				{
 					kind += ", making room";
 				}
 				tileSpacing = room.spacing;
-				final double mx = room.x;
-				final double mz = room.z;
-				final boolean keepToShares = room.fits;
-				laidOut = (dx, dz) -> check.canStand((int) Math.round(dx + mx), (int) Math.round(dz + mz))
-					&& (!keepToShares || withinShares(shares, dx + mx, dz + mz));
+				laidOut = movedOver(check, shares, room, guard);
 			}
 			boolean[] squeezed = {false};
 			int[] used = {tileSpacing};
+			boolean middleNow = middleTaken;
 			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
 				Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
@@ -1430,9 +1562,64 @@ final class CrowdPlanner
 				// Walls leave too few spots for everyone: someone stays in the middle without a spot,
 				// so don't also give the middle to someone else.
 				boolean wasRow = row && squeezed[0];
+				middleNow = true;
 				spots = spotsWithRoom(false, false, angle, true, tileSpacing, capacity,
 					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 				squeezed[0] |= wasRow;
+			}
+			if (room != null && room.moved() && (used[0] < room.spacing || middleNow != middleTaken))
+			{
+				// A wall closed the ring up further than the room allowed for, around the same moved
+				// middle, or left someone in the middle: move it over again for the ring it has now,
+				// or its near side lands on whoever stands in the middle of the tile.
+				boolean g = guard || middleNow;
+				List<double[]> area = roomAt(shares, middleNow, g, used[0], people);
+				double far = farAt(g, used[0]);
+				double[] c = area.isEmpty()
+					? new double[]{Math.max(-far, Math.min(far, room.x)), Math.max(-far, Math.min(far, room.z))}
+					: nearestTo(area, room.x, room.z);
+				Room again = new Room(Math.round(c[0]), Math.round(c[1]), used[0], room.wanted, room.fits && !area.isEmpty());
+				moveOver = new double[]{again.x, again.z};
+				laidOut = movedOver(check, shares, again, g);
+				int closer = used[0];
+				spots = spotsWithRoom(false, false, angle, middleNow, closer, capacity,
+					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
+			}
+			if (room != null && !room.fits)
+			{
+				// No layout keeps a crowd's first spots all to their shares (a full tile boxed in by
+				// its neighbours), but the ring can still have enough spots further round that do:
+				// take those, rather than handing out spots that lean into the neighbours.
+				Room within = new Room(moveOver[0], moveOver[1], used[0], room.wanted, true);
+				List<int[]> kept = StackSpreader.spots(false, false, angle, middleNow, used[0], capacity,
+					movedOver(check, shares, within, guard || middleNow));
+				if (kept.size() >= Math.min(capacity, movable.size()))
+				{
+					spots = kept;
+				}
+			}
+			if (row && squeezed[0] && used[0] < ROOM_FLOOR && !rowShares.isEmpty())
+			{
+				// Keeping to its share of the ground would squeeze this row into a ring tighter than a
+				// crowd ever closes up for its neighbours. Better a row that leans into them a little.
+				List<double[]> kept = new ArrayList<>(rowShares);
+				rowShares.clear();
+				boolean[] plain = {false};
+				int[] plainUsed = {tileSpacing};
+				int[] plainBlocked = {0};
+				List<int[]> loose = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
+					Math.min(capacity, movable.size()), check, plainBlocked, plain, arcRadius, false, StackSpreader.WRAP_ARC, plainUsed);
+				if (!plain[0] && loose.size() >= Math.min(spots.size(), movable.size()))
+				{
+					spots = loose;
+					squeezed[0] = false;
+					used[0] = plainUsed[0];
+					blocked[0] = plainBlocked[0];
+				}
+				else
+				{
+					rowShares.addAll(kept);
+				}
 			}
 			if (squeezed[0])
 			{
@@ -1497,6 +1684,14 @@ final class CrowdPlanner
 		}
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 		lastSlots = assigned;
+		waited = new HashSet<>();
+		for (StackSpreader.Placement p : plan.unplaced)
+		{
+			if (shown.test(p.id))
+			{
+				waited.add(p.tile);
+			}
+		}
 
 		Set<Integer> placed = new HashSet<>();
 		Map<Long, LineBook.LineReport> lineReports = new HashMap<>();
@@ -1665,5 +1860,7 @@ final class CrowdPlanner
 		currentLineTiles.clear();
 		rooms.clear();
 		roomsNow.clear();
+		presence.clear();
+		waited.clear();
 	}
 }

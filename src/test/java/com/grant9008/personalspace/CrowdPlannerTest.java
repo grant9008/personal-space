@@ -2181,15 +2181,17 @@ public class CrowdPlannerTest
 		int[][] around = new int[5][5];
 		Map<Integer, double[]> settled = null;
 		Map<Integer, Double> shape = null;
+		int changed = 0;
 		for (int t = 1; t <= 180; t++)
 		{
-			if (t > 8 && t < 150 && t % 3 == 0)
+			if (t > 8 && t < 150 && t % 4 == 0)
 			{
 				int x = rnd.nextInt(5);
 				int y = rnd.nextInt(5);
 				if (x != 2 || y != 2)
 				{
 					around[x][y] = rnd.nextInt(4);
+					changed = t;
 				}
 			}
 			if (t == 150)
@@ -2226,7 +2228,8 @@ public class CrowdPlannerTest
 			{
 				assertSameShape("tick " + t, shape, bearings(at, 1, 5));
 			}
-			for (int i = 1; t > 8 && i <= 5; i++)
+			// Someone who has only just stopped isn't made room for until they have stood a moment.
+			for (int i = 1; t > 8 && t - changed >= CrowdPlanner.SETTLE_TICKS && i <= 5; i++)
 			{
 				for (int other : at.keySet())
 				{
@@ -2272,7 +2275,7 @@ public class CrowdPlannerTest
 		{
 			Map<Integer, double[]> at = drawnAt(planner.plan(both, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), both);
 			assertSameShape("tick " + t, shape, bearings(at, 1, 5));
-			for (int i = 1; i <= 5; i++)
+			for (int i = 1; t >= 6 + CrowdPlanner.SETTLE_TICKS && i <= 5; i++)
 			{
 				for (int j = 6; j <= 8; j++)
 				{
@@ -2291,6 +2294,123 @@ public class CrowdPlannerTest
 		for (int i = 1; i <= 5; i++)
 		{
 			Assert.assertArrayEquals("player " + i + " back out where they were", alone.get(i), later.get(i), 0);
+		}
+	}
+
+	/** A group of five on {@link #TILE}, and whoever else is given, all standing still. */
+	private static List<StackSpreader.Entry> fiveAnd(StackSpreader.Entry... others)
+	{
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 1; i <= 5; i++)
+		{
+			still.add(new StackSpreader.Entry(i, TILE, false, NORTH));
+		}
+		still.addAll(java.util.Arrays.asList(others));
+		return still;
+	}
+
+	@Test
+	public void aPasserByStoppingForAMomentDoesntMoveAGroup()
+	{
+		// Someone walking past pauses on the tile next to a settled group for a moment. The group
+		// only makes room for people who stay: it doesn't slide over and back for a passer-by.
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, double[]> settled = null;
+		for (int t = 1; t <= 40; t++)
+		{
+			List<StackSpreader.Entry> still = t >= 20 && t < 20 + CrowdPlanner.SETTLE_TICKS
+				? fiveAnd(new StackSpreader.Entry(9, StackRegistry.key(0, 51, 50), false, SOUTH)) : fiveAnd();
+			Map<Integer, double[]> at = drawnAt(planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), still);
+			if (t == 19)
+			{
+				settled = at;
+			}
+			for (int i = 1; t > 19 && i <= 5; i++)
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + i + " moved for a passer-by", settled.get(i), at.get(i), 0);
+			}
+		}
+	}
+
+	@Test
+	public void aGroupDoesntMakeRoomForPeopleTheGameIsntShowing()
+	{
+		// Players another plugin or the game itself hides aren't drawn, so nobody makes room for them.
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> alone = fiveAnd();
+		Map<Integer, double[]> before = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			before = drawnAt(planner.plan(alone, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), alone);
+		}
+		List<StackSpreader.Entry> hidden = fiveAnd(new StackSpreader.Entry(20, StackRegistry.key(0, 51, 50), false, SOUTH),
+			new StackSpreader.Entry(21, StackRegistry.key(0, 51, 50), false, SOUTH),
+			new StackSpreader.Entry(22, StackRegistry.key(0, 49, 50), false, SOUTH));
+		for (int t = 6; t <= 20; t++)
+		{
+			CrowdPlanner.Plan plan = planner.plan(hidden, q -> q < 20, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN);
+			Map<Integer, double[]> at = drawnAt(plan, alone);
+			for (int i = 1; i <= 5; i++)
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + i + " made room for hidden players", before.get(i), at.get(i), 0);
+			}
+		}
+	}
+
+	@Test
+	public void aGroupMakingRoomAgainstAWallKeepsClearOfYouInTheMiddle()
+	{
+		// You stand still in the middle of your tile with five others; a wall runs along the east
+		// edge and people stand to the west. The ring moves over, the wall closes it up, and its near
+		// side used to land on you, a unit away.
+		CrowdPlanner.Surroundings wall = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return tile != TILE || dx <= 37;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		List<StackSpreader.Entry> still = fiveAnd(new StackSpreader.Entry(99, TILE, true, NORTH),
+			new StackSpreader.Entry(30, StackRegistry.key(0, 49, 50), false, SOUTH),
+			new StackSpreader.Entry(31, StackRegistry.key(0, 49, 49), false, SOUTH),
+			new StackSpreader.Entry(32, StackRegistry.key(0, 49, 49), false, SOUTH));
+		CrowdPlanner planner = new CrowdPlanner();
+		for (int t = 1; t <= 20; t++)
+		{
+			CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, wall);
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				if (p.tile == TILE)
+				{
+					Assert.assertTrue("tick " + t + ": player " + p.id + " drawn " + Math.hypot(p.dx, p.dz) + " from you",
+						Math.hypot(p.dx, p.dz) >= CrowdPlanner.NEIGHBOUR_GAP - 1);
+				}
+			}
 		}
 	}
 }

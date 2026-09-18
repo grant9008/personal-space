@@ -43,7 +43,8 @@ turns out to be four friends hanging out.
 - **Groups side by side don't merge.** On a busy square, groups on neighbouring tiles each keep
   to their own side of the ground between them, so nobody is drawn inside anybody else. A group
   makes room by sliding over or closing up together, keeping its shape, and eases back out a few
-  seconds after its neighbours leave.
+  seconds after its neighbours leave. Someone who only pauses for a moment on the way past isn't
+  made room for, and nobody makes room for players the game isn't showing.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.
