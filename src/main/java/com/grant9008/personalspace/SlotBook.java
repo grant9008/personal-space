@@ -2,7 +2,6 @@ package com.grant9008.personalspace;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -39,11 +38,6 @@ final class SlotBook
 		final Map<Integer, Integer> occupant = new HashMap<>();
 		final Map<Integer, Integer> heldFor = new HashMap<>();
 		final Map<Integer, Integer> heldUntil = new HashMap<>();
-		/**
-		 * Spots that came back when someone left the next tile. Nobody walks across the crowd to
-		 * fill one, only someone arriving takes it: the crowd was fine without it.
-		 */
-		final Set<Integer> fresh = new HashSet<>();
 
 		boolean held(int slot, int tick)
 		{
@@ -80,7 +74,6 @@ final class SlotBook
 
 		void assign(int id, int slot)
 		{
-			fresh.remove(slot);
 			slotOf.put(id, slot);
 			occupant.put(slot, id);
 			heldFor.remove(slot);
@@ -89,105 +82,6 @@ final class SlotBook
 	}
 
 	private final Map<Long, Tile> tiles = new HashMap<>();
-
-	/**
-	 * A tile's spots were numbered afresh without all of them moving: someone stopping on the next
-	 * tile shut one off, and every spot after it in the list moved up a place. Everyone whose spot
-	 * is still there keeps it under its new number, instead of walking round the crowd to whatever
-	 * spot now has their old one. Anyone whose spot went takes the free spot nearest where they
-	 * stood. Spots held for people who stepped away follow the same way, and spots that are new
-	 * are left for whoever arrives next.
-	 *
-	 * @param stillThere old number to new number, for every spot that is exactly where it was
-	 * @param before     where each spot was, by its old number
-	 * @param now        where each spot is, by its new number
-	 */
-	void renumber(long tile, Map<Integer, Integer> stillThere, List<int[]> before, List<int[]> now)
-	{
-		Tile t = tiles.get(tile);
-		if (t == null)
-		{
-			return;
-		}
-		Map<Integer, Integer> slotOf = new HashMap<>();
-		Set<Integer> taken = new HashSet<>();
-		for (Map.Entry<Integer, Integer> e : t.slotOf.entrySet())
-		{
-			Integer to = stillThere.get(e.getValue());
-			if (to != null)
-			{
-				slotOf.put(e.getKey(), to);
-				taken.add(to);
-			}
-		}
-		Map<Integer, Integer> heldFor = new HashMap<>();
-		Map<Integer, Integer> heldUntil = new HashMap<>();
-		for (Map.Entry<Integer, Integer> h : t.heldUntil.entrySet())
-		{
-			Integer to = stillThere.get(h.getKey());
-			if (to != null && taken.add(to))
-			{
-				heldUntil.put(to, h.getValue());
-				if (t.heldFor.containsKey(h.getKey()))
-				{
-					heldFor.put(to, t.heldFor.get(h.getKey()));
-				}
-			}
-		}
-		List<Integer> gone = new ArrayList<>();
-		for (Map.Entry<Integer, Integer> e : t.slotOf.entrySet())
-		{
-			if (!slotOf.containsKey(e.getKey()))
-			{
-				gone.add(e.getKey());
-			}
-		}
-		Collections.sort(gone);
-		for (int id : gone)
-		{
-			int old = t.slotOf.get(id);
-			int[] was = old < before.size() ? before.get(old) : null;
-			int nearest = -1;
-			double best = Double.MAX_VALUE;
-			for (int s = 0; s < now.size() && was != null; s++)
-			{
-				double d = Math.hypot(now.get(s)[0] - was[0], now.get(s)[1] - was[1]);
-				if (!taken.contains(s) && d < best)
-				{
-					best = d;
-					nearest = s;
-				}
-			}
-			if (nearest >= 0)
-			{
-				slotOf.put(id, nearest);
-				taken.add(nearest);
-				moves++;
-			}
-		}
-		t.slotOf.clear();
-		t.occupant.clear();
-		t.heldFor.clear();
-		t.heldUntil.clear();
-		for (Map.Entry<Integer, Integer> e : slotOf.entrySet())
-		{
-			t.slotOf.put(e.getKey(), e.getValue());
-			t.occupant.put(e.getValue(), e.getKey());
-		}
-		t.heldFor.putAll(heldFor);
-		t.heldUntil.putAll(heldUntil);
-		Set<Integer> kept = new HashSet<>(stillThere.values());
-		Set<Integer> fresh = new HashSet<>();
-		for (int s = 0; s < now.size(); s++)
-		{
-			if (!kept.contains(s) && !t.occupant.containsKey(s))
-			{
-				fresh.add(s);
-			}
-		}
-		t.fresh.clear();
-		t.fresh.addAll(fresh);
-	}
 
 	/** Diagnostics: how many times a player who already had a spot was given a different one. */
 	long moves;
@@ -345,7 +239,7 @@ final class SlotBook
 				{
 					continue;
 				}
-				if (id == localId && !t.occupant.containsKey(yours) && !t.held(yours, tick))
+				if (id == localId && yours < capacity && !t.occupant.containsKey(yours) && !t.held(yours, tick))
 				{
 					t.assign(id, yours);
 					movedYou = true;
@@ -428,8 +322,7 @@ final class SlotBook
 			// never one standing between you and the camera.
 			for (int s = 0; s < capacity; s++)
 			{
-				if (t.occupant.containsKey(s) || t.held(s, tick) || inFront.contains(s) || t.fresh.contains(s)
-					|| tight.getOrDefault(e.getKey(), Collections.emptySet()).contains(s))
+				if (t.occupant.containsKey(s) || t.held(s, tick) || inFront.contains(s))
 				{
 					continue;
 				}
@@ -508,32 +401,18 @@ final class SlotBook
 		return out;
 	}
 
-	/**
-	 * For each tile, the spots close to people standing on the tile next door who'd have to make
-	 * way if anyone stood there. They are tried last, and nobody moves into one to fill a gap.
-	 */
-	Map<Long, Set<Integer>> tight = new HashMap<>();
-
-	/**
-	 * The spots of a tile in the order to try them: nearest its middle first where that's known,
-	 * and those close to the people next door last.
-	 */
+	/** The spots of a tile in the order to try them: nearest its middle first where that's known. */
 	private List<Integer> order(long tile, int capacity)
 	{
 		List<Integer> known = nearestFirst.get(tile);
-		List<Integer> plain = new ArrayList<>(capacity);
 		if (known != null)
 		{
-			plain.addAll(known);
+			return known;
 		}
-		for (int s = 0; s < capacity && known == null; s++)
+		List<Integer> plain = new ArrayList<>(capacity);
+		for (int s = 0; s < capacity; s++)
 		{
 			plain.add(s);
-		}
-		Set<Integer> close = tight.getOrDefault(tile, Collections.emptySet());
-		if (!close.isEmpty())
-		{
-			plain.sort(Comparator.comparingInt(s -> close.contains(s) ? 1 : 0));
 		}
 		return plain;
 	}

@@ -2143,18 +2143,47 @@ public class CrowdPlannerTest
 		}
 	}
 
-	@Test
-	public void aSettledGroupKeepsItsPlacesWhilePeopleComeAndGoNextDoor()
+	/** Each person's bearing from the middle of their group, which only changes if people swap places or walk round. */
+	private static Map<Integer, Double> bearings(Map<Integer, double[]> at, int from, int to)
 	{
-		// People stopping on the tiles around a group fit in around it. The group was there first
-		// and doesn't move for them, and nobody walks back when they leave.
+		double cx = 0;
+		double cz = 0;
+		for (int i = from; i <= to; i++)
+		{
+			cx += at.get(i)[0] / (to - from + 1);
+			cz += at.get(i)[1] / (to - from + 1);
+		}
+		Map<Integer, Double> out = new HashMap<>();
+		for (int i = from; i <= to; i++)
+		{
+			out.put(i, Math.atan2(at.get(i)[1] - cz, at.get(i)[0] - cx));
+		}
+		return out;
+	}
+
+	private static void assertSameShape(String what, Map<Integer, Double> before, Map<Integer, Double> now)
+	{
+		for (Map.Entry<Integer, Double> e : before.entrySet())
+		{
+			double turn = Math.abs(Math.atan2(Math.sin(now.get(e.getKey()) - e.getValue()), Math.cos(now.get(e.getKey()) - e.getValue())));
+			Assert.assertTrue(what + ": player " + e.getKey() + " went round the others (" + turn + " rad)", turn < 0.15);
+		}
+	}
+
+	@Test
+	public void aGroupMakesRoomForPeopleNextDoorWithoutAnyoneSwappingPlaces()
+	{
+		// People come and go on the tiles around a group of five. The group moves over and closes up
+		// as a whole to leave them room, but nobody swaps places or walks round the others, and
+		// once everyone has gone it settles back exactly where it was.
 		CrowdPlanner planner = new CrowdPlanner();
 		java.util.Random rnd = new java.util.Random(5);
 		int[][] around = new int[5][5];
 		Map<Integer, double[]> settled = null;
-		for (int t = 1; t <= 150; t++)
+		Map<Integer, Double> shape = null;
+		for (int t = 1; t <= 180; t++)
 		{
-			if (t > 8 && t % 3 == 0)
+			if (t > 8 && t < 150 && t % 3 == 0)
 			{
 				int x = rnd.nextInt(5);
 				int y = rnd.nextInt(5);
@@ -2163,55 +2192,76 @@ public class CrowdPlannerTest
 					around[x][y] = rnd.nextInt(4);
 				}
 			}
+			if (t == 150)
+			{
+				around = new int[5][5];
+			}
 			List<StackSpreader.Entry> still = new ArrayList<>();
+			Map<Integer, Long> tileOf = new HashMap<>();
 			for (int i = 1; i <= 5; i++)
 			{
 				still.add(new StackSpreader.Entry(i, TILE, false, NORTH));
+				tileOf.put(i, TILE);
 			}
 			int id = 100;
 			for (int x = 0; x < 5; x++)
 			{
 				for (int y = 0; y < 5; y++)
 				{
-					for (int i = 0; i < around[x][y]; i++)
+					for (int i = 0; i < around[x][y]; i++, id++)
 					{
-						still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, 48 + x, 48 + y), false, SOUTH));
+						long tile = StackRegistry.key(0, 48 + x, 48 + y);
+						still.add(new StackSpreader.Entry(id, tile, false, SOUTH));
+						tileOf.put(id, tile);
 					}
 				}
 			}
-			Map<Integer, double[]> at = drawnAt(planner.plan(still, q -> true, 128, 5, true, false, t, OPEN), still);
-			Map<Integer, double[]> group = new HashMap<>();
-			for (int i = 1; i <= 5; i++)
-			{
-				group.put(i, at.get(i));
-			}
+			Map<Integer, double[]> at = drawnAt(planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), still);
 			if (t == 8)
 			{
-				settled = group;
+				settled = at;
+				shape = bearings(at, 1, 5);
+			}
+			if (t > 8)
+			{
+				assertSameShape("tick " + t, shape, bearings(at, 1, 5));
 			}
 			for (int i = 1; t > 8 && i <= 5; i++)
 			{
-				Assert.assertArrayEquals("tick " + t + ": player " + i + " moved for the people next door", settled.get(i), group.get(i), 0);
+				for (int other : at.keySet())
+				{
+					if (!tileOf.get(other).equals(TILE))
+					{
+						double gap = Math.hypot(at.get(i)[0] - at.get(other)[0], at.get(i)[1] - at.get(other)[1]);
+						Assert.assertTrue("tick " + t + ": " + i + " and " + other + " only " + gap + " apart", gap >= CrowdPlanner.NEIGHBOUR_GAP - 2);
+					}
+				}
+			}
+			for (int i = 1; t == 180 && i <= 5; i++)
+			{
+				Assert.assertArrayEquals("player " + i + " back where they were", settled.get(i), at.get(i), 0);
 			}
 		}
 	}
 
 	@Test
-	public void aGroupFormingBesideAnotherFitsInAroundIt()
+	public void twoGroupsSideBySideBothMakeRoomAndKeepTheirShapes()
 	{
-		// Five already standing; three stop on the tile next door. The five stay exactly where they
-		// were, and the three stand clear of them.
+		// Five standing, then three stop on the tile next door. Both groups keep to their own side
+		// of the ground between them, each keeping its shape; when the three leave, the five ease
+		// back out a few seconds later, not the moment they go.
 		CrowdPlanner planner = new CrowdPlanner();
 		List<StackSpreader.Entry> five = new ArrayList<>();
 		for (int i = 1; i <= 5; i++)
 		{
 			five.add(new StackSpreader.Entry(i, TILE, false, NORTH));
 		}
-		Map<Integer, double[]> before = null;
+		Map<Integer, double[]> alone = null;
 		for (int t = 1; t <= 5; t++)
 		{
-			before = drawnAt(planner.plan(five, q -> true, 128, 5, true, false, t, OPEN), five);
+			alone = drawnAt(planner.plan(five, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), five);
 		}
+		Map<Integer, Double> shape = bearings(alone, 1, 5);
 		List<StackSpreader.Entry> both = new ArrayList<>(five);
 		long east = StackRegistry.key(0, 51, 50);
 		for (int i = 6; i <= 8; i++)
@@ -2220,16 +2270,27 @@ public class CrowdPlannerTest
 		}
 		for (int t = 6; t <= 10; t++)
 		{
-			Map<Integer, double[]> at = drawnAt(planner.plan(both, q -> true, 128, 5, true, false, t, OPEN), both);
+			Map<Integer, double[]> at = drawnAt(planner.plan(both, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), both);
+			assertSameShape("tick " + t, shape, bearings(at, 1, 5));
 			for (int i = 1; i <= 5; i++)
 			{
-				Assert.assertArrayEquals("tick " + t + ": player " + i + " made way", before.get(i), at.get(i), 0);
 				for (int j = 6; j <= 8; j++)
 				{
 					double gap = Math.hypot(at.get(i)[0] - at.get(j)[0], at.get(i)[1] - at.get(j)[1]);
-					Assert.assertTrue("tick " + t + ": " + i + " and " + j + " only " + gap + " apart", gap >= CrowdPlanner.NEIGHBOUR_GAP - 1);
+					Assert.assertTrue("tick " + t + ": " + i + " and " + j + " only " + gap + " apart", gap >= CrowdPlanner.NEIGHBOUR_GAP - 2);
 				}
 			}
+		}
+		Map<Integer, double[]> justLeft = drawnAt(planner.plan(five, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, 11, OPEN), five);
+		Assert.assertFalse("the five eased straight back out", java.util.Arrays.equals(alone.get(1), justLeft.get(1)));
+		Map<Integer, double[]> later = null;
+		for (int t = 12; t <= 11 + CrowdPlanner.RELAX_TICKS + 1; t++)
+		{
+			later = drawnAt(planner.plan(five, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), five);
+		}
+		for (int i = 1; i <= 5; i++)
+		{
+			Assert.assertArrayEquals("player " + i + " back out where they were", alone.get(i), later.get(i), 0);
 		}
 	}
 }
