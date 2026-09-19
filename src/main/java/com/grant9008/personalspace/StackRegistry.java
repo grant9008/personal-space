@@ -32,6 +32,8 @@ final class StackRegistry
 	private volatile Map<Long, int[]> fires = Collections.emptyMap();
 	/** Small groups posed to face each other or angled towards each other. */
 	private volatile Map<Long, PersonalSpaceConfig.Pose> poses = Collections.emptyMap();
+	/** Tiles whose middle is between you and the camera: nobody waiting there is drawn. */
+	private volatile java.util.Set<Long> middleOutOfSight = Collections.emptySet();
 
 	static long key(int plane, int sceneX, int sceneY)
 	{
@@ -68,6 +70,13 @@ final class StackRegistry
 		Map<Long, int[]> fireByTile)
 	{
 		rebuild(members, curvedRowTiles, unplacedIds, fireByTile, Collections.emptyMap());
+	}
+
+	void rebuild(List<StackSpreader.Placement> members, java.util.Set<Long> curvedRowTiles, java.util.Set<Integer> unplacedIds,
+		Map<Long, int[]> fireByTile, Map<Long, PersonalSpaceConfig.Pose> poseByTile, java.util.Set<Long> middlesOutOfSight)
+	{
+		middleOutOfSight = middlesOutOfSight == null ? Collections.emptySet() : new java.util.HashSet<>(middlesOutOfSight);
+		rebuild(members, curvedRowTiles, unplacedIds, fireByTile, poseByTile);
 	}
 
 	void rebuild(List<StackSpreader.Placement> members, java.util.Set<Long> curvedRowTiles, java.util.Set<Integer> unplacedIds,
@@ -112,6 +121,12 @@ final class StackRegistry
 			return StackSpreader.halfway(orientation, StackSpreader.faceTowards(orientation, dx, dz, 0, 0));
 		}
 		return orientation;
+	}
+
+	/** True if nobody left waiting in the middle of this tile should be drawn: they would stand in front of you. */
+	boolean middleOutOfSight(long tileKey)
+	{
+		return middleOutOfSight.contains(tileKey);
 	}
 
 	/** True if this player is on a crowded tile but wasn't given a spot this tick. */

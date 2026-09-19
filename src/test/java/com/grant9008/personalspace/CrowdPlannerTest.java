@@ -1971,7 +1971,7 @@ public class CrowdPlannerTest
 	};
 
 	@Test
-	public void aBankCrowdLinesUpWhenMostOfThemFaceTheBooth()
+	public void aBankCrowdLinesUpAlongTheCounterWhicheverWayTheyFace()
 	{
 		// Three banking, two casting spells facing elsewhere.
 		CrowdPlanner.Plan plan = new CrowdPlanner().plan(players(1, NORTH, 2, NORTH, 3, NORTH, 4, 1536, 5, SOUTH),
@@ -1983,8 +1983,10 @@ public class CrowdPlannerTest
 				Math.abs(p.dz) <= StackSpreader.MAX_BOW);
 		}
 
+		// Only one of five faces the booth, the rest alching or chatting every which way: still a
+		// row along the counter. Packed into a ring between the booths, they buried whoever was in it.
 		CrowdPlanner fewFacing = new CrowdPlanner();
-		Assert.assertEquals("only one of five faces the booth: a crowd", "crowd",
+		Assert.assertEquals("counter row",
 			fewFacing.plan(players(1, NORTH, 2, 1536, 3, SOUTH, 4, 512, 5, SOUTH), id -> true, 72, 5, true, false, 1, COUNTER_NORTH)
 				.tiles.get(TILE).shape);
 	}
@@ -2514,6 +2516,108 @@ public class CrowdPlannerTest
 				Assert.assertTrue(order.get(i - 1) + " and " + order.get(i) + " swapped places along the counter",
 					after.get(order.get(i - 1)) < after.get(order.get(i)));
 			}
+		}
+	}
+
+	@Test
+	public void atAPackedAnvilNobodyIsDrawnBetweenYouAndTheCamera()
+	{
+		// Six smithing on each of three tiles at an anvil, you at the front of the middle one, the
+		// camera behind the crowd. Every spot behind you is in front of you from there, so whoever
+		// would stand in your way with nowhere else to go waits, out of sight, instead.
+		CrowdPlanner.Surroundings anvil = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return dz <= 32;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int id = 1;
+		for (int x = -1; x <= 1; x++)
+		{
+			for (int i = 0; i < 6; i++)
+			{
+				boolean you = x == 0 && i == 0;
+				still.add(new StackSpreader.Entry(you ? 99 : id++, StackRegistry.key(0, 50 + x, 50), you, NORTH, !you));
+			}
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		cameraAt(planner, 0, -1);
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 20; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 6, true, true, t, anvil);
+		}
+		double[] you = null;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (p.id == 99)
+			{
+				you = new double[]{StackRegistry.sceneX(p.tile) * 128 + p.dx, StackRegistry.sceneY(p.tile) * 128 + p.dz};
+			}
+		}
+		Assert.assertNotNull("you have a spot", you);
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			double east = StackRegistry.sceneX(p.tile) * 128 + p.dx - you[0];
+			double north = StackRegistry.sceneY(p.tile) * 128 + p.dz - you[1];
+			Assert.assertFalse("player " + p.id + " drawn right in front of you", p.id != 99 && -north > 24 && Math.abs(east) < 40);
+		}
+		for (StackSpreader.Placement p : plan.unplaced)
+		{
+			double east = StackRegistry.sceneX(p.tile) * 128 - you[0];
+			double north = StackRegistry.sceneY(p.tile) * 128 - you[1];
+			Assert.assertTrue("player " + p.id + " waits in the middle of a tile in front of you, and would be drawn there",
+				!(-north > 24 && Math.abs(east) < 40) || plan.middleOutOfSight.contains(p.tile));
+		}
+	}
+
+	@Test
+	public void onAFullTileThePeopleLeftWaitingAreTheBusyOnes()
+	{
+		// Eight on a tile with room for five: the three left without a spot are people busy alching,
+		// not whoever arrived last.
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int i = 1; i <= 8; i++)
+		{
+			still.add(new StackSpreader.Entry(i, TILE, false, NORTH, i % 2 == 0));
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, false, t, OPEN);
+		}
+		Assert.assertEquals(5, plan.placements.size());
+		for (StackSpreader.Placement p : plan.unplaced)
+		{
+			Assert.assertTrue("player " + p.id + " waits though they aren't busy", p.id % 2 == 0);
 		}
 	}
 }

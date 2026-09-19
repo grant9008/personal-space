@@ -64,6 +64,11 @@ final class CrowdPlanner
 		 * ends of a row look round at the booth instead of straight ahead at the wall beside it.
 		 */
 		final Set<Long> facingIn = new HashSet<>();
+		/**
+		 * Tiles whose middle is between you and the camera: nobody left waiting there is drawn,
+		 * or whoever the game shows in the middle of the tile would stand in front of you.
+		 */
+		final Set<Long> middleOutOfSight = new HashSet<>();
 		/** Spread tiles gathered round a fire: where the fire is, in local units from the tile centre. Everyone there faces it. */
 		final Map<Long, int[]> fires = new HashMap<>();
 		/** Small groups in the open that are posed (angled or facing each other). */
@@ -474,6 +479,32 @@ final class CrowdPlanner
 
 	private Map<Long, Room> rooms = new HashMap<>();
 	private Map<Long, Room> roomsNow = new HashMap<>();
+	/** The plane you stand on. */
+	private static int plane(double[] youAt, Map<Long, List<StackSpreader.Entry>> byTile, int localId)
+	{
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			for (StackSpreader.Entry en : e.getValue())
+			{
+				if (en.id == localId)
+				{
+					return StackRegistry.plane(e.getKey());
+				}
+			}
+		}
+		return -1;
+	}
+
+	/** Spots past the players-per-tile limit that tiles near you lay out, for stepping out of your way. */
+	static final int SPARE_SPOTS = 4;
+	private final Set<Long> nearYou = new HashSet<>();
+
+	/** How many spots a tile lays out: the limit, and some spare near you. */
+	private int spotsFor(long tile, int capacity)
+	{
+		return capacity + (nearYou.contains(tile) ? SPARE_SPOTS : 0);
+	}
+
 	/** Tiles where someone the game shows was left in the middle without a spot last tick. */
 	private Set<Long> waited = new HashSet<>();
 
@@ -895,6 +926,44 @@ final class CrowdPlanner
 	/** Tiles on a line that is closed up for being busy, and the tick until which it stays so. */
 	private final Map<Long, Integer> busyLineUntil = new HashMap<>();
 
+	private static boolean lineUpOrCurve(PersonalSpaceConfig.Arrangement arrangement)
+	{
+		return arrangement == PersonalSpaceConfig.Arrangement.ROW || arrangement == PersonalSpaceConfig.Arrangement.ARC;
+	}
+
+	/**
+	 * Which way the bank counter or row of booths next to a tile is, looking square on, or null if
+	 * there is none. With counters on more than one side (a corner), the one most of the group
+	 * faces nearest.
+	 */
+	static Double counterBeside(long tile, List<StackSpreader.Entry> group, Surroundings around)
+	{
+		Double best = null;
+		double bestScore = -Double.MAX_VALUE;
+		for (int side = 0; side < 4; side++)
+		{
+			double angle = side * Math.PI / 2;
+			if (!around.isCounter(tile, angle))
+			{
+				continue;
+			}
+			double score = 0;
+			for (StackSpreader.Entry e : group)
+			{
+				if (e.orientation >= 0)
+				{
+					score += Math.cos(StackSpreader.toRadians(e.orientation) - angle);
+				}
+			}
+			if (score > bestScore)
+			{
+				bestScore = score;
+				best = angle;
+			}
+		}
+		return best;
+	}
+
 	/** How many tiles along a counter or bank to look for someone else's row. */
 	private static final int LINE_LOOKOUT = 4;
 
@@ -1042,12 +1111,12 @@ final class CrowdPlanner
 						}
 						boolean[] squeezed = {false};
 						int[] used = {r.spacing};
-						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, capacity, r.wanted,
+						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, spotsFor(r.tile, capacity), r.wanted,
 							r.check, r.blocked, squeezed, StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC, used);
 						if (!r.middleTaken && spots.size() < r.wanted)
 						{
 							// Someone will be left in the middle without a spot: don't give the middle away too.
-							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, capacity, r.wanted, r.check, r.blocked, squeezed,
+							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, spotsFor(r.tile, capacity), r.wanted, r.check, r.blocked, squeezed,
 								StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC, used);
 						}
 						if (squeezed[0])
@@ -1334,6 +1403,29 @@ final class CrowdPlanner
 		lineBook.localId = localId;
 		double[] view = viewFrom(still, tick);
 		lineBook.view = view;
+		// Tiles near you get spare spots, for people to step out from between you and the camera
+		// even when every ordinary spot is taken.
+		nearYou.clear();
+		slots.busy = new HashSet<>();
+		for (StackSpreader.Entry e : still)
+		{
+			if (e.busy && !e.local)
+			{
+				slots.busy.add(e.id);
+			}
+			if (e.id == localId && view != null)
+			{
+				for (long other : byTile.keySet())
+				{
+					if (StackRegistry.plane(other) == StackRegistry.plane(e.tile)
+						&& Math.abs(StackRegistry.sceneX(other) - StackRegistry.sceneX(e.tile)) <= VIEW_TILES
+						&& Math.abs(StackRegistry.sceneY(other) - StackRegistry.sceneY(e.tile)) <= VIEW_TILES)
+					{
+						nearYou.add(other);
+					}
+				}
+			}
+		}
 		lineBook.bow = arrangement != PersonalSpaceConfig.Arrangement.ROW;
 
 		Plan plan = new Plan();
@@ -1375,7 +1467,15 @@ final class CrowdPlanner
 			List<Integer> movable = new ArrayList<>(group.size());
 			for (StackSpreader.Entry en : group)
 			{
-				if (includeLocal || !en.local)
+				if ((includeLocal || !en.local) && (!en.busy || en.local))
+				{
+					movable.add(en.id);
+				}
+			}
+			// Anyone busy with something comes last: with more people than spots, they wait.
+			for (StackSpreader.Entry en : group)
+			{
+				if ((includeLocal || !en.local) && en.busy && !en.local)
 				{
 					movable.add(en.id);
 				}
@@ -1400,6 +1500,18 @@ final class CrowdPlanner
 				{
 					row = true;
 					rowAngle = faced;
+				}
+			}
+			if (smart && !row && !lineUpOrCurve(arrangement))
+			{
+				// At a bank counter, line up along it whichever way people happen to face. People
+				// alching or chatting at the bank face every way, and a tile of them was packed into a
+				// ring squeezed between the booths instead, burying whoever stood in it.
+				Double counterSide = counterBeside(tile, group, around);
+				if (counterSide != null)
+				{
+					row = true;
+					rowAngle = counterSide;
 				}
 			}
 
@@ -1585,7 +1697,7 @@ final class CrowdPlanner
 			boolean[] squeezed = {false};
 			int[] used = {tileSpacing};
 			boolean middleNow = middleTaken;
-			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
+			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, spotsFor(tile, capacity),
 				Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
 			{
@@ -1593,7 +1705,7 @@ final class CrowdPlanner
 				// so don't also give the middle to someone else.
 				boolean wasRow = row && squeezed[0];
 				middleNow = true;
-				spots = spotsWithRoom(false, false, angle, true, tileSpacing, capacity,
+				spots = spotsWithRoom(false, false, angle, true, tileSpacing, spotsFor(tile, capacity),
 					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 				squeezed[0] |= wasRow;
 			}
@@ -1612,7 +1724,7 @@ final class CrowdPlanner
 				moveOver = new double[]{again.x, again.z};
 				laidOut = movedOver(check, shares, again, g);
 				int closer = used[0];
-				spots = spotsWithRoom(false, false, angle, middleNow, closer, capacity,
+				spots = spotsWithRoom(false, false, angle, middleNow, closer, spotsFor(tile, capacity),
 					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
 			}
 			if (room != null && !room.fits)
@@ -1621,7 +1733,7 @@ final class CrowdPlanner
 				// its neighbours), but the ring can still have enough spots further round that do:
 				// take those, rather than handing out spots that lean into the neighbours.
 				Room within = new Room(moveOver[0], moveOver[1], used[0], room.wanted, true);
-				List<int[]> kept = StackSpreader.spots(false, false, angle, middleNow, used[0], capacity,
+				List<int[]> kept = StackSpreader.spots(false, false, angle, middleNow, used[0], spotsFor(tile, capacity),
 					movedOver(check, shares, within, guard || middleNow));
 				if (kept.size() >= Math.min(capacity, movable.size()))
 				{
@@ -1637,7 +1749,7 @@ final class CrowdPlanner
 				boolean[] plain = {false};
 				int[] plainUsed = {tileSpacing};
 				int[] plainBlocked = {0};
-				List<int[]> loose = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, capacity,
+				List<int[]> loose = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, spotsFor(tile, capacity),
 					Math.min(capacity, movable.size()), check, plainBlocked, plain, arcRadius, false, StackSpreader.WRAP_ARC, plainUsed);
 				if (!plain[0] && loose.size() >= Math.min(spots.size(), movable.size()))
 				{
@@ -1678,6 +1790,14 @@ final class CrowdPlanner
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal, tick);
 
 		slots.keepClear = spotsInFront(view, spotsByTile);
+		slots.spare = new HashMap<>();
+		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
+		{
+			if (nearYou.contains(e.getKey()) && e.getValue().size() > capacity)
+			{
+				slots.spare.put(e.getKey(), e.getValue().size() - capacity);
+			}
+		}
 		slots.stepAside = tick - youStillSince >= SlotBook.LOCAL_SWAP_DELAY;
 		slots.viewKey = viewSector;
 		slots.inFrontOf = (tile, spot) ->
@@ -1853,6 +1973,25 @@ final class CrowdPlanner
 			{
 				youAt = new double[]{StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
 					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz};
+			}
+		}
+		if (youAt != null)
+		{
+			// Nobody waiting in the middle of a tile is drawn where they'd stand in front of you, or
+			// right up against you: someone who gave up their spot for you waits there.
+			for (long tile : byTile.keySet())
+			{
+				double east = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE - youAt[0];
+				double north = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE - youAt[1];
+				boolean against = Math.hypot(east, north) < NEIGHBOUR_GAP;
+				boolean inFront = view != null && slots.stepAside
+					&& Math.abs(east) <= VIEW_TILES * 2 * HALF_TILE && Math.abs(north) <= VIEW_TILES * 2 * HALF_TILE
+					&& east * view[0] + north * view[1] > VIEW_IN_FRONT
+					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
+				if ((against || inFront) && StackRegistry.plane(tile) == plane(youAt, byTile, localId))
+				{
+					plan.middleOutOfSight.add(tile);
+				}
 			}
 		}
 		// Your spot's identity, not where it is drawn: a crowd's spacing growing and shrinking as

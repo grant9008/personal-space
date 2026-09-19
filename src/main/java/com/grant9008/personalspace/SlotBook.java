@@ -2,6 +2,7 @@ package com.grant9008.personalspace;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -101,6 +102,25 @@ final class SlotBook
 	Map<Long, Set<Integer>> keepClear = new HashMap<>();
 
 	/**
+	 * For tiles near you, how many spots at the end of their list are spare: past the players-per-
+	 * tile limit, and only for someone stepping out from between you and the camera when every
+	 * other spot is taken. In a pile, nobody had anywhere to step to.
+	 */
+	Map<Long, Integer> spare = new HashMap<>();
+
+	/**
+	 * People busy with something (alching, an emote, smithing). When a tile has more people than
+	 * spots, they are the ones left without one, rather than whoever came last.
+	 */
+	Set<Integer> busy = new HashSet<>();
+
+	/**
+	 * This tick, people who would have stood between you and the camera with nowhere else on
+	 * their tile to go: they wait without a spot, like anyone past the players-per-tile limit.
+	 */
+	final Set<Integer> hiddenForYou = new HashSet<>();
+
+	/**
 	 * Whether you've stood still long enough for people in front of you to step aside. Until then
 	 * nobody is moved for you, but newcomers and gap-filling still keep out of those spots.
 	 */
@@ -151,6 +171,7 @@ final class SlotBook
 	Map<Long, Map<Integer, Integer>> update(Map<Long, List<Integer>> present, ToIntFunction<Long> capacityOf, int tick)
 	{
 		boolean movedYou = false;
+		hiddenForYou.clear();
 		if (viewKey != asideView || localTile != asideTile)
 		{
 			asideForYou.clear();
@@ -181,7 +202,8 @@ final class SlotBook
 		for (Map.Entry<Long, List<Integer>> e : present.entrySet())
 		{
 			Tile t = tiles.computeIfAbsent(e.getKey(), k -> new Tile());
-			int capacity = capacityOf.applyAsInt(e.getKey());
+			int all = capacityOf.applyAsInt(e.getKey());
+			int capacity = all - Math.min(all, spare.getOrDefault(e.getKey(), 0));
 			List<Integer> ids = new ArrayList<>(e.getValue());
 			Collections.sort(ids);
 			Set<Integer> here = new HashSet<>(ids);
@@ -197,13 +219,13 @@ final class SlotBook
 			// Spots that no longer exist because the tile got smaller.
 			for (int id : new ArrayList<>(t.slotOf.keySet()))
 			{
-				if (t.slotOf.get(id) >= capacity)
+				if (t.slotOf.get(id) >= all)
 				{
 					t.vacate(id, tick, false);
 				}
 			}
 			// Forget holds that have run out or point past the end.
-			t.heldUntil.entrySet().removeIf(h -> h.getValue() < tick || h.getKey() >= capacity);
+			t.heldUntil.entrySet().removeIf(h -> h.getValue() < tick || h.getKey() >= all);
 			t.heldFor.keySet().retainAll(t.heldUntil.keySet());
 
 			// People coming back to a spot held for them.
@@ -254,15 +276,43 @@ final class SlotBook
 						spot = s;
 					}
 				}
+				// Once you've settled, someone arriving at a full tile waits rather than stand
+				// between you and the camera.
 				for (int s = 0; s < capacity && spot < 0; s++)
 				{
-					spot = !t.occupant.containsKey(s) && !t.held(s, tick) ? s : -1;
+					spot = !t.occupant.containsKey(s) && !t.held(s, tick) && !(stepAside && inFront.contains(s)) ? s : -1;
 				}
 				if (spot >= 0)
 				{
 					t.assign(id, spot);
 					movedYou |= id == localId;
 				}
+			}
+			// More people than spots: whoever is busy with something (alching, an emote) gives up
+			// theirs to someone who isn't, so the ones left waiting in the middle are the busy ones.
+			for (int id : arriving)
+			{
+				if (t.slotOf.containsKey(id) || busy.contains(id))
+				{
+					continue;
+				}
+				int from = -1;
+				for (Map.Entry<Integer, Integer> o : t.occupant.entrySet())
+				{
+					if (from < 0 && o.getKey() < capacity && busy.contains(o.getValue()) && o.getValue() != localId
+						&& !inFront.contains(o.getKey()))
+					{
+						from = o.getKey();
+					}
+				}
+				if (from < 0)
+				{
+					break;
+				}
+				t.vacate(t.occupant.get(from), tick, false);
+				t.assign(id, from);
+				movedYou |= id == localId;
+				moves++;
 			}
 			// Once you've stood here a moment you get the best spot going: a free one if there is
 			// one, else whoever has the front spot takes yours. Not while a better spot is being held
@@ -366,20 +416,44 @@ final class SlotBook
 			{
 				continue;
 			}
-			int capacity = capacityOf.applyAsInt(c.getKey());
+			int all = capacityOf.applyAsInt(c.getKey());
+			int capacity = all - Math.min(all, spare.getOrDefault(c.getKey(), 0));
 			Set<Integer> inFront = c.getValue();
 			boolean changed = false;
-			for (int s : inFront)
+			// An ordinary free spot if there is one, else a spare one past the players-per-tile limit.
+			List<Integer> free = new ArrayList<>();
+			for (int to : order(c.getKey(), all))
+			{
+				if (to < capacity)
+				{
+					free.add(to);
+				}
+			}
+			for (int to : order(c.getKey(), all))
+			{
+				if (to >= capacity && to < all)
+				{
+					free.add(to);
+				}
+			}
+			// Those who aren't busy with anything get the free spots first; whoever is left over
+			// waits in the middle rather than stand in front of you. In a pile at an anvil or a
+			// packed bank there is nowhere else, and you should be the one people can see.
+			List<Integer> blocking = new ArrayList<>(inFront);
+			blocking.sort(Comparator.comparingInt(s -> busy.contains(t.occupant.getOrDefault(s, -1)) ? 1 : 0));
+			for (int s : blocking)
 			{
 				Integer who = t.occupant.get(s);
 				if (who == null || who == localId)
 				{
 					continue;
 				}
-				for (int to : order(c.getKey(), capacity))
+				boolean stepped = false;
+				for (int to : free)
 				{
-					if (to < capacity && !t.occupant.containsKey(to) && !t.held(to, tick) && !inFront.contains(to))
+					if (!stepped && !t.occupant.containsKey(to) && !t.held(to, tick) && !inFront.contains(to))
 					{
+						stepped = true;
 						t.vacate(who, tick, false);
 						t.assign(who, to);
 						asideForYou.add(who);
@@ -387,6 +461,13 @@ final class SlotBook
 						changed = true;
 						break;
 					}
+				}
+				if (!stepped)
+				{
+					t.vacate(who, tick, false);
+					hiddenForYou.add(who);
+					moves++;
+					changed = true;
 				}
 			}
 			if (changed)

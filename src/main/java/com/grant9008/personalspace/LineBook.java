@@ -291,6 +291,8 @@ final class LineBook
 	 * into a free place at the counter the next tick, they walked twice.
 	 */
 	private final Set<Integer> asideForYou = new HashSet<>();
+	/** This tick, people on a line who would have stood in front of you with nowhere else to go. */
+	final Set<Integer> hiddenForYou = new HashSet<>();
 	private String asideAim;
 
 	/** Whether each tile's people curve gently round their own booth, rather than standing dead flat. */
@@ -310,6 +312,7 @@ final class LineBook
 	{
 		sawLocal = false;
 		this.tick = tick;
+		hiddenForYou.clear();
 		// Who is where this tick.
 		Map<Integer, Member> memberOf = new HashMap<>();
 		Map<Integer, Line> lineOf = new HashMap<>();
@@ -698,6 +701,12 @@ final class LineBook
 					}
 					if (best == null)
 					{
+						// Nowhere out of your way along a packed line: they wait without a spot, like
+						// anyone past the players-per-tile limit, rather than stand in front of you.
+						spotOf.remove(id);
+						taken.remove(spot.point());
+						hiddenForYou.add(id);
+						moves++;
 						continue;
 					}
 					String[] parts = best.split("/");

@@ -68,6 +68,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long offThreadDraws;
 	/** Errors while drawing a hidden stackmate (that mate is skipped for the frame). */
 	long revealErrors;
+	/** Players waiting in the middle of a tile between you and the camera, left undrawn. */
+	long hiddenInYourWay;
 	/** Player models drawn mid-step with their walk animation. */
 	long walkDraws;
 	/** Moving players drawn without walk frames because they were busy with an emote or action. */
@@ -155,6 +157,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				x + dx, y + groundDelta(wv, plane, x, z, x + dx, z + dz), z + dz);
 			nudgedDraws++;
 		}
+		else if (StillnessTracker.isCentred(x, z) && stacks.isUnplaced(drawnId) && !isLocal(drawn)
+			&& stacks.middleOutOfSight(StackRegistry.key(plane, x >> 7, z >> 7)))
+		{
+			// Waiting in the middle of a tile that is between you and the camera: left undrawn, like
+			// the others the game hides there, rather than standing in front of you.
+			hiddenInYourWay++;
+		}
 		else
 		{
 			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
@@ -233,6 +242,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			walkTimings.put(animationId, timing);
 		}
 		return timing;
+	}
+
+	private boolean isLocal(Player player)
+	{
+		return player == client.getLocalPlayer();
 	}
 
 	/** How many frames to wait before trying to read a missing walk animation again (about a second). */
@@ -331,7 +345,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// As in the game, only one player is drawn in the middle of a tile: anyone left without a spot
 		// (past the "players per tile" limit, or standing in the middle with you) stays hidden there.
 		// Players with a spot are always drawn, and so are you.
-		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0;
+		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0
+			|| stacks.middleOutOfSight(tileKey);
 		Player local = client.getLocalPlayer();
 		int localId = local == null ? -1 : local.getId();
 		int total = mates.length + heldCount;

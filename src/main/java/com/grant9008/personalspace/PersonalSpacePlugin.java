@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.26";
+	static final String VERSION = "1.8.27";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -89,6 +89,12 @@ public class PersonalSpacePlugin extends Plugin
 	private final StillnessTracker stillness = new StillnessTracker();
 	/** Tick number each player id was last counted on, to catch two players sharing an id. */
 	private final int[] idSeenTick = new int[OffsetTable.CAPACITY];
+	/**
+	 * The tick each player last had an animation playing (alching, smithing, an emote). Anyone busy
+	 * in the last {@link #BUSY_TICKS} gives up their spot first when a tile has too few.
+	 */
+	private final int[] busyTick = new int[OffsetTable.CAPACITY];
+	private static final int BUSY_TICKS = 10;
 	/** Tick on which each player was last found to be shown by the game. */
 	private final int[] shownTick = new int[OffsetTable.CAPACITY];
 
@@ -411,7 +417,12 @@ public class PersonalSpacePlugin extends Plugin
 			{
 				shownTick[id] = tick;
 			}
-			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation()));
+			if (p.getAnimation() != -1)
+			{
+				busyTick[id] = tick;
+			}
+			boolean busy = busyTick[id] != 0 && tick - busyTick[id] <= BUSY_TICKS;
+			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation(), busy));
 		}
 
 		planner.smallGroupsClose = config.smallGroupsClose();
@@ -439,7 +450,7 @@ public class PersonalSpacePlugin extends Plugin
 		// Curved rows and counter rows alike: everyone turns towards what they are facing.
 		Set<Long> turnIn = new HashSet<>(plan.curvedRows);
 		turnIn.addAll(plan.facingIn);
-		stacks.rebuild(members, turnIn, unplacedIds, plan.fires, plan.poses);
+		stacks.rebuild(members, turnIn, unplacedIds, plan.fires, plan.poses, plan.middleOutOfSight);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;

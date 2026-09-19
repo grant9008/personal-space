@@ -87,6 +87,8 @@ final class StackSpreader
 		final boolean local;
 		/** Facing in game orientation units, or -1 if unknown. */
 		final int orientation;
+		/** Busy with something (alching, smithing, an emote) a moment ago. */
+		final boolean busy;
 
 		Entry(int id, long tile, boolean local)
 		{
@@ -95,10 +97,16 @@ final class StackSpreader
 
 		Entry(int id, long tile, boolean local, int orientation)
 		{
+			this(id, tile, local, orientation, false);
+		}
+
+		Entry(int id, long tile, boolean local, int orientation, boolean busy)
+		{
 			this.id = id;
 			this.tile = tile;
 			this.local = local;
 			this.orientation = orientation;
+			this.busy = busy;
 		}
 	}
 
