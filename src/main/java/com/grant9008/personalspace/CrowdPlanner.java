@@ -69,11 +69,6 @@ final class CrowdPlanner
 		 * or whoever the game shows in the middle of the tile would stand in front of you.
 		 */
 		final Set<Long> middleOutOfSight = new HashSet<>();
-		/**
-		 * Someone is drawn close enough to you that their arms, legs or staff could reach into you.
-		 * You're then drawn a little towards the camera, so you are the one on top.
-		 */
-		boolean youInCrowd;
 		/** Spread tiles gathered round a fire: where the fire is, in local units from the tile centre. Everyone there faces it. */
 		final Map<Long, int[]> fires = new HashMap<>();
 		/** Small groups in the open that are posed (angled or facing each other). */
@@ -502,8 +497,6 @@ final class CrowdPlanner
 	 * people beside you at a counter keep their places, but nobody is drawn inside you.
 	 */
 	static final int YOUR_SPACE = 40;
-	/** Anyone drawn this close to you, a tile, could have an arm, leg or staff reaching into you. */
-	static final int WITHIN_REACH = 2 * HALF_TILE;
 
 	/** Spots past the players-per-tile limit that tiles near you lay out, for stepping out of your way. */
 	static final int SPARE_SPOTS = 4;
@@ -2008,23 +2001,6 @@ final class CrowdPlanner
 		}
 		if (youAt != null)
 		{
-			for (StackSpreader.Placement p : plan.placements)
-			{
-				plan.youInCrowd |= p.id != localId && StackRegistry.plane(p.tile) == yourPlane(still)
-					&& Math.hypot(StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx - youAt[0],
-					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz - youAt[1]) < WITHIN_REACH;
-			}
-			for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
-			{
-				boolean someoneElse = false;
-				for (StackSpreader.Entry en : e.getValue())
-				{
-					someoneElse |= en.id != localId;
-				}
-				plan.youInCrowd |= someoneElse && StackRegistry.plane(e.getKey()) == yourPlane(still)
-					&& Math.hypot(StackRegistry.sceneX(e.getKey()) * 2.0 * HALF_TILE + HALF_TILE - youAt[0],
-					StackRegistry.sceneY(e.getKey()) * 2.0 * HALF_TILE + HALF_TILE - youAt[1]) < WITHIN_REACH;
-			}
 			// Nobody waiting in the middle of a tile is drawn where they'd stand in front of you, or
 			// right up against you: someone who gave up their spot for you waits there.
 			for (long tile : byTile.keySet())

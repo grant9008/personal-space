@@ -136,10 +136,10 @@ public class SlotBookTest
 	}
 
 	@Test
-	public void youDontSwapWhileABetterSpotIsHeldForSomeone()
+	public void youTakeAFrontSpotHeldForSomeoneStraightAway()
 	{
-		// The front player steps away; you arrive; their hold runs out. Nobody else moves at all:
-		// you step into the freed front spot.
+		// The front player steps away; you arrive while their spot is still held for them. You take
+		// it the tick you arrive, nobody else moves, and when they come back they get a free spot.
 		SlotBook book = new SlotBook();
 		book.localId = 99;
 		Map<Integer, Integer> before = step(book, 1, 10, 20, 30, 40);
@@ -150,8 +150,14 @@ public class SlotBookTest
 			{
 				Assert.assertEquals("tick " + t + ": player " + id + " was moved", before.get(id), now.get(id));
 			}
+			if (t >= 8)
+			{
+				Assert.assertEquals("tick " + t + ": you're not at the front", 0, (int) now.get(99));
+			}
 		}
-		Assert.assertEquals(0, (int) step(book, 31, 20, 30, 40, 99).get(99));
+		Map<Integer, Integer> back = step(book, 31, 10, 20, 30, 40, 99);
+		Assert.assertEquals("you keep the front", 0, (int) back.get(99));
+		Assert.assertEquals("they take the free spot at the back", 4, (int) back.get(10));
 	}
 
 	@Test
@@ -162,11 +168,16 @@ public class SlotBookTest
 		step(book, 1, 10, 20, 30, 40, 99);
 		// 20 and 30 leave: their spots are held for a while, then free.
 		Map<Integer, Integer> before = null;
+		int yourMoves = 0;
+		int was = 4;
 		for (int t = 2; t <= 1 + SlotBook.HOLD_TICKS + 2; t++)
 		{
 			before = step(book, t, 10, 40, 99);
+			yourMoves += before.get(99) == was ? 0 : 1;
+			was = before.get(99);
 		}
 		Assert.assertEquals("you end up at the front", 0, (int) before.get(99));
+		Assert.assertEquals("in one move", 1, yourMoves);
 		for (int t = 1; t <= 4; t++)
 		{
 			Assert.assertEquals("and then nobody moves", before, step(book, 20 + t, 10, 40, 99));

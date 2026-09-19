@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.28";
+	static final String VERSION = "1.8.29";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -451,7 +451,6 @@ public class PersonalSpacePlugin extends Plugin
 		Set<Long> turnIn = new HashSet<>(plan.curvedRows);
 		turnIn.addAll(plan.facingIn);
 		stacks.rebuild(members, turnIn, unplacedIds, plan.fires, plan.poses, plan.middleOutOfSight);
-		stacks.setYouInCrowd(plan.youInCrowd);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
@@ -800,7 +799,8 @@ public class PersonalSpacePlugin extends Plugin
 			s.offThreadDraws = w.offThreadDraws;
 			s.revealErrors = w.revealErrors;
 			s.walkDraws = w.walkDraws;
-			s.youOnTop = w.youOnTop;
+			s.orderedDraws = w.orderedDraws;
+			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
 			s.walkSkippedNoAnimation = w.walkSkippedNoAnimation;

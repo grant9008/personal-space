@@ -1,5 +1,6 @@
 package com.grant9008.personalspace;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -7,6 +8,7 @@ import net.runelite.api.Animation;
 import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.Model;
+import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
 import net.runelite.api.Projection;
@@ -40,6 +42,19 @@ import net.runelite.client.callback.RenderCallbackManager;
  * tiles, clickboxes, overhead text and chat bubbles are never modified. Hidden stackmates drawn
  * this way have no clickbox of their own, exactly as when the game hides them.
  *
+ * <p>Who is drawn over whom: the GPU plugin draws every player and NPC of a frame in one batch,
+ * in the order the game hands them over, and (as they are RENDERMODE_SORTED_NO_DEPTH) without
+ * any depth test between them. Whoever is drawn later is on top, wherever they stand. The game
+ * hands them over tile by tile, back to front, which is right until people are drawn a tile from
+ * where they stand: then someone behind you, handed over a moment later, was drawn over you. So
+ * while a crowd is being spread, players and NPCs aren't drawn as they come. They are kept until
+ * the renderer asks for its opaque pass, and drawn then, farthest from the camera first. You
+ * count as a body's width nearer than you are, so nobody standing right up against you is drawn
+ * over you. Each kept model is built again at that point (the game's animated models share one
+ * buffer), so to save that work anyone farther from the camera than every crowd, and than
+ * anywhere anyone is drawn, is drawn straight away as before: they belong under the kept set
+ * anyway. Nobody nearer is, whichever tile they are on, so the order is right all the way out.
+ *
  * <p>Every method of {@link DrawCallbacks} is overridden, including the ones with default bodies,
  * because a default body would silently swallow the call instead of forwarding it.
  *
@@ -72,8 +87,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long hiddenInYourWay;
 	/** Player models drawn mid-step with their walk animation. */
 	long walkDraws;
-	/** Times you were drawn a little towards the camera, on top of people right up against you. */
-	long youOnTop;
+	/** Players and NPCs drawn farthest first, once the renderer asked for its opaque pass. */
+	long orderedDraws;
+	/** Frames where draws were kept back but the renderer never asked for its opaque pass. Expected to stay 0. */
+	long passMissedFrames;
 	/** Moving players drawn without walk frames because they were busy with an emote or action. */
 	long walkSkippedBusy;
 	/** Moving players drawn without walk frames because the animation couldn't be loaded (yet). */
@@ -106,13 +123,265 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 
 	// ---- the call players are drawn through --------------------------------------------
 
+	/** A player or NPC kept back to be drawn in depth order: where, facing which way, and how. */
+	private static final class Kept
+	{
+		Projection projection;
+		Scene scene;
+		GameObject gameObject;
+		Renderable actor;
+		int orientation;
+		int walkOrientation;
+		int x;
+		int y;
+		int z;
+		boolean walk;
+		double distance;
+	}
+
+	private Kept[] kept = new Kept[128];
+	private int keptCount;
+	/**
+	 * The renderer asks for its opaque pass once the game has handed over every player and NPC of
+	 * the frame; only after seeing that once can draws be kept back until then. If they were kept
+	 * back and that pass never came, this renderer draws in its own order, and they're never kept
+	 * back again.
+	 */
+	private boolean opaquePassSeen;
+	private boolean passMissed;
+
+	/**
+	 * How far ahead of your own distance you're drawn: a body's width, the closest anyone stands
+	 * beside you at a counter. Seen from the side they are nearer the camera than you by almost
+	 * that much, and would otherwise be drawn over you again.
+	 */
+	static final int YOU_AHEAD = PersonalSpaceConfig.COUNTER_SPACING;
+
+	/**
+	 * Actors are kept back when they are drawn no farther from the camera than the farthest
+	 * stacked tile, plus the farthest anyone is drawn from their tile, plus this to spare: a tile
+	 * and a half. Everyone drawn farther is drawn as they come, and so ends up under the kept set,
+	 * which is right: every kept actor is drawn nearer than them.
+	 */
+	static final int KEEP_SLACK = 192;
+
+	/** The frame {@link #keepWithin} was worked out for, and the distance itself (-1: keep nobody). */
+	private int keepFrame = -1;
+	private double keepWithin;
+
+	/** How far from the camera actors are kept back this frame. Worked out once per frame. */
+	private double keepWithin(WorldView wv)
+	{
+		int frame = offsets.frame();
+		if (keepFrame != frame)
+		{
+			keepFrame = frame;
+			double cameraX = client.getCameraX();
+			double cameraHeight = client.getCameraZ();
+			double cameraZ = client.getCameraY();
+			double farthest = -1;
+			for (long tile : stacks.stackedTiles())
+			{
+				int x = StackRegistry.sceneX(tile) * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_HALF_TILE_SIZE;
+				int z = StackRegistry.sceneY(tile) * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_HALF_TILE_SIZE;
+				double east = x - cameraX;
+				double up = tileHeight(wv, StackRegistry.plane(tile), x, z) - cameraHeight;
+				double north = z - cameraZ;
+				farthest = Math.max(farthest, Math.sqrt(east * east + up * up + north * north));
+			}
+			keepWithin = farthest < 0 ? -1 : farthest + offsets.maxOffset() + KEEP_SLACK;
+		}
+		return keepWithin;
+	}
+
+	/** Whether an actor drawn at (x, y, z) is near enough the camera to be kept back. */
+	private boolean withinKeep(WorldView wv, int x, int y, int z)
+	{
+		double within = keepWithin(wv);
+		if (within < 0)
+		{
+			return false;
+		}
+		double east = x - client.getCameraX();
+		double up = y - client.getCameraZ();
+		double north = z - client.getCameraY();
+		return east * east + up * up + north * north <= within * within;
+	}
+
+	/** Whether an NPC standing at (x, y, z) on this scene is kept back for the opaque pass. */
+	private boolean keeping(Scene scene, int x, int y, int z)
+	{
+		if (!opaquePassSeen || passMissed || stacks.isEmpty() || !client.isClientThread())
+		{
+			return false;
+		}
+		WorldView wv = client.getTopLevelWorldView();
+		return wv != null && scene == wv.getScene() && withinKeep(wv, x, y, z);
+	}
+
+	/** Ground height at a spot, or 0 if it can't be read. */
+	private int tileHeight(WorldView wv, int plane, int x, int z)
+	{
+		int maxX = wv.getSizeX() * Perspective.LOCAL_TILE_SIZE;
+		int maxZ = wv.getSizeY() * Perspective.LOCAL_TILE_SIZE;
+		if (x < 0 || z < 0 || x >= maxX || z >= maxZ)
+		{
+			return 0;
+		}
+		try
+		{
+			return Perspective.getTileHeight(client, new LocalPoint(x, z, wv), plane);
+		}
+		catch (RuntimeException e)
+		{
+			return 0;
+		}
+	}
+
+	private void keep(Projection projection, Scene scene, GameObject gameObject, Renderable actor, int orientation, int walkOrientation, int x, int y, int z, boolean walk)
+	{
+		if (keptCount == kept.length)
+		{
+			kept = Arrays.copyOf(kept, kept.length * 2);
+		}
+		Kept k = kept[keptCount];
+		if (k == null)
+		{
+			k = kept[keptCount] = new Kept();
+		}
+		k.projection = projection;
+		k.scene = scene;
+		k.gameObject = gameObject;
+		k.actor = actor;
+		k.orientation = orientation;
+		k.walkOrientation = walkOrientation;
+		k.x = x;
+		k.y = y;
+		k.z = z;
+		k.walk = walk;
+		keptCount++;
+	}
+
+	/**
+	 * Draw everyone kept back this frame, farthest from the camera first. Each model is built
+	 * afresh here: animated models share one buffer inside the game, so the one handed over
+	 * with the draw call is long gone.
+	 */
+	private void drawKept()
+	{
+		if (keptCount == 0)
+		{
+			return;
+		}
+		double cameraX = client.getCameraX();
+		double cameraHeight = client.getCameraZ();
+		double cameraZ = client.getCameraY();
+		Player local = client.getLocalPlayer();
+		for (int i = 0; i < keptCount; i++)
+		{
+			Kept k = kept[i];
+			double east = k.x - cameraX;
+			double up = k.y - cameraHeight;
+			double north = k.z - cameraZ;
+			k.distance = Math.sqrt(east * east + up * up + north * north) - (k.actor == local ? YOU_AHEAD : 0);
+		}
+		// The game hands actors over roughly back to front already, so a plain insertion sort is
+		// quick here and, unlike Arrays.sort, allocates nothing.
+		for (int i = 1; i < keptCount; i++)
+		{
+			Kept k = kept[i];
+			int j = i - 1;
+			while (j >= 0 && kept[j].distance < k.distance)
+			{
+				kept[j + 1] = kept[j];
+				j--;
+			}
+			kept[j + 1] = k;
+		}
+		for (int i = 0; i < keptCount; i++)
+		{
+			Kept k = kept[i];
+			try
+			{
+				int orientation = k.orientation;
+				Model model = null;
+				if (k.walk && k.actor instanceof Player)
+				{
+					Player player = (Player) k.actor;
+					model = walkModel(player, player.getId());
+					if (model != null)
+					{
+						orientation = k.walkOrientation;
+						walkDraws++;
+					}
+				}
+				if (model == null)
+				{
+					model = k.actor.getModel();
+				}
+				if (model != null)
+				{
+					delegate.drawTemp(k.projection, k.scene, k.gameObject, model, orientation, k.x, k.y, k.z);
+					orderedDraws++;
+				}
+			}
+			catch (RuntimeException e)
+			{
+				revealErrors++;
+			}
+			k.projection = null;
+			k.scene = null;
+			k.gameObject = null;
+			k.actor = null;
+		}
+		keptCount = 0;
+	}
+
+	/** Forget everyone kept back, drawing nobody: the frame they belonged to is over. */
+	private void dropKept()
+	{
+		for (int i = 0; i < keptCount; i++)
+		{
+			Kept k = kept[i];
+			k.projection = null;
+			k.scene = null;
+			k.gameObject = null;
+			k.actor = null;
+		}
+		keptCount = 0;
+	}
+
+	/** Draws were kept back for an opaque pass that never came: this renderer draws in its own order. */
+	private void passMissed()
+	{
+		if (keptCount > 0)
+		{
+			passMissedFrames++;
+			passMissed = true;
+			dropKept();
+		}
+	}
+
+	private boolean isMainScene(Scene scene)
+	{
+		WorldView wv = client.getTopLevelWorldView();
+		return wv != null && scene == wv.getScene();
+	}
+
 	@Override
 	public void drawTemp(Projection projection, Scene scene, GameObject gameObject, Model model, int orientation, int x, int y, int z)
 	{
 		Renderable renderable = gameObject == null ? null : gameObject.getRenderable();
 		if (!(renderable instanceof Player))
 		{
-			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			if (renderable instanceof NPC && keeping(scene, x, y, z))
+			{
+				keep(projection, scene, gameObject, renderable, orientation, orientation, x, y, z, false);
+			}
+			else
+			{
+				delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			}
 			return;
 		}
 		playerDraws++;
@@ -137,28 +406,39 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			nativeFrame[drawnId] = offsets.frame();
 		}
 		int plane = gameObject.getPlane();
+		// This shim already knows it's on the client thread and the main scene here. Whether someone
+		// is kept back goes by where they are drawn, not where they stand: someone easing back from a
+		// spot is drawn past where they stand, and it's the drawn spot that has to be inside the
+		// cut-off for the order across it to be right.
+		boolean mayKeep = opaquePassSeen && !passMissed && !stacks.isEmpty();
 		int dx = offsets.dx(drawnId);
 		int dz = offsets.dz(drawnId);
 		boolean touchedSharedModel = false;
 		if (dx != 0 || dz != 0)
 		{
-			Model drawModel = model;
 			int drawOrientation = stacks.drawOrientation(StackRegistry.key(plane, x >> 7, z >> 7), orientation, dx, dz);
-			if (offsets.isWalking(drawnId))
-			{
-				Model walk = walkModel(drawn, drawnId);
-				touchedSharedModel = true;
-				if (walk != null)
-				{
-					drawModel = walk;
-					drawOrientation = offsets.walkOrientation(drawnId);
-					walkDraws++;
-				}
-			}
 			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
-			int[] pull = onTop(drawn, x + dx, drawY, z + dz);
-			delegate.drawTemp(projection, scene, gameObject, drawModel, drawOrientation,
-				x + dx + pull[0], drawY + pull[1], z + dz + pull[2]);
+			boolean walking = offsets.isWalking(drawnId);
+			if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
+			{
+				keep(projection, scene, gameObject, drawn, drawOrientation, offsets.walkOrientation(drawnId), x + dx, drawY, z + dz, walking);
+			}
+			else
+			{
+				Model drawModel = model;
+				if (walking)
+				{
+					Model walk = walkModel(drawn, drawnId);
+					touchedSharedModel = true;
+					if (walk != null)
+					{
+						drawModel = walk;
+						drawOrientation = offsets.walkOrientation(drawnId);
+						walkDraws++;
+					}
+				}
+				delegate.drawTemp(projection, scene, gameObject, drawModel, drawOrientation, x + dx, drawY, z + dz);
+			}
 			nudgedDraws++;
 		}
 		else if (StillnessTracker.isCentred(x, z) && stacks.isUnplaced(drawnId) && !isLocal(drawn)
@@ -168,16 +448,19 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			// the others the game hides there, rather than standing in front of you.
 			hiddenInYourWay++;
 		}
+		else if (mayKeep && withinKeep(wv, x, y, z))
+		{
+			keep(projection, scene, gameObject, drawn, orientation, orientation, x, y, z, false);
+		}
 		else
 		{
-			int[] pull = onTop(drawn, x, y, z);
-			delegate.drawTemp(projection, scene, gameObject, model, orientation, x + pull[0], y + pull[1], z + pull[2]);
+			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
 		}
 
 		// Only a player standing exactly in the middle of its tile hides others there.
 		if (!stacks.isEmpty() && StillnessTracker.isCentred(x, z))
 		{
-			touchedSharedModel |= drawHiddenStackmates(projection, scene, gameObject, drawn, wv, plane, x, y, z);
+			touchedSharedModel |= drawHiddenStackmates(projection, scene, gameObject, drawn, wv, plane, x, y, z, mayKeep);
 		}
 
 		if (touchedSharedModel)
@@ -252,42 +535,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private boolean isLocal(Player player)
 	{
 		return player == client.getLocalPlayer();
-	}
-
-	/**
-	 * How far your own character is drawn towards the camera while someone is right up against
-	 * you: half a tile. Standing a body's width apart, a neighbour's staff, arms or legs reach
-	 * into you, and whichever is nearer the camera shows, so a spinning emote or an alcher behind
-	 * you was drawn over you.
-	 */
-	static final int ON_TOP = 64;
-
-	private static final int[] NO_PULL = new int[3];
-
-	/**
-	 * Where to draw you, relative to (x, y, z), so you're on top of anyone right up against you:
-	 * a little along the line from you to the camera. You stay exactly where you were on the
-	 * screen, just a touch bigger, and everything within half a tile of you is drawn behind you.
-	 * Nobody else is ever moved this way, and only while someone is that close to you.
-	 */
-	private int[] onTop(Player player, int x, int y, int z)
-	{
-		if (!isLocal(player) || !stacks.youInCrowd())
-		{
-			return NO_PULL;
-		}
-		// Aim from the middle of your body, so that is what stays put on the screen.
-		double east = client.getCameraX() - x;
-		double up = client.getCameraZ() - (y - player.getModelHeight() / 2.0);
-		double north = client.getCameraY() - z;
-		double length = Math.sqrt(east * east + up * up + north * north);
-		if (length < ON_TOP * 4)
-		{
-			return NO_PULL;
-		}
-		double k = ON_TOP / length;
-		youOnTop++;
-		return new int[]{(int) Math.round(east * k), (int) Math.round(up * k), (int) Math.round(north * k)};
 	}
 
 	/** How many frames to wait before trying to read a missing walk animation again (about a second). */
@@ -368,7 +615,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * game draws only one centred player per tile. A mate that has since stepped off-centre is
 	 * drawn by the game itself, so it is left alone to avoid drawing anyone twice.
 	 */
-	private boolean drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z)
+	private boolean drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z, boolean mayKeep)
 	{
 		long tileKey = StackRegistry.key(plane, x >> 7, z >> 7);
 		int[] mates = stacks.membersAt(tileKey);
@@ -426,30 +673,36 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				{
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
-				touchedSharedModel = true;
 				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);
-				Model mateModel = null;
-				if (offsets.isWalking(id))
-				{
-					mateModel = walkModel(mate, id);
-					if (mateModel != null)
-					{
-						mateOrientation = offsets.walkOrientation(id);
-						walkDraws++;
-					}
-				}
-				if (mateModel == null)
-				{
-					mateModel = mate.getModel();
-				}
-				if (mateModel == null)
-				{
-					continue;
-				}
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
-				int[] pull = onTop(mate, x + mdx, mateY, z + mdz);
-				delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation,
-					x + mdx + pull[0], mateY + pull[1], z + mdz + pull[2]);
+				boolean walking = offsets.isWalking(id);
+				if (mayKeep && withinKeep(wv, x + mdx, mateY, z + mdz))
+				{
+					keep(projection, scene, gameObject, mate, mateOrientation, offsets.walkOrientation(id), x + mdx, mateY, z + mdz, walking);
+				}
+				else
+				{
+					touchedSharedModel = true;
+					Model mateModel = null;
+					if (walking)
+					{
+						mateModel = walkModel(mate, id);
+						if (mateModel != null)
+						{
+							mateOrientation = offsets.walkOrientation(id);
+							walkDraws++;
+						}
+					}
+					if (mateModel == null)
+					{
+						mateModel = mate.getModel();
+					}
+					if (mateModel == null)
+					{
+						continue;
+					}
+					delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation, x + mdx, mateY, z + mdz);
+				}
 				revealedFrame[id] = frame;
 				revealedDraws++;
 				middleDrawn |= inMiddle;
@@ -559,24 +812,28 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	@Override
 	public void loadScene(Scene scene)
 	{
+		dropKept();
 		delegate.loadScene(scene);
 	}
 
 	@Override
 	public void loadScene(WorldView worldView, Scene scene)
 	{
+		dropKept();
 		delegate.loadScene(worldView, scene);
 	}
 
 	@Override
 	public void swapScene(Scene scene)
 	{
+		dropKept();
 		delegate.swapScene(scene);
 	}
 
 	@Override
 	public void despawnWorldView(WorldView worldView)
 	{
+		dropKept();
 		delegate.despawnWorldView(worldView);
 	}
 
@@ -595,6 +852,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	@Override
 	public void preSceneDraw(Scene scene, Projection projection, float cameraX, float cameraY, float cameraZ, float cameraPitch, float cameraYaw, int plane, int minLevel, int maxLevel, Set<Integer> zones)
 	{
+		if (isMainScene(scene))
+		{
+			passMissed();
+		}
 		delegate.preSceneDraw(scene, projection, cameraX, cameraY, cameraZ, cameraPitch, cameraYaw, plane, minLevel, maxLevel, zones);
 	}
 
@@ -602,18 +863,32 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	@SuppressWarnings("deprecation")
 	public void preSceneDraw(Scene scene, float cameraX, float cameraY, float cameraZ, float cameraPitch, float cameraYaw, int plane, int minLevel, int maxLevel, Set<Integer> zones)
 	{
+		if (isMainScene(scene))
+		{
+			passMissed();
+		}
 		delegate.preSceneDraw(scene, cameraX, cameraY, cameraZ, cameraPitch, cameraYaw, plane, minLevel, maxLevel, zones);
 	}
 
 	@Override
 	public void postSceneDraw(Scene scene)
 	{
+		if (isMainScene(scene))
+		{
+			passMissed();
+		}
 		delegate.postSceneDraw(scene);
 	}
 
 	@Override
 	public void drawPass(Projection projection, Scene scene, int pass)
 	{
+		if (pass == PASS_OPAQUE && isMainScene(scene))
+		{
+			// The game has handed over everyone for this frame: now they're drawn, farthest first.
+			opaquePassSeen = true;
+			drawKept();
+		}
 		delegate.drawPass(projection, scene, pass);
 	}
 

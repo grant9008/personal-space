@@ -37,6 +37,13 @@ final class OffsetTable
 	private final boolean[] isActive = new boolean[CAPACITY];
 	private int activeCount;
 	private int frame;
+	/** The farthest anyone is drawn from their real spot right now, in local units. */
+	private float maxOffset;
+
+	float maxOffset()
+	{
+		return maxOffset;
+	}
 
 	int dx(int id)
 	{
@@ -144,12 +151,14 @@ final class OffsetTable
 	void advance(float dtSeconds)
 	{
 		frame++;
+		float farthest = 0f;
 		for (int i = activeCount - 1; i >= 0; i--)
 		{
 			int id = active[i];
 			walkTowardTarget(id, dtSeconds);
 			outX[id] = Math.round(curX[id]);
 			outZ[id] = Math.round(curZ[id]);
+			farthest = Math.max(farthest, (float) Math.hypot(outX[id], outZ[id]));
 			if (tgtX[id] == 0 && tgtZ[id] == 0 && curX[id] == 0f && curZ[id] == 0f)
 			{
 				// Fully back home: drop it from the active list (swap-remove; the slot we pull in
@@ -160,6 +169,7 @@ final class OffsetTable
 				active[i] = active[--activeCount];
 			}
 		}
+		maxOffset = farthest;
 	}
 
 	private void walkTowardTarget(int id, float dt)

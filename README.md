@@ -48,9 +48,11 @@ turns out to be four friends hanging out.
   makes room by sliding over or closing up together, keeping its shape, and eases back out a few
   seconds after its neighbours leave. Someone who only pauses for a moment on the way past isn't
   made room for, and nobody makes room for players the game isn't showing.
-- **You stay on top.** In a crowd you're drawn a touch nearer the camera than you stand, so an
-  alcher's staff, a spinning emote or legs mid-stride right up against you are drawn behind you,
-  not through you. Nobody is squeezed on top of you in a tight corner either.
+- **You stay on top.** The game draws people in tile order, which goes wrong once they're drawn
+  a tile from where they stand: someone behind you could be drawn over you. Personal Space draws
+  a crowd back to front instead, nearest the camera last, and you count as a body's width nearer
+  than you are. So an alcher's staff, a spinning emote or a shield right up against you sits
+  behind you, not through you, and nobody is squeezed on top of you in a tight corner either.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.

@@ -24,6 +24,8 @@ final class StackRegistry
 	private static final int[] NONE = new int[0];
 
 	private volatile Map<Long, int[]> byTile = Collections.emptyMap();
+	/** The stacked tiles, for the draw shim to work out how far out to keep actors back. */
+	private volatile long[] stackedTiles = new long[0];
 	/** Tiles laid out as a curved row this tick. */
 	private volatile java.util.Set<Long> curvedRows = Collections.emptySet();
 	/** Players on a crowded tile who weren't given a spot this tick (past the limit, you staying put, or not shown yet). */
@@ -123,19 +125,6 @@ final class StackRegistry
 		return orientation;
 	}
 
-	/** Someone is drawn right up against you this tick: you're drawn a little towards the camera. */
-	private volatile boolean youInCrowd;
-
-	void setYouInCrowd(boolean inCrowd)
-	{
-		youInCrowd = inCrowd;
-	}
-
-	boolean youInCrowd()
-	{
-		return youInCrowd;
-	}
-
 	/** True if nobody left waiting in the middle of this tile should be drawn: they would stand in front of you. */
 	boolean middleOutOfSight(long tileKey)
 	{
@@ -159,6 +148,7 @@ final class StackRegistry
 		if (placements.isEmpty())
 		{
 			byTile = Collections.emptyMap();
+			stackedTiles = new long[0];
 			return;
 		}
 		Map<Long, List<Integer>> grouped = new LinkedHashMap<>();
@@ -177,7 +167,20 @@ final class StackRegistry
 			}
 			table.put(e.getKey(), arr);
 		}
+		long[] tiles = new long[table.size()];
+		int i = 0;
+		for (long tile : table.keySet())
+		{
+			tiles[i++] = tile;
+		}
 		byTile = table;
+		stackedTiles = tiles;
+	}
+
+	/** The stacked tiles this tick. Not to be modified. */
+	long[] stackedTiles()
+	{
+		return stackedTiles;
 	}
 
 	void clear()
@@ -187,8 +190,8 @@ final class StackRegistry
 		fires = Collections.emptyMap();
 		poses = Collections.emptyMap();
 		byTile = Collections.emptyMap();
+		stackedTiles = new long[0];
 		middleOutOfSight = Collections.emptySet();
-		youInCrowd = false;
 	}
 
 	boolean isEmpty()

@@ -343,9 +343,10 @@ final class SlotBook
 				movedYou |= id == localId;
 				moves++;
 			}
-			// Once you've stood here a moment you get the best spot going: a free one if there is
-			// one, else whoever has the front spot takes yours. Not while a better spot is being held
-			// for someone: they may come back, and a swap now would only be undone later.
+			// You get the best spot going the moment you have one: a free one if there is one, else
+			// whoever has the front spot takes yours. A front spot being held for someone who stepped
+			// away is yours too: you'd otherwise stand waiting for their hold to run out, and if they
+			// come back they take the next free spot like anyone arriving.
 			Integer mine = t.slotOf.get(localId);
 			if (mine != null)
 			{
@@ -355,18 +356,15 @@ final class SlotBook
 					localTile = e.getKey();
 					localSince = tick;
 				}
-				boolean holdAhead = false;
 				int free = -1;
 				for (int s = 0; s < mine; s++)
 				{
-					holdAhead |= t.held(s, tick);
-					if (free < 0 && !t.occupant.containsKey(s))
+					if (free < 0 && !t.occupant.containsKey(s) && !t.held(s, tick))
 					{
 						free = s;
 					}
 				}
-				boolean clear = yours == 0 ? !holdAhead : !t.held(yours, tick);
-				if (mine != yours && clear && tick - localSince >= LOCAL_SWAP_DELAY)
+				if (mine != yours && tick - localSince >= LOCAL_SWAP_DELAY)
 				{
 					// Straight to your spot in one step. Whoever was there takes the best free spot if
 					// there is one, else yours, so neither of you is moved again next tick.

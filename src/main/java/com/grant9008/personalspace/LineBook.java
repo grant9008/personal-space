@@ -568,17 +568,35 @@ final class LineBook
 				localSince = tick;
 			}
 		}
-		boolean edgeHeld = false;
-		for (Spot spot : held.values())
-		{
-			edgeHeld |= mine != null && spot.line.equals(key) && spot.row == 0 && spot.tile == mine.tile;
-		}
 		boolean swappedYou = false;
 		int keptAside = -1;
-		// Once you've stood here a moment, a place at the edge if anyone from your tile has one:
-		// swap with whoever of them stands nearest your tile's middle. That is the only time the line
-		// moves you; seeing yourself is taken care of by keeping the spots in front of you empty.
-		if (mine != null && mine.line.equals(key) && mine.row > 0 && !edgeHeld && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
+		// An edge spot held for someone from your tile who stepped away is yours the moment you
+		// have a spot behind: you step into it now rather than wait for their hold to run out, and
+		// nobody else moves. If they come back they take a free spot, like anyone arriving.
+		if (mine != null && mine.line.equals(key) && mine.row > 0 && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
+		{
+			for (Iterator<Map.Entry<Integer, Spot>> it = held.entrySet().iterator(); it.hasNext(); )
+			{
+				Map.Entry<Integer, Spot> h = it.next();
+				Spot spot = h.getValue();
+				if (spot.line.equals(key) && spot.row == 0 && spot.tile == mine.tile && Boolean.TRUE.equals(usable.get(spot.row + "/" + spot.j)))
+				{
+					it.remove();
+					heldUntil.remove(h.getKey());
+					taken.remove(mine.point());
+					taken.add(spot.point());
+					spotOf.put(localId, spot);
+					mine = spot;
+					swappedYou = true;
+					moves++;
+					break;
+				}
+			}
+		}
+		// Else a place at the edge if anyone from your tile has one: swap with whoever of them
+		// stands nearest your tile's middle. That is the only time the line moves you; seeing
+		// yourself is taken care of by keeping the spots in front of you empty.
+		if (mine != null && mine.line.equals(key) && mine.row > 0 && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
 		{
 			for (Member m : members)
 			{

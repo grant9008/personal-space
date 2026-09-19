@@ -2701,42 +2701,98 @@ public class CrowdPlannerTest
 					}
 					Assert.assertTrue(when + "someone waiting in the middle is drawn " + middle + " from you",
 						!someoneInMiddle || middle >= 40 || plan.middleOutOfSight.contains(TILE));
-					Assert.assertTrue(when + "with people all round, you're drawn on top of them", plan.youInCrowd);
 				}
 			}
 		}
 	}
 
 	@Test
-	public void youreOnlyDrawnOnTopWhileSomeoneIsRightUpAgainstYou()
+	public void atABankYouTakeAnEdgeSpotHeldForSomeoneStraightAway()
 	{
-		// You alone on a tile, a group three tiles away: nobody can reach into you, so you're drawn
-		// exactly where you stand. Join them and you're drawn on top.
-		long away = StackRegistry.key(0, 53, 50);
-		List<StackSpreader.Entry> apart = new ArrayList<>();
-		apart.add(new StackSpreader.Entry(99, TILE, true, NORTH, false));
-		for (int i = 1; i <= 4; i++)
+		// A short counter with four spots at the edge and six people, so two stand behind. Someone
+		// at the edge steps away; you arrive while their spot is still held for them. You take it
+		// the tick you arrive, nobody else moves, and when they come back they get a free spot.
+		CrowdPlanner.Surroundings shortBank = new CrowdPlanner.Surroundings()
 		{
-			apart.add(new StackSpreader.Entry(i, away, false, NORTH, false));
-		}
-		CrowdPlanner planner = new CrowdPlanner();
-		CrowdPlanner.Plan plan = null;
-		for (int t = 1; t <= 5; t++)
-		{
-			plan = planner.plan(apart, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, true, t, OPEN);
-		}
-		Assert.assertFalse("nobody near you", plan.youInCrowd);
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(tile) * 128 + dx;
+				return dz <= 0 && x >= 50 * 128 - 100 && x <= 50 * 128 + 100;
+			}
 
-		List<StackSpreader.Entry> together = new ArrayList<>();
-		together.add(new StackSpreader.Entry(99, away, true, NORTH, false));
-		for (int i = 1; i <= 4; i++)
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> six = bank(new int[]{6}, 1);
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 3; t++)
 		{
-			together.add(new StackSpreader.Entry(i, away, false, NORTH, false));
+			settled = spots(planner.plan(six, x -> true, 128, 10, true, true, t, shortBank));
 		}
-		for (int t = 6; t <= 10; t++)
+		int atEdge = 0;
+		int leaver = -1;
+		for (Map.Entry<Integer, int[]> e : settled.entrySet())
 		{
-			plan = planner.plan(together, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, true, t, OPEN);
+			if (Math.abs(e.getValue()[1]) <= StackSpreader.MAX_BOW)
+			{
+				atEdge++;
+				leaver = leaver < 0 || Math.abs(e.getValue()[0]) < Math.abs(settled.get(leaver)[0]) ? e.getKey() : leaver;
+			}
 		}
-		Assert.assertTrue("in the group", plan.youInCrowd);
+		Assert.assertTrue(atEdge + " at the edge: some at the edge, some behind", atEdge >= 3 && atEdge <= 5);
+		List<StackSpreader.Entry> without = new ArrayList<>();
+		for (StackSpreader.Entry e : six)
+		{
+			if (e.id != leaver)
+			{
+				without.add(e);
+			}
+		}
+		spots(planner.plan(without, x -> true, 128, 10, true, true, 4, shortBank));
+		List<StackSpreader.Entry> withYou = new ArrayList<>(without);
+		withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
+		Map<Integer, int[]> arrived = spots(planner.plan(withYou, x -> true, 128, 10, true, true, 5, shortBank));
+		Assert.assertTrue("you stand " + arrived.get(99)[1] + " back the tick you arrive, not at the counter",
+			Math.abs(arrived.get(99)[1]) <= StackSpreader.MAX_BOW);
+		for (StackSpreader.Entry e : without)
+		{
+			Assert.assertArrayEquals("player " + e.id + " moved", settled.get(e.id), arrived.get(e.id));
+		}
+		List<StackSpreader.Entry> back = new ArrayList<>(withYou);
+		back.add(new StackSpreader.Entry(leaver, StackRegistry.key(0, 50, 50), false, NORTH));
+		Map<Integer, int[]> returned = null;
+		for (int t = 6; t <= 8; t++)
+		{
+			returned = spots(planner.plan(back, x -> true, 128, 10, true, true, t, shortBank));
+		}
+		Assert.assertArrayEquals("you keep the edge", arrived.get(99), returned.get(99));
+		Assert.assertNotNull("they get a spot", returned.get(leaver));
+		for (StackSpreader.Entry e : without)
+		{
+			Assert.assertArrayEquals("player " + e.id + " moved when they came back", settled.get(e.id), returned.get(e.id));
+		}
 	}
 }
