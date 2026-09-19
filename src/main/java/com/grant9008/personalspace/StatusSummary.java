@@ -186,6 +186,8 @@ final class StatusSummary
 			.append(", off-thread draws (should be 0): ").append(s.offThreadDraws)
 			.append(", reveal errors: ").append(s.revealErrors)
 			.append(", walk frames drawn: ").append(s.walkDraws)
+			.append(", you drawn on top: ").append(s.youOnTop)
+			.append(", hidden in your way: ").append(s.hiddenInYourWay)
 			.append(", no walk (busy): ").append(s.walkSkippedBusy)
 			.append(", no walk (animation not loaded): ").append(s.walkSkippedNoAnimation)
 			.append(", held for confirmation: ").append(s.probeHeld)

@@ -72,6 +72,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long hiddenInYourWay;
 	/** Player models drawn mid-step with their walk animation. */
 	long walkDraws;
+	/** Times you were drawn a little towards the camera, on top of people right up against you. */
+	long youOnTop;
 	/** Moving players drawn without walk frames because they were busy with an emote or action. */
 	long walkSkippedBusy;
 	/** Moving players drawn without walk frames because the animation couldn't be loaded (yet). */
@@ -153,8 +155,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					walkDraws++;
 				}
 			}
+			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
+			int[] pull = onTop(drawn, x + dx, drawY, z + dz);
 			delegate.drawTemp(projection, scene, gameObject, drawModel, drawOrientation,
-				x + dx, y + groundDelta(wv, plane, x, z, x + dx, z + dz), z + dz);
+				x + dx + pull[0], drawY + pull[1], z + dz + pull[2]);
 			nudgedDraws++;
 		}
 		else if (StillnessTracker.isCentred(x, z) && stacks.isUnplaced(drawnId) && !isLocal(drawn)
@@ -166,7 +170,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		}
 		else
 		{
-			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			int[] pull = onTop(drawn, x, y, z);
+			delegate.drawTemp(projection, scene, gameObject, model, orientation, x + pull[0], y + pull[1], z + pull[2]);
 		}
 
 		// Only a player standing exactly in the middle of its tile hides others there.
@@ -247,6 +252,42 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private boolean isLocal(Player player)
 	{
 		return player == client.getLocalPlayer();
+	}
+
+	/**
+	 * How far your own character is drawn towards the camera while someone is right up against
+	 * you: half a tile. Standing a body's width apart, a neighbour's staff, arms or legs reach
+	 * into you, and whichever is nearer the camera shows, so a spinning emote or an alcher behind
+	 * you was drawn over you.
+	 */
+	static final int ON_TOP = 64;
+
+	private static final int[] NO_PULL = new int[3];
+
+	/**
+	 * Where to draw you, relative to (x, y, z), so you're on top of anyone right up against you:
+	 * a little along the line from you to the camera. You stay exactly where you were on the
+	 * screen, just a touch bigger, and everything within half a tile of you is drawn behind you.
+	 * Nobody else is ever moved this way, and only while someone is that close to you.
+	 */
+	private int[] onTop(Player player, int x, int y, int z)
+	{
+		if (!isLocal(player) || !stacks.youInCrowd())
+		{
+			return NO_PULL;
+		}
+		// Aim from the middle of your body, so that is what stays put on the screen.
+		double east = client.getCameraX() - x;
+		double up = client.getCameraZ() - (y - player.getModelHeight() / 2.0);
+		double north = client.getCameraY() - z;
+		double length = Math.sqrt(east * east + up * up + north * north);
+		if (length < ON_TOP * 4)
+		{
+			return NO_PULL;
+		}
+		double k = ON_TOP / length;
+		youOnTop++;
+		return new int[]{(int) Math.round(east * k), (int) Math.round(up * k), (int) Math.round(north * k)};
 	}
 
 	/** How many frames to wait before trying to read a missing walk animation again (about a second). */
@@ -406,7 +447,9 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					continue;
 				}
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
-				delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation, x + mdx, mateY, z + mdz);
+				int[] pull = onTop(mate, x + mdx, mateY, z + mdz);
+				delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation,
+					x + mdx + pull[0], mateY + pull[1], z + mdz + pull[2]);
 				revealedFrame[id] = frame;
 				revealedDraws++;
 				middleDrawn |= inMiddle;

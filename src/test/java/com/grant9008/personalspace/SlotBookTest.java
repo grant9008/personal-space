@@ -93,19 +93,13 @@ public class SlotBookTest
 	}
 
 	@Test
-	public void youGetTheFrontSpotAndOnlyOnePersonMakesRoom()
+	public void youGoStraightToTheFrontSpotAndOnlyOnePersonMakesRoom()
 	{
 		SlotBook book = new SlotBook();
 		book.localId = 99;
 		Map<Integer, Integer> before = step(book, 1, 10, 20, 30);
-		Map<Integer, Integer> arrived = step(book, 2, 10, 20, 30, 99);
-		Assert.assertEquals("at first you take the next free spot and nobody moves", 3, (int) arrived.get(99));
-		Map<Integer, Integer> after = arrived;
-		for (int t = 3; t <= 2 + SlotBook.LOCAL_SWAP_DELAY; t++)
-		{
-			after = step(book, t, 10, 20, 30, 99);
-		}
-		Assert.assertEquals("once you've stayed a moment you get the best spot", 0, (int) after.get(99));
+		Map<Integer, Integer> after = step(book, 2, 10, 20, 30, 99);
+		Assert.assertEquals("you get the best spot as soon as you arrive, not off to the side first", 0, (int) after.get(99));
 		int moved = 0;
 		for (Map.Entry<Integer, Integer> e : before.entrySet())
 		{
@@ -116,20 +110,29 @@ public class SlotBookTest
 	}
 
 	@Test
-	public void stoppingForAMomentOnYourWayPastPushesNobodyAround()
+	public void stoppingNowAndThenMovesOnePersonAtATime()
 	{
+		// (Walking past never reaches here: nobody is given a spot until they've stood still.)
 		SlotBook book = new SlotBook();
 		book.localId = 99;
-		Map<Integer, Integer> before = step(book, 1, 10, 20, 30);
+		Map<Integer, Integer> was = step(book, 1, 10, 20, 30);
+		int moves = 0;
 		for (int t = 2; t <= 40; t++)
 		{
 			boolean stopped = t % 12 == 0 || t % 12 == 1;
 			Map<Integer, Integer> now = stopped ? step(book, t, 10, 20, 30, 99) : step(book, t, 10, 20, 30);
-			for (Map.Entry<Integer, Integer> e : before.entrySet())
+			int movedNow = 0;
+			for (int id : new int[]{10, 20, 30})
 			{
-				Assert.assertEquals("tick " + t + ": player " + e.getKey() + " was moved", e.getValue(), now.get(e.getKey()));
+				movedNow += was.get(id).equals(now.get(id)) ? 0 : 1;
 			}
+			Assert.assertTrue("tick " + t + ": " + movedNow + " people moved at once", movedNow <= 1);
+			moves += movedNow;
+			was = now;
 		}
+		// Three stops: each time one person makes room, and gets their spot back once yours has
+		// been held a while after you left.
+		Assert.assertTrue(moves + " moves", moves <= 6);
 	}
 
 	@Test

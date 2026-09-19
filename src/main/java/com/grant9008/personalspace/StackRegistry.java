@@ -123,6 +123,19 @@ final class StackRegistry
 		return orientation;
 	}
 
+	/** Someone is drawn right up against you this tick: you're drawn a little towards the camera. */
+	private volatile boolean youInCrowd;
+
+	void setYouInCrowd(boolean inCrowd)
+	{
+		youInCrowd = inCrowd;
+	}
+
+	boolean youInCrowd()
+	{
+		return youInCrowd;
+	}
+
 	/** True if nobody left waiting in the middle of this tile should be drawn: they would stand in front of you. */
 	boolean middleOutOfSight(long tileKey)
 	{
@@ -174,6 +187,8 @@ final class StackRegistry
 		fires = Collections.emptyMap();
 		poses = Collections.emptyMap();
 		byTile = Collections.emptyMap();
+		middleOutOfSight = Collections.emptySet();
+		youInCrowd = false;
 	}
 
 	boolean isEmpty()

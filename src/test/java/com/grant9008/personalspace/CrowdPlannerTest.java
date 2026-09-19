@@ -2620,4 +2620,123 @@ public class CrowdPlannerTest
 			Assert.assertTrue("player " + p.id + " waits though they aren't busy", p.id % 2 == 0);
 		}
 	}
+
+	@Test
+	public void inACrampedNookNobodyIsDrawnInsideYou()
+	{
+		// An anvil ahead, a wall just behind the middle of the tile, crates either side, and eleven
+		// smiths on the tile with you (you aren't smithing). With nowhere else to go, people were
+		// squeezed in right on top of you; now anyone who'd be drawn inside you waits out of sight.
+		CrowdPlanner.Surroundings nook = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return dz <= 32 && dz >= -40 && Math.abs(dx) <= 90;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+		for (int smiths = 4; smiths <= 12; smiths++)
+		{
+			for (int k = 0; k < 8; k++)
+			{
+				List<StackSpreader.Entry> still = new ArrayList<>();
+				for (int i = 1; i <= smiths; i++)
+				{
+					still.add(new StackSpreader.Entry(i, TILE, false, NORTH, true));
+				}
+				still.add(new StackSpreader.Entry(99, TILE, true, 0, false));
+				CrowdPlanner planner = new CrowdPlanner();
+				planner.cameraX = StackRegistry.sceneX(TILE) * 128 + 64 + (int) Math.round(Math.cos(k * Math.PI / 4) * 1500);
+				planner.cameraY = StackRegistry.sceneY(TILE) * 128 + 64 + (int) Math.round(Math.sin(k * Math.PI / 4) * 1500);
+				for (int t = 1; t <= 30; t++)
+				{
+					CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, nook);
+					if (t < 20)
+					{
+						continue;
+					}
+					String when = smiths + " smiths, camera " + k + ", tick " + t + ": ";
+					double[] you = new double[2];
+					for (StackSpreader.Placement p : plan.placements)
+					{
+						if (p.id == 99)
+						{
+							you = new double[]{p.dx, p.dz};
+						}
+					}
+					for (StackSpreader.Placement p : plan.placements)
+					{
+						double apart = Math.hypot(p.dx - you[0], p.dz - you[1]);
+						Assert.assertTrue(when + "player " + p.id + " drawn " + apart + " from you", p.id == 99 || apart >= 40);
+					}
+					double middle = Math.hypot(you[0], you[1]);
+					boolean someoneInMiddle = false;
+					for (StackSpreader.Placement p : plan.unplaced)
+					{
+						someoneInMiddle |= p.id != 99;
+					}
+					Assert.assertTrue(when + "someone waiting in the middle is drawn " + middle + " from you",
+						!someoneInMiddle || middle >= 40 || plan.middleOutOfSight.contains(TILE));
+					Assert.assertTrue(when + "with people all round, you're drawn on top of them", plan.youInCrowd);
+				}
+			}
+		}
+	}
+
+	@Test
+	public void youreOnlyDrawnOnTopWhileSomeoneIsRightUpAgainstYou()
+	{
+		// You alone on a tile, a group three tiles away: nobody can reach into you, so you're drawn
+		// exactly where you stand. Join them and you're drawn on top.
+		long away = StackRegistry.key(0, 53, 50);
+		List<StackSpreader.Entry> apart = new ArrayList<>();
+		apart.add(new StackSpreader.Entry(99, TILE, true, NORTH, false));
+		for (int i = 1; i <= 4; i++)
+		{
+			apart.add(new StackSpreader.Entry(i, away, false, NORTH, false));
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = planner.plan(apart, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, true, t, OPEN);
+		}
+		Assert.assertFalse("nobody near you", plan.youInCrowd);
+
+		List<StackSpreader.Entry> together = new ArrayList<>();
+		together.add(new StackSpreader.Entry(99, away, true, NORTH, false));
+		for (int i = 1; i <= 4; i++)
+		{
+			together.add(new StackSpreader.Entry(i, away, false, NORTH, false));
+		}
+		for (int t = 6; t <= 10; t++)
+		{
+			plan = planner.plan(together, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, true, t, OPEN);
+		}
+		Assert.assertTrue("in the group", plan.youInCrowd);
+	}
 }

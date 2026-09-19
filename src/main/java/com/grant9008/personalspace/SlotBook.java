@@ -152,10 +152,11 @@ final class SlotBook
 	private long asideTile = Long.MIN_VALUE;
 
 	/**
-	 * How long you must have stood on a tile before you take the front spot: 4 ticks, about 2.5
-	 * seconds. Stopping for a moment on your way past doesn't push anyone around.
+	 * How long you must have been given a spot on a tile before you take the front one: none. You
+	 * go straight to it rather than start off to the side and shuffle in a few seconds later.
+	 * Walking past never counts: nobody is given a spot until they have stood still for two ticks.
 	 */
-	static final int LOCAL_SWAP_DELAY = 4;
+	static final int LOCAL_SWAP_DELAY = 0;
 
 	private long localTile = Long.MIN_VALUE;
 	private int localSince;
@@ -286,6 +287,34 @@ final class SlotBook
 				{
 					t.assign(id, spot);
 					movedYou |= id == localId;
+				}
+			}
+			// You always get a spot. On a full tile you used to be left standing in the middle, with
+			// everyone in a ring round you, until someone left. Whoever is busy with something gives
+			// theirs up first, else whoever has the spot furthest back.
+			if (localId >= 0 && here.contains(localId) && !t.slotOf.containsKey(localId) && !t.occupant.isEmpty())
+			{
+				int from = -1;
+				for (Map.Entry<Integer, Integer> o : t.occupant.entrySet())
+				{
+					if (o.getKey() >= capacity)
+					{
+						continue;
+					}
+					boolean better = from < 0
+						|| (busy.contains(o.getValue()) && !busy.contains(t.occupant.get(from)))
+						|| (busy.contains(o.getValue()) == busy.contains(t.occupant.get(from)) && o.getKey() > from);
+					if (better)
+					{
+						from = o.getKey();
+					}
+				}
+				if (from >= 0)
+				{
+					t.vacate(t.occupant.get(from), tick, false);
+					t.assign(localId, from);
+					movedYou = true;
+					moves++;
 				}
 			}
 			// More people than spots: whoever is busy with something (alching, an emote) gives up

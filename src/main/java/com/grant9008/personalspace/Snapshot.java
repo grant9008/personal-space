@@ -41,6 +41,10 @@ final class Snapshot
 	String yourShape;
 	/** Players drawn mid-step with their walk animation; total. */
 	long walkDraws;
+	/** Times you were drawn a little towards the camera to stay on top of people right up against you; total. */
+	long youOnTop;
+	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */
+	long hiddenInYourWay;
 	/** Moving players drawn without a walk animation because they were busy with an emote or action; total. */
 	long walkSkippedBusy;
 	/** Moving players drawn without a walk animation because it couldn't be loaded; total. */

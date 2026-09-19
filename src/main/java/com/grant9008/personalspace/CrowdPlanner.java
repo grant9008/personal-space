@@ -69,6 +69,11 @@ final class CrowdPlanner
 		 * or whoever the game shows in the middle of the tile would stand in front of you.
 		 */
 		final Set<Long> middleOutOfSight = new HashSet<>();
+		/**
+		 * Someone is drawn close enough to you that their arms, legs or staff could reach into you.
+		 * You're then drawn a little towards the camera, so you are the one on top.
+		 */
+		boolean youInCrowd;
 		/** Spread tiles gathered round a fire: where the fire is, in local units from the tile centre. Everyone there faces it. */
 		final Map<Long, int[]> fires = new HashMap<>();
 		/** Small groups in the open that are posed (angled or facing each other). */
@@ -480,20 +485,25 @@ final class CrowdPlanner
 	private Map<Long, Room> rooms = new HashMap<>();
 	private Map<Long, Room> roomsNow = new HashMap<>();
 	/** The plane you stand on. */
-	private static int plane(double[] youAt, Map<Long, List<StackSpreader.Entry>> byTile, int localId)
+	private static int yourPlane(List<StackSpreader.Entry> still)
 	{
-		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		for (StackSpreader.Entry e : still)
 		{
-			for (StackSpreader.Entry en : e.getValue())
+			if (e.local)
 			{
-				if (en.id == localId)
-				{
-					return StackRegistry.plane(e.getKey());
-				}
+				return StackRegistry.plane(e.tile);
 			}
 		}
 		return -1;
 	}
+
+	/**
+	 * Nobody is given a spot closer to you than this: just inside a busy bank line's spacing, so the
+	 * people beside you at a counter keep their places, but nobody is drawn inside you.
+	 */
+	static final int YOUR_SPACE = 40;
+	/** Anyone drawn this close to you, a tile, could have an arm, leg or staff reaching into you. */
+	static final int WITHIN_REACH = 2 * HALF_TILE;
 
 	/** Spots past the players-per-tile limit that tiles near you lay out, for stepping out of your way. */
 	static final int SPARE_SPOTS = 4;
@@ -1273,7 +1283,7 @@ final class CrowdPlanner
 	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile)
 	{
 		Map<Long, Set<Integer>> out = new HashMap<>();
-		if (view == null || lastYouAt == null)
+		if (lastYouAt == null)
 		{
 			return out;
 		}
@@ -1299,11 +1309,19 @@ final class CrowdPlanner
 			List<int[]> spots = e.getValue();
 			for (int s = 0; s < spots.size(); s++)
 			{
+				if (tile == lastYouTile && s == lastYouSlot)
+				{
+					continue;
+				}
 				double east = tileX + spots.get(s)[0] - lastYouAt[0];
 				double north = tileY + spots.get(s)[1] - lastYouAt[1];
-				double nearer = east * view[0] + north * view[1];
-				double across = Math.abs(north * view[0] - east * view[1]);
-				if (nearer > VIEW_IN_FRONT && across < VIEW_OVERLAP)
+				// Your personal space: nobody stands inside you, whichever way the camera looks. In a
+				// cramped corner, with a wall behind and nowhere to go, people were squeezed right on
+				// top of you.
+				boolean onYou = Math.hypot(east, north) < YOUR_SPACE;
+				boolean inFront = view != null && east * view[0] + north * view[1] > VIEW_IN_FRONT
+					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
+				if (onYou || inFront)
 				{
 					clear.add(s);
 				}
@@ -1975,8 +1993,38 @@ final class CrowdPlanner
 					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz};
 			}
 		}
+		if (youAt == null)
+		{
+			// Without a spot of your own (alone on your tile, or staying put) you're drawn in the
+			// middle of your tile, and people around still keep out of your space and your view.
+			for (StackSpreader.Entry e : still)
+			{
+				if (e.local)
+				{
+					youAt = new double[]{StackRegistry.sceneX(e.tile) * 2.0 * HALF_TILE + HALF_TILE,
+						StackRegistry.sceneY(e.tile) * 2.0 * HALF_TILE + HALF_TILE};
+				}
+			}
+		}
 		if (youAt != null)
 		{
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				plan.youInCrowd |= p.id != localId && StackRegistry.plane(p.tile) == yourPlane(still)
+					&& Math.hypot(StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx - youAt[0],
+					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz - youAt[1]) < WITHIN_REACH;
+			}
+			for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+			{
+				boolean someoneElse = false;
+				for (StackSpreader.Entry en : e.getValue())
+				{
+					someoneElse |= en.id != localId;
+				}
+				plan.youInCrowd |= someoneElse && StackRegistry.plane(e.getKey()) == yourPlane(still)
+					&& Math.hypot(StackRegistry.sceneX(e.getKey()) * 2.0 * HALF_TILE + HALF_TILE - youAt[0],
+					StackRegistry.sceneY(e.getKey()) * 2.0 * HALF_TILE + HALF_TILE - youAt[1]) < WITHIN_REACH;
+			}
 			// Nobody waiting in the middle of a tile is drawn where they'd stand in front of you, or
 			// right up against you: someone who gave up their spot for you waits there.
 			for (long tile : byTile.keySet())
@@ -1988,7 +2036,7 @@ final class CrowdPlanner
 					&& Math.abs(east) <= VIEW_TILES * 2 * HALF_TILE && Math.abs(north) <= VIEW_TILES * 2 * HALF_TILE
 					&& east * view[0] + north * view[1] > VIEW_IN_FRONT
 					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
-				if ((against || inFront) && StackRegistry.plane(tile) == plane(youAt, byTile, localId))
+				if ((against || inFront) && StackRegistry.plane(tile) == yourPlane(still))
 				{
 					plan.middleOutOfSight.add(tile);
 				}

@@ -48,6 +48,9 @@ turns out to be four friends hanging out.
   makes room by sliding over or closing up together, keeping its shape, and eases back out a few
   seconds after its neighbours leave. Someone who only pauses for a moment on the way past isn't
   made room for, and nobody makes room for players the game isn't showing.
+- **You stay on top.** In a crowd you're drawn a touch nearer the camera than you stand, so an
+  alcher's staff, a spinning emote or legs mid-stride right up against you are drawn behind you,
+  not through you. Nobody is squeezed on top of you in a tight corner either.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.
@@ -57,7 +60,7 @@ turns out to be four friends hanging out.
   It never shows players the game itself (or another plugin such as Entity Hider) keeps hidden,
   and they never push anyone else aside.
 
-Needs the **GPU** plugin (or 117 HD) turned on.
+Needs the **GPU** plugin or **117 HD** turned on. Works alongside **True Tile Movement Animations**.
 
 <br clear="right">
 
@@ -97,7 +100,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Arrangement | **Smart**: a line along whatever people are facing - a counter, a wall, an anvil, a fire - and a ring out in the open, where there's nothing to line up along. **Circle**: always a ring. **Line**: side by side anywhere, even in the open. **Arc**: a curve, like the crowd round an anvil. |
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
 | Auto-space | On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn it off to unlock the slider: it then sets how far apart everyone stands, handy for photos, though a tight spot or a big crowd on one tile can still keep people closer. |
-| Move my character too | Off: you stay put and others step around you. On: you take a spot too, and anyone who'd stand between you and the camera steps aside, or waits out of sight if there's nowhere to go, so you can always see yourself, even in a packed bank or anvil pile. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
+| Move my character too | Off: you stay put and others step around you. On: you take a spot too, straight away when you stop rather than off to the side first, and anyone who'd stand between you and the camera steps aside, or waits out of sight if there's nowhere to go, so you can always see yourself, even in a packed bank or anvil pile. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
 | Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
 | Show sidebar button | On (the default): Personal Space has a button in the sidebar with its settings and a live status. Off: no button, for a tidy sidebar; every setting is still in the plugin's configuration. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
