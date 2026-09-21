@@ -34,8 +34,7 @@ final class NamesOverlay extends Overlay
 	static final Color FRIENDS_CHAT = new Color(170, 0, 255);
 	static final Color TEAM = new Color(19, 110, 247);
 	static final Color CLAN = new Color(36, 15, 171);
-	/** Player Indicators uses red for strangers, meant for PvP; over a bank crowd plain white reads better. */
-	static final Color OTHERS = Color.WHITE;
+	static final Color OTHERS = Color.RED;
 
 	/** How far above the top of the model the name sits, as in Player Indicators. */
 	private static final int ABOVE_HEAD = 40;
