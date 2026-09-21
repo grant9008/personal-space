@@ -87,7 +87,8 @@ final class HoverOverlay extends Overlay
 		String name = best.getName();
 		if (name != null)
 		{
-			tooltips.add(new Tooltip(Text.sanitize(name) + "  (level-" + best.getCombatLevel() + ")"));
+			tooltips.add(new Tooltip(Text.sanitize(name) + "  <col=" + levelColour(local.getCombatLevel(), best.getCombatLevel())
+				+ ">(level-" + best.getCombatLevel() + ")</col>"));
 		}
 		if (hoveredFeet != null && hoveredReal != null)
 		{
@@ -182,6 +183,48 @@ final class HoverOverlay extends Overlay
 			}
 		}
 		return best;
+	}
+
+	/**
+	 * The colour the game gives "(level-N)" beside a name: green for someone well below you,
+	 * through yellow for your own level, to red for someone well above.
+	 */
+	static String levelColour(int yours, int theirs)
+	{
+		int diff = theirs - yours;
+		if (diff < -9)
+		{
+			return "00ff00";
+		}
+		if (diff < -6)
+		{
+			return "40ff00";
+		}
+		if (diff < -3)
+		{
+			return "80ff00";
+		}
+		if (diff < 0)
+		{
+			return "c0ff00";
+		}
+		if (diff > 9)
+		{
+			return "ff0000";
+		}
+		if (diff > 6)
+		{
+			return "ff3000";
+		}
+		if (diff > 3)
+		{
+			return "ff7000";
+		}
+		if (diff > 0)
+		{
+			return "ffb000";
+		}
+		return "ffff00";
 	}
 
 	/** A small arrow from the drawn body's feet to where they really stand. */
