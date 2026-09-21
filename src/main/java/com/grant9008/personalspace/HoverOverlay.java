@@ -26,7 +26,7 @@ import net.runelite.client.util.Text;
  * <p>Clicking stays with the game: you click people where they really stand, because a plugin
  * may not move a click zone. But you can be told who you're looking at. With the mouse over a
  * body drawn away from its tile, a tooltip gives the name and combat level, and a small arrow
- * points from the body to where they really stand.
+ * points from the body to where they really stand. Each is its own switch.
  */
 final class HoverOverlay extends Overlay
 {
@@ -59,7 +59,9 @@ final class HoverOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.hoverShowsWho() || client.isMenuOpen())
+		boolean who = config.hoverShowsWho();
+		boolean arrow = config.hoverArrow();
+		if ((!who && !arrow) || client.isMenuOpen())
 		{
 			return null;
 		}
@@ -85,12 +87,12 @@ final class HoverOverlay extends Overlay
 			return null;
 		}
 		String name = best.getName();
-		if (name != null)
+		if (who && name != null)
 		{
 			tooltips.add(new Tooltip(Text.sanitize(name) + "  <col=" + levelColour(local.getCombatLevel(), best.getCombatLevel())
 				+ ">(level-" + best.getCombatLevel() + ")</col>"));
 		}
-		if (config.hoverArrow() && hoveredFeet != null && hoveredReal != null)
+		if (arrow && hoveredFeet != null && hoveredReal != null)
 		{
 			arrow(graphics, hoveredFeet, hoveredReal);
 		}

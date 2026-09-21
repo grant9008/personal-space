@@ -231,7 +231,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HOVER,
 		name = "Hover shows who",
-		description = "On: hover a body drawn away from its tile to see who it is, with a small arrow to where they really stand. Clicking is unchanged: you still click people where they really stand.",
+		description = "On: hover a body drawn away from its tile and a tooltip says who it is. Clicking is unchanged: you still click people where they really stand.",
 		position = 9
 	)
 	default boolean hoverShowsWho()
@@ -242,7 +242,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HOVER_ARROW,
 		name = "Arrow to their tile",
-		description = "On: while you hover a body drawn away from its tile, a small arrow points to where they really stand.",
+		description = "On: hover a body drawn away from its tile and a small arrow points to where they really stand. Works with or without the tooltip.",
 		position = 10
 	)
 	default boolean hoverArrow()
