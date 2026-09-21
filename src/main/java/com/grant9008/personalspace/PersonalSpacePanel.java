@@ -345,7 +345,7 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Names over players", namesSwitch,
-			"On: names drawn where the bodies are, using your Player Indicators settings for who gets one, the colours and rank icons. Set Player Indicators' 'Name position' to Disabled, or names are doubled."), c);
+			"On: names follow the bodies. Who gets a name, the colours and the rank icons are Player Indicators' settings, so change them there. Turn off Player Indicators' name position (or the plugin) so names aren't doubled."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -432,24 +432,26 @@ final class PersonalSpacePanel extends PluginPanel
 			new EmptyBorder(6, 10, 8, 10)));
 		GridBagConstraints c = column();
 
-		JLabel support = new JLabel("Support the developer", new HeartIcon(ColorScheme.BRAND_ORANGE), SwingConstants.CENTER);
-		support.setIconTextGap(6);
+		// Two quiet links side by side, then the version: nothing here needs to shout.
+		JPanel links = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+		links.setOpaque(false);
+		JLabel report = new JLabel("Report a problem");
+		report.setToolTipText(tip("Something wrong? Press Copy report under Troubleshooting and paste it into a new issue, with a screenshot."));
+		link(report, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
+		links.add(report);
+		JLabel support = new JLabel("Support the dev", new HeartIcon(ColorScheme.MEDIUM_GRAY_COLOR), SwingConstants.CENTER);
+		support.setIconTextGap(4);
 		support.setToolTipText(tip("Personal Space is free. If you enjoy it, you can chip in here."));
-		link(support, ColorScheme.LIGHT_GRAY_COLOR, () -> LinkBrowser.browse(SUPPORT_URL));
-		p.add(support, c);
+		link(support, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(SUPPORT_URL));
+		links.add(support);
+		p.add(links, c);
 
 		c.gridy++;
 		c.insets = new Insets(3, 0, 0, 0);
-		JPanel small = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
-		small.setOpaque(false);
-		JLabel report = new JLabel("Report a problem");
-		link(report, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
-		small.add(report);
-		JLabel version = new JLabel("v" + PersonalSpacePlugin.VERSION);
+		JLabel version = new JLabel("v" + PersonalSpacePlugin.VERSION, SwingConstants.CENTER);
 		version.setFont(FontManager.getRunescapeSmallFont());
 		version.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-		small.add(version);
-		p.add(small, c);
+		p.add(version, c);
 		return p;
 	}
 

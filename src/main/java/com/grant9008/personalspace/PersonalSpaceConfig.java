@@ -219,7 +219,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_NAMES,
 		name = "Names over players",
-		description = "On: names are drawn over players where Personal Space draws them, using your Player Indicators settings for who gets a name, the colours and rank icons. Set Player Indicators' 'Name position' to Disabled so names aren't doubled.",
+		description = "Off by default. On: names follow the bodies. Who gets a name, the colours and the rank icons are Player Indicators' settings, so change them there. Turn off Player Indicators' name position (or the plugin) so names aren't doubled.",
 		position = 8
 	)
 	default boolean namesFollowPlayers()
