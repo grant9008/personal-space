@@ -90,7 +90,7 @@ final class HoverOverlay extends Overlay
 			tooltips.add(new Tooltip(Text.sanitize(name) + "  <col=" + levelColour(local.getCombatLevel(), best.getCombatLevel())
 				+ ">(level-" + best.getCombatLevel() + ")</col>"));
 		}
-		if (hoveredFeet != null && hoveredReal != null)
+		if (config.hoverArrow() && hoveredFeet != null && hoveredReal != null)
 		{
 			arrow(graphics, hoveredFeet, hoveredReal);
 		}

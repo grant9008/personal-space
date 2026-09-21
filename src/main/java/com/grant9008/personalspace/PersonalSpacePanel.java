@@ -92,6 +92,7 @@ final class PersonalSpacePanel extends PluginPanel
 	private final ToggleSwitch inFrontSwitch = new ToggleSwitch();
 	private final ToggleSwitch namesSwitch = new ToggleSwitch();
 	private final ToggleSwitch hoverSwitch = new ToggleSwitch();
+	private final ToggleSwitch arrowSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
 	private final ToggleSwitch combatSwitch = new ToggleSwitch();
 
@@ -195,6 +196,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.select(config.pose());
 		namesSwitch.setOn(config.namesFollowPlayers());
 		hoverSwitch.setOn(config.hoverShowsWho());
+		arrowSwitch.setOn(config.hoverArrow());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		inFrontSwitch.setOn(config.drawMeInFront());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
@@ -350,7 +352,12 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Hover shows who", hoverSwitch,
-			"On: hover a body drawn away from its tile to see who it is, with a small arrow to where they really stand. You still click people where they really stand."), c);
+			"On: hover a body drawn away from its tile to see who it is. You still click people where they really stand."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Arrow to their tile", arrowSwitch,
+			"On: while you hover someone, a small arrow points to the tile they really stand on."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -524,6 +531,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
 		namesSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_NAMES, on));
 		hoverSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HOVER, on));
+		arrowSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HOVER_ARROW, on));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));

@@ -59,7 +59,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.38";
+	static final String VERSION = "1.8.39";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -861,6 +861,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.drawMeInFront = config.drawMeInFront();
 		s.names = config.namesFollowPlayers();
 		s.hover = config.hoverShowsWho();
+		s.hoverArrow = config.hoverArrow();
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();

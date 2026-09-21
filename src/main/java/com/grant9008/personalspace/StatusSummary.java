@@ -175,6 +175,7 @@ final class StatusSummary
 			.append(", pose ").append(s.pose)
 			.append(", names over players ").append(yesNo(s.names))
 			.append(", hover shows who ").append(yesNo(s.hover))
+			.append(", arrow to their tile ").append(yesNo(s.hoverArrow))
 			.append(", pause in combat ").append(yesNo(s.pauseInCombat))
 
 			.append(", test offset ").append(s.testOffset).append('\n');
