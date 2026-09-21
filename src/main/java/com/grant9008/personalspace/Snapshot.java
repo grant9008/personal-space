@@ -93,6 +93,8 @@ final class Snapshot
 
 	// what the last game tick found
 	int nearby;
+	/** Of those, how many are aboard a boat. */
+	int aboard;
 	int still;
 	int stackedTiles;
 	int moving;

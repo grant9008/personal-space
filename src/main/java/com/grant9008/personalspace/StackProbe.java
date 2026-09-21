@@ -117,12 +117,12 @@ final class StackProbe implements RenderCallback
 		{
 			return true;
 		}
-		WorldView wv = client.getTopLevelWorldView();
+		WorldView wv = player.getWorldView();
 		if (wv == null)
 		{
 			return true;
 		}
-		long key = StackRegistry.key(player.getWorldLocation().getPlane(), lp.getSceneX(), lp.getSceneY());
+		long key = StackRegistry.key(StackRegistry.layer(wv.getId(), player.getWorldLocation().getPlane()), lp.getSceneX(), lp.getSceneY());
 		int[] members = stacks.membersAt(key);
 		if (members.length == 0 || !shouldProbe(key, members, wv, offsets.frame(), cycle))
 		{

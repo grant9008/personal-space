@@ -10,7 +10,6 @@ import net.runelite.api.Point;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.ui.overlay.Overlay;
-import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.util.Text;
@@ -50,8 +49,8 @@ final class NamesOverlay extends Overlay
 		this.client = client;
 		this.config = config;
 		this.offsets = offsets;
+		// Player Indicators draws on the default layer, above overhead chat and hitsplats; so does this.
 		setPosition(OverlayPosition.DYNAMIC);
-		setLayer(OverlayLayer.ABOVE_SCENE);
 	}
 
 	@Override
@@ -68,7 +67,21 @@ final class NamesOverlay extends Overlay
 		{
 			return null;
 		}
-		for (Player player : wv.players())
+		draw(graphics, wv, local, names);
+		for (WorldView boat : wv.worldViews())
+		{
+			if (boat != null)
+			{
+				draw(graphics, boat, local, names);
+			}
+		}
+		return null;
+	}
+
+	/** Names over the players of one world: the main world, or a boat's deck. */
+	private void draw(Graphics2D graphics, WorldView world, Player local, PersonalSpaceConfig.Names names)
+	{
+		for (Player player : world.players())
 		{
 			if (player == null || player == local)
 			{
@@ -86,16 +99,34 @@ final class NamesOverlay extends Overlay
 			int dz = offsets.dz(player.getId());
 			if (dx != 0 || dz != 0)
 			{
-				at = new LocalPoint(at.getX() + dx, at.getY() + dz, wv);
+				at = new LocalPoint(at.getX() + dx, at.getY() + dz, world);
+			}
+			// Off the edge of this world's tiles (a deck is only a few tiles across): no name.
+			if (at.getSceneX() < 0 || at.getSceneY() < 0 || at.getSceneX() >= world.getSizeX() || at.getSceneY() >= world.getSizeY())
+			{
+				continue;
+			}
+			// The same sums as the game's own Actor.getCanvasTextLocation: the ground under the
+			// player's footprint, less any lift from their animation, less the height of the name.
+			Point foot;
+			try
+			{
+				int ground = Perspective.getFootprintTileHeight(client, at, world.getPlane(), player.getFootprintSize())
+					- player.getAnimationHeightOffset();
+				foot = Perspective.localToCanvas(client, at.getWorldView(), at.getX(), at.getY(), ground - player.getLogicalHeight() - ABOVE_HEAD);
+			}
+			catch (RuntimeException e)
+			{
+				continue;
+			}
+			if (foot == null)
+			{
+				continue;
 			}
 			name = Text.sanitize(name);
-			Point where = Perspective.getCanvasTextLocation(client, graphics, at, name, player.getLogicalHeight() + ABOVE_HEAD);
-			if (where != null)
-			{
-				OverlayUtil.renderTextLocation(graphics, where, name, colour);
-			}
+			int width = (int) graphics.getFontMetrics().getStringBounds(name, graphics).getWidth();
+			OverlayUtil.renderTextLocation(graphics, new Point(foot.getX() - width / 2, foot.getY()), name, colour);
 		}
-		return null;
 	}
 
 	/** The colour a player's name gets, or null for no name. Friends first, as in Player Indicators. */

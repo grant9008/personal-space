@@ -4,8 +4,10 @@ import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -54,7 +56,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.31";
+	static final String VERSION = "1.8.32";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -121,6 +123,8 @@ public class PersonalSpacePlugin extends Plugin
 	/** What the last game tick found, for the sidebar. */
 	private Snapshot.Gate gate = Snapshot.Gate.NOT_LOGGED_IN;
 	private int nearby;
+	/** Of those, how many are on a boat. */
+	private int aboard;
 	private int still;
 	private int stackedTiles;
 	private int moving;
@@ -375,6 +379,7 @@ public class PersonalSpacePlugin extends Plugin
 			offsets.setTarget(local.getId(), config.testOffset(), 0);
 			nearby = countPlayers(wv);
 			still = 0;
+			aboard = 0;
 			stackedTiles = 0;
 			moving = config.testOffset() > 0 ? 1 : 0;
 			skippedIds = 0;
@@ -389,13 +394,30 @@ public class PersonalSpacePlugin extends Plugin
 		int nearbyCount = 0;
 		int skipped = 0;
 		int cycle = client.getGameCycle();
-		for (Player p : wv.players())
+		int onBoats = 0;
+		// The main world, then every boat in view: each is a world of its own, with its own deck.
+		List<WorldView> worlds = new ArrayList<>();
+		worlds.add(wv);
+		for (WorldView boat : wv.worldViews())
+		{
+			if (boat != null)
+			{
+				worlds.add(boat);
+			}
+		}
+		for (WorldView world : worlds)
+		{
+		for (Player p : world.players())
 		{
 			if (p == null)
 			{
 				continue;
 			}
 			nearbyCount++;
+			if (world != wv)
+			{
+				onBoats++;
+			}
 			int id = p.getId();
 			if (id < 0 || id >= OffsetTable.CAPACITY || idSeenTick[id] == tick)
 			{
@@ -417,7 +439,7 @@ public class PersonalSpacePlugin extends Plugin
 			{
 				continue;
 			}
-			long tileKey = StackRegistry.key(wp.getPlane(), lp.getSceneX(), lp.getSceneY());
+			long tileKey = StackRegistry.key(StackRegistry.layer(world.getId(), wp.getPlane()), lp.getSceneX(), lp.getSceneY());
 			boolean centred = StillnessTracker.isCentred(lp.getX(), lp.getY());
 			boolean standingStill = stillness.observe(id, tileKey, centred, tick);
 			if (!standingStill || p.isDead())
@@ -441,11 +463,19 @@ public class PersonalSpacePlugin extends Plugin
 			boolean busy = busyTick[id] != 0 && tick - busyTick[id] <= BUSY_TICKS;
 			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation(), busy));
 		}
+		}
 
 		planner.smallGroupsClose = config.smallGroupsClose();
 		planner.pose = config.pose();
 		planner.cameraX = client.getCameraX();
 		planner.cameraY = client.getCameraY();
+		if (local.getWorldView() != null && local.getWorldView().getId() != WorldView.TOPLEVEL)
+		{
+			// Aboard a boat: the deck has coordinates of its own and the camera's are the world's,
+			// so which way the camera is from you can't be told. Nobody steps out of your view.
+			planner.cameraX = Integer.MIN_VALUE;
+			planner.cameraY = Integer.MIN_VALUE;
+		}
 		planner.arrangement = config.arrangement();
 		CrowdPlanner.Plan plan = planner.plan(entries, id -> shownTick[id] == tick, config.spacing(), config.maxStack(),
 			config.arrangement() != PersonalSpaceConfig.Arrangement.CIRCLE, config.includeLocalPlayer(), tick, surroundings(wv));
@@ -471,6 +501,7 @@ public class PersonalSpacePlugin extends Plugin
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
+		aboard = onBoats;
 		still = entries.size();
 		stackedTiles = StackSpreader.stackedTiles(entries);
 		moving = plan.placements.size();
@@ -554,6 +585,7 @@ public class PersonalSpacePlugin extends Plugin
 		gate = client.getGameState() == GameState.LOGGED_IN ? gate : Snapshot.Gate.NOT_LOGGED_IN;
 		nearby = 0;
 		still = 0;
+		aboard = 0;
 		stackedTiles = 0;
 		moving = 0;
 		skippedIds = 0;
@@ -562,20 +594,29 @@ public class PersonalSpacePlugin extends Plugin
 		yourShape = null;
 	}
 
-	/** Client thread. The world around crowded tiles; the collision map is only read if a tile needs it. */
+	/**
+	 * Client thread. The world around crowded tiles: the main world's, or a boat's for tiles on
+	 * its deck. A collision map is only read if a tile on it needs it.
+	 */
 	private CrowdPlanner.Surroundings surroundings(WorldView wv)
 	{
 		return new CrowdPlanner.Surroundings()
 		{
-			private CollisionTerrain collision;
+			private final Map<Integer, CollisionTerrain> collision = new HashMap<>();
 
-			private CollisionTerrain collision()
+			private WorldView world(long tile)
 			{
-				if (collision == null)
+				int id = StackRegistry.worldViewOf(StackRegistry.plane(tile));
+				return id == WorldView.TOPLEVEL ? wv : client.getWorldView(id);
+			}
+
+			private CollisionTerrain collision(long tile)
+			{
+				return collision.computeIfAbsent(StackRegistry.worldViewOf(StackRegistry.plane(tile)), id ->
 				{
-					collision = terrain(wv);
-				}
-				return collision;
+					WorldView world = world(tile);
+					return world == null ? new CollisionTerrain(new int[4][][]) : terrain(world);
+				});
 			}
 
 			@Override
@@ -583,30 +624,35 @@ public class PersonalSpacePlugin extends Plugin
 			{
 				int x = StackRegistry.sceneX(tile) * 128 + 64;
 				int z = StackRegistry.sceneY(tile) * 128 + 64;
-				return collision().canStand(StackRegistry.plane(tile), x, z, x + dx, z + dz);
+				return collision(tile).canStand(StackRegistry.planeOf(StackRegistry.plane(tile)), x, z, x + dx, z + dz);
 			}
 
 			@Override
 			public boolean facesObstacle(long tile, double angle)
 			{
-				return collision().facesObstacle(StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
+				return collision(tile).facesObstacle(StackRegistry.planeOf(StackRegistry.plane(tile)), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
 			}
 
 			@Override
 			public boolean isCounter(long tile, double angle)
 			{
-				return collision().isCounter(StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
+				return collision(tile).isCounter(StackRegistry.planeOf(StackRegistry.plane(tile)), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
 			}
 
 			@Override
 			public List<int[]> firesNear(long tile)
 			{
 				List<int[]> out = new ArrayList<>(1);
+				WorldView world = world(tile);
+				if (world == null)
+				{
+					return out;
+				}
 				for (int east = -1; east <= 1; east++)
 				{
 					for (int north = -1; north <= 1; north++)
 					{
-						if (hasFire(wv, StackRegistry.plane(tile), StackRegistry.sceneX(tile) + east, StackRegistry.sceneY(tile) + north))
+						if (hasFire(world, StackRegistry.planeOf(StackRegistry.plane(tile)), StackRegistry.sceneX(tile) + east, StackRegistry.sceneY(tile) + north))
 						{
 							out.add(new int[]{east, north});
 						}
@@ -618,7 +664,8 @@ public class PersonalSpacePlugin extends Plugin
 			@Override
 			public boolean facesFire(long tile, double angle)
 			{
-				return PersonalSpacePlugin.this.facesFire(wv, StackRegistry.plane(tile), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
+				WorldView world = world(tile);
+				return world != null && PersonalSpacePlugin.this.facesFire(world, StackRegistry.planeOf(StackRegistry.plane(tile)), StackRegistry.sceneX(tile), StackRegistry.sceneY(tile), angle);
 			}
 		};
 	}
@@ -636,7 +683,8 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return null;
 		}
-		CrowdPlanner.TileReport yours = plan.tiles.get(StackRegistry.key(wp.getPlane(), lp.getSceneX(), lp.getSceneY()));
+		int layer = StackRegistry.layer(local.getWorldView() == null ? WorldView.TOPLEVEL : local.getWorldView().getId(), wp.getPlane());
+		CrowdPlanner.TileReport yours = plan.tiles.get(StackRegistry.key(layer, lp.getSceneX(), lp.getSceneY()));
 		if (yours == null)
 		{
 			return null;
@@ -684,11 +732,12 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return null;
 		}
+		int layer = StackRegistry.layer(local.getWorldView() == null ? WorldView.TOPLEVEL : local.getWorldView().getId(), wp.getPlane());
 		Long nearest = null;
 		int nearestDistance = Integer.MAX_VALUE;
 		for (long tile : plan.tiles.keySet())
 		{
-			if (StackRegistry.plane(tile) != wp.getPlane())
+			if (StackRegistry.plane(tile) != layer)
 			{
 				continue;
 			}
@@ -846,6 +895,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.nearestTile = nearestTile;
 		s.yourShape = yourShape;
 		s.nearby = nearby;
+		s.aboard = aboard;
 		s.still = still;
 		s.stackedTiles = stackedTiles;
 		s.moving = moving;

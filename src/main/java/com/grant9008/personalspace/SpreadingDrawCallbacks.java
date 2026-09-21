@@ -77,7 +77,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long nudgedDraws;
 	/** Hidden stackmates we drew ourselves. */
 	long revealedDraws;
-	/** Player draws for a scene other than the main one (e.g. on a boat); left alone. */
+	/** Player draws for a scene no world view owns; left alone. */
 	long sceneMismatches;
 	/** Players arriving through drawDynamic or the legacy draw call. Expected to stay 0. */
 	long playersInOtherCalls;
@@ -188,10 +188,14 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			double farthest = -1;
 			for (long tile : stacks.stackedTiles())
 			{
+				if (StackRegistry.worldViewOf(StackRegistry.plane(tile)) != WorldView.TOPLEVEL)
+				{
+					continue; // a boat's deck has coordinates of its own
+				}
 				int x = StackRegistry.sceneX(tile) * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_HALF_TILE_SIZE;
 				int z = StackRegistry.sceneY(tile) * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_HALF_TILE_SIZE;
 				double east = x - cameraX;
-				double up = tileHeight(wv, StackRegistry.plane(tile), x, z) - cameraHeight;
+				double up = tileHeight(wv, StackRegistry.planeOf(StackRegistry.plane(tile)), x, z) - cameraHeight;
 				double north = z - cameraZ;
 				farthest = Math.max(farthest, Math.sqrt(east * east + up * up + north * north));
 			}
@@ -398,7 +402,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
 			return;
 		}
-		WorldView wv = client.getTopLevelWorldView();
+		// The main world, or a boat: each is a world view with a scene of its own.
+		WorldView wv = client.getWorldView(scene.getWorldViewId());
 		if (wv == null || scene != wv.getScene())
 		{
 			sceneMismatches++;
@@ -413,17 +418,18 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			nativeFrame[drawnId] = offsets.frame();
 		}
 		int plane = gameObject.getPlane();
-		// This shim already knows it's on the client thread and the main scene here. Whether someone
-		// is kept back goes by where they are drawn, not where they stand: someone easing back from a
-		// spot is drawn past where they stand, and it's the drawn spot that has to be inside the
-		// cut-off for the order across it to be right.
-		boolean mayKeep = opaquePassSeen && !passMissed && !stacks.isEmpty();
+		int layer = StackRegistry.layer(wv.getId(), plane);
+		// This shim already knows it's on the client thread here. Whether someone is kept back goes
+		// by where they are drawn, not where they stand: someone easing back from a spot is drawn
+		// past where they stand, and it's the drawn spot that has to be inside the cut-off for the
+		// order across it to be right. Only on the main scene: a boat's deck is drawn as it comes.
+		boolean mayKeep = wv.getId() == WorldView.TOPLEVEL && opaquePassSeen && !passMissed && !stacks.isEmpty();
 		int dx = offsets.dx(drawnId);
 		int dz = offsets.dz(drawnId);
 		boolean touchedSharedModel = false;
 		if (dx != 0 || dz != 0)
 		{
-			int drawOrientation = stacks.drawOrientation(StackRegistry.key(plane, x >> 7, z >> 7), orientation, dx, dz);
+			int drawOrientation = stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
 			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
 			boolean walking = offsets.isWalking(drawnId);
 			if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
@@ -449,7 +455,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			nudgedDraws++;
 		}
 		else if (StillnessTracker.isCentred(x, z) && stacks.isUnplaced(drawnId) && !isLocal(drawn)
-			&& stacks.middleOutOfSight(StackRegistry.key(plane, x >> 7, z >> 7)))
+			&& stacks.middleOutOfSight(StackRegistry.key(layer, x >> 7, z >> 7)))
 		{
 			// Waiting in the middle of a tile that is between you and the camera: left undrawn, like
 			// the others the game hides there, rather than standing in front of you.
@@ -624,7 +630,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 */
 	private boolean drawHiddenStackmates(Projection projection, Scene scene, GameObject gameObject, Player drawn, WorldView wv, int plane, int x, int y, int z, boolean mayKeep)
 	{
-		long tileKey = StackRegistry.key(plane, x >> 7, z >> 7);
+		long tileKey = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), x >> 7, z >> 7);
 		int[] mates = stacks.membersAt(tileKey);
 		int frame = offsets.frame();
 		int heldCount = probe.heldOn(tileKey, frame, held);

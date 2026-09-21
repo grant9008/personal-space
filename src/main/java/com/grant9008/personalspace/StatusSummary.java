@@ -200,6 +200,7 @@ final class StatusSummary
 			.append(", no draws sustained: ").append(yesNo(s.noPlayerDrawsSustained))
 			.append(", nothing moved sustained: ").append(yesNo(s.nothingMovedSustained)).append('\n');
 		b.append("Nearby: ").append(s.nearby)
+			.append(", on boats: ").append(s.aboard)
 			.append(", standing still: ").append(s.still)
 			.append(", stacked tiles: ").append(s.stackedTiles)
 			.append(", being spread: ").append(s.moving)

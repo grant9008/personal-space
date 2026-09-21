@@ -59,6 +59,8 @@ turns out to be four friends hanging out.
   a spread crowd is the middle of the pile. Turn on **Names over players** and Personal Space
   draws the names over the bodies instead, in Player Indicators' colours, for friends, friends
   chat, team and clan members, or for everyone.
+- **On boats too.** A crew stacked on a deck is spread out like any other crowd. This is new
+  and I can't test it myself (no boat), so if it misbehaves, please report it.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.
@@ -150,6 +152,7 @@ anywhere.
 - Players busy with an emote or action (sitting, smithing) slide into place instead of walking, so their action isn't interrupted.
 - If **Entity Hider** hides every relevant player, the status may wrongly turn red.
 - Players past the "players per tile" limit stay hidden in the middle, as in the normal game.
+- On a boat, nobody steps out of your view: the deck has coordinates of its own, so the plugin can't tell where the camera is from you.
 
 ## Development
 

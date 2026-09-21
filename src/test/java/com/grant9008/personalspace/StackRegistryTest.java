@@ -27,6 +27,21 @@ public class StackRegistryTest
 	}
 
 	@Test
+	public void aBoatsDeckHasLayersOfItsOwn()
+	{
+		Assert.assertEquals("the main world's layers are its planes", 2, StackRegistry.layer(net.runelite.api.WorldView.TOPLEVEL, 2));
+		int deck = StackRegistry.layer(7, 1);
+		Assert.assertEquals(1, StackRegistry.planeOf(deck));
+		Assert.assertEquals(7, StackRegistry.worldViewOf(deck));
+		long onDeck = StackRegistry.key(deck, 50, 50);
+		Assert.assertNotEquals("the same tile on a boat is not the world's", StackRegistry.key(1, 50, 50), onDeck);
+		Assert.assertEquals(deck, StackRegistry.plane(onDeck));
+		Assert.assertEquals(50, StackRegistry.sceneX(onDeck));
+		Assert.assertEquals(50, StackRegistry.sceneY(onDeck));
+		Assert.assertEquals(0, StackRegistry.worldViewOf(StackRegistry.plane(StackRegistry.key(3, 9, 9))));
+	}
+
+	@Test
 	public void emptyUntilRebuiltAndNeverReturnsNull()
 	{
 		StackRegistry r = new StackRegistry();

@@ -86,7 +86,7 @@ public interface PersonalSpaceConfig extends Config
 		}
 	}
 
-	/** How two or three players standing together in the open are turned. */
+	/** Who gets a name drawn over them where they are drawn: nobody, friends and clan, or everyone. */
 	enum Names
 	{
 		OFF("Off"),
@@ -107,6 +107,7 @@ public interface PersonalSpaceConfig extends Config
 		}
 	}
 
+	/** How two or three players standing together in the open are turned. */
 	enum Pose
 	{
 		NATURAL("Natural"),

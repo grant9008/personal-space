@@ -37,14 +37,39 @@ final class StackRegistry
 	/** Tiles whose middle is between you and the camera: nobody waiting there is drawn. */
 	private volatile java.util.Set<Long> middleOutOfSight = Collections.emptySet();
 
-	static long key(int plane, int sceneX, int sceneY)
+	/**
+	 * A tile key: its layer, scene x and scene y packed into a long. A layer is a plane of the
+	 * main world (0 to 3), or a plane of a boat: a boat's deck is a world of its own, with its
+	 * own tiles and coordinates, so it gets layers of its own and its tiles never mix with the
+	 * world's. To everything that lays crowds out a layer is just "the same level or not".
+	 */
+	static long key(int layer, int sceneX, int sceneY)
 	{
-		return ((long) (plane & 0xFF) << 40) | ((long) (sceneX & 0xFFFFF) << 20) | (sceneY & 0xFFFFF);
+		return ((long) (layer & 0xFFFFFF) << 40) | ((long) (sceneX & 0xFFFFF) << 20) | (sceneY & 0xFFFFF);
 	}
 
+	/** The key's layer, see {@link #layer}. Called the plane where only sameness matters. */
 	static int plane(long key)
 	{
-		return (int) ((key >> 40) & 0xFF);
+		return (int) ((key >> 40) & 0xFFFFFF);
+	}
+
+	/** The layer for a plane of a world view. The main world's ({@code WorldView.TOPLEVEL}, 0) are its planes. */
+	static int layer(int worldViewId, int plane)
+	{
+		return ((worldViewId & 0xFFFF) << 8) | (plane & 0xFF);
+	}
+
+	/** The plane within its world view. */
+	static int planeOf(int layer)
+	{
+		return layer & 0xFF;
+	}
+
+	/** The world view's id: 0 for the main world, else a boat's. */
+	static int worldViewOf(int layer)
+	{
+		return (layer >> 8) & 0xFFFF;
 	}
 
 	static int sceneX(long key)
