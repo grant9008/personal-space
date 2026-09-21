@@ -26,6 +26,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_PAUSE_IN_COMBAT = "pauseInCombat";
 	String KEY_DRAW_ME_IN_FRONT = "drawMeInFront";
 	String KEY_NAMES = "namesFollowPlayers";
+	String KEY_HOVER = "hoverShowsWho";
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
@@ -208,7 +209,7 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_PAUSE_IN_COMBAT,
 		name = "Pause while I'm fighting",
 		description = "On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses.",
-		position = 9
+		position = 10
 	)
 	default boolean pauseInCombat()
 	{
@@ -227,10 +228,21 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = KEY_HOVER,
+		name = "Hover shows who",
+		description = "On: hover a body drawn away from its tile to see who it is, and their lines in the right-click menu light up (the others on that tile dim) for a few seconds. Clicking is unchanged: you still click people where they really stand.",
+		position = 9
+	)
+	default boolean hoverShowsWho()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = KEY_SHOW_SIDEBAR,
 		name = "Show sidebar button",
 		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
-		position = 10
+		position = 11
 	)
 	default boolean showSidebarButton()
 	{

@@ -174,6 +174,7 @@ final class StatusSummary
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 			.append(", pose ").append(s.pose)
 			.append(", names over players ").append(yesNo(s.names))
+			.append(", hover shows who ").append(yesNo(s.hover))
 			.append(", pause in combat ").append(yesNo(s.pauseInCombat))
 
 			.append(", test offset ").append(s.testOffset).append('\n');

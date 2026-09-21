@@ -61,6 +61,11 @@ turns out to be four friends hanging out.
   people, colours and rank icons, just in the right place.
 - **On boats too.** A crew stacked on a deck is spread out like any other crowd. This is new
   and I can't test it myself (no boat), so if it misbehaves, please report it.
+- **Hover to see who.** Clicking stays with the game (you click people where they really stand;
+  a plugin may not move a click zone), but hover a body drawn away from its tile and a tooltip
+  names them, the tile they really stand on is outlined, and for a few seconds their lines in the
+  right-click menu are lit up with everyone else on that tile dimmed. In a pile of ten you see
+  which "Trade with" is theirs.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.
@@ -111,6 +116,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
 | Auto-space | On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn it off to unlock the slider: it then sets how far apart everyone stands, handy for photos, though a tight spot or a big crowd on one tile can still keep people closer. |
 | Names over players | On: a name over each player where their body is drawn, using your **Player Indicators** settings for who gets one, the colours and the rank icons, so nothing changes but where the names sit. Player Indicators itself can't follow the bodies, so set its **Name position** to *Disabled* or you'll see two names per person. |
+| Hover shows who | On (the default): hover a body drawn away from its tile to see who it is, and their lines in the right-click menu light up for a few seconds while the others on that tile dim. The menu's order and what a click does are unchanged. |
 | Draw me in front | Off (the default): whoever is between you and the camera covers you, as they really would. On: you're always drawn over anyone right up against you, so you can see yourself whichever way the camera faces, at the cost of them looking behind you when they aren't. |
 | Move my character too | Off: you stay put and others step around you. On: you take a spot too, straight away when you stop rather than off to the side first, and anyone who'd stand between you and the camera steps aside, or waits out of sight if there's nowhere to go, so you can always see yourself, even in a packed bank or anvil pile. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
 | Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
