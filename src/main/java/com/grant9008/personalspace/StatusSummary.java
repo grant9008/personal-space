@@ -170,6 +170,7 @@ final class StatusSummary
 			.append(", spacing ").append(s.spacing)
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
+			.append(", draw me in front ").append(yesNo(s.drawMeInFront))
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 			.append(", pose ").append(s.pose)
 			.append(", pause in combat ").append(yesNo(s.pauseInCombat))

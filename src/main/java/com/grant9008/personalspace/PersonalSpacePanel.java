@@ -89,6 +89,7 @@ final class PersonalSpacePanel extends PluginPanel
 		PersonalSpaceConfig.Pose.values(), labels(PersonalSpaceConfig.Pose.values()));
 
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
+	private final ToggleSwitch inFrontSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
 	private final ToggleSwitch combatSwitch = new ToggleSwitch();
 
@@ -191,6 +192,7 @@ final class PersonalSpacePanel extends PluginPanel
 		arrangementPills.select(config.arrangement());
 		posePills.select(config.pose());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
+		inFrontSwitch.setOn(config.drawMeInFront());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		combatSwitch.setOn(config.pauseInCombat());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
@@ -330,6 +332,11 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Move my character too", includeMeSwitch,
 			"Off: you stay put and others step around you. On: you take a spot too, and people step out of your view where there's room."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Draw me in front", inFrontSwitch,
+			"Off: whoever is between you and the camera covers you, as they really would. On: you're drawn over anyone right up against you."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -500,6 +507,7 @@ final class PersonalSpacePanel extends PluginPanel
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
+		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
@@ -531,6 +539,7 @@ final class PersonalSpacePanel extends PluginPanel
 		arrangementPills.setEnabled(enabled);
 		posePills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
+		inFrontSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);
 		combatSwitch.setEnabled(enabled);
 	}

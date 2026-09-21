@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.29";
+	static final String VERSION = "1.8.30";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -237,6 +237,10 @@ public class PersonalSpacePlugin extends Plugin
 	public void onBeforeRender(BeforeRender event)
 	{
 		ensureInstalled();
+		if (wrapper != null)
+		{
+			wrapper.drawMeInFront = config.drawMeInFront();
+		}
 
 		long now = System.nanoTime();
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
@@ -771,6 +775,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.spacing = config.spacing();
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
+		s.drawMeInFront = config.drawMeInFront();
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();

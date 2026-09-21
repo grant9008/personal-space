@@ -34,6 +34,7 @@ final class Snapshot
 	int spacing = PersonalSpaceConfig.SPACING_WIDE;
 	int maxStack;
 	boolean includeLocal;
+	boolean drawMeInFront;
 	boolean smallGroupsClose = true;
 	boolean pauseInCombat = true;
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;

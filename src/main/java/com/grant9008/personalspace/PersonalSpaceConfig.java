@@ -24,6 +24,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_SMALL_GROUPS_CLOSE = "smallGroupsClose";
 	String KEY_POSE = "smallGroupPose";
 	String KEY_PAUSE_IN_COMBAT = "pauseInCombat";
+	String KEY_DRAW_ME_IN_FRONT = "drawMeInFront";
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
@@ -192,10 +193,21 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = KEY_DRAW_ME_IN_FRONT,
+		name = "Draw me in front",
+		description = "Off: people are drawn front to back as they really stand, so someone between you and the camera covers you. On: you're drawn over anyone right up against you, whichever way the camera faces.",
+		position = 5
+	)
+	default boolean drawMeInFront()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = KEY_PAUSE_IN_COMBAT,
 		name = "Pause while I'm fighting",
 		description = "On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses.",
-		position = 7
+		position = 8
 	)
 	default boolean pauseInCombat()
 	{
@@ -206,7 +218,7 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_SHOW_SIDEBAR,
 		name = "Show sidebar button",
 		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
-		position = 8
+		position = 9
 	)
 	default boolean showSidebarButton()
 	{
@@ -217,7 +229,7 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_SMALL_GROUPS_CLOSE,
 		name = "Auto-space",
 		description = "On: small groups, banks, walls and fires stay close whatever the slider says. Off: the slider decides everywhere.",
-		position = 5
+		position = 6
 	)
 	default boolean smallGroupsClose()
 	{
@@ -228,7 +240,7 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_POSE,
 		name = "Small group pose",
 		description = "How two or three players in the open are turned. Natural: as they really face. Angled: half towards each other. Facing: towards each other.",
-		position = 6
+		position = 7
 	)
 	default Pose pose()
 	{
