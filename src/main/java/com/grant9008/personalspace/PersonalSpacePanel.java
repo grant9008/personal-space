@@ -88,11 +88,9 @@ final class PersonalSpacePanel extends PluginPanel
 	private final PillGroup<PersonalSpaceConfig.Pose> posePills = new PillGroup<>(
 		PersonalSpaceConfig.Pose.values(), labels(PersonalSpaceConfig.Pose.values()));
 
-	private final PillGroup<PersonalSpaceConfig.Names> namesPills = new PillGroup<>(
-		PersonalSpaceConfig.Names.values(), labels(PersonalSpaceConfig.Names.values()));
-
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 	private final ToggleSwitch inFrontSwitch = new ToggleSwitch();
+	private final ToggleSwitch namesSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
 	private final ToggleSwitch combatSwitch = new ToggleSwitch();
 
@@ -194,7 +192,7 @@ final class PersonalSpacePanel extends PluginPanel
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
 		posePills.select(config.pose());
-		namesPills.select(config.names());
+		namesSwitch.setOn(config.namesFollowPlayers());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		inFrontSwitch.setOn(config.drawMeInFront());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
@@ -328,14 +326,6 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(posePills, c);
 
 		c.gridy++;
-		c.insets = new Insets(6, 0, 4, 0);
-		card.add(fieldLabel("Names over players"), c);
-		c.gridy++;
-		c.insets = new Insets(0, 0, 0, 0);
-		namesPills.setToolTipText(tip("Names drawn where the bodies are, in Player Indicators' colours. Friends & clan: friends, friends chat, team and clan. Everyone: all players. Set Player Indicators' 'Player name position' to Disabled so names aren't doubled."));
-		card.add(namesPills, c);
-
-		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
 		card.add(switchRow("Auto-space", smallGroupsSwitch,
 			"On: small groups, banks, walls and fires stay close whatever the slider says. Off: the slider decides everywhere."), c);
@@ -349,6 +339,11 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Draw me in front", inFrontSwitch,
 			"Off: whoever is between you and the camera covers you, as they really would. On: you're drawn over anyone right up against you."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Names over players", namesSwitch,
+			"On: names drawn where the bodies are, using your Player Indicators settings for who gets one, the colours and rank icons. Set Player Indicators' 'Name position' to Disabled, or names are doubled."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -518,7 +513,7 @@ final class PersonalSpacePanel extends PluginPanel
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
-		namesPills.onSelect(v -> write(PersonalSpaceConfig.KEY_NAMES, v));
+		namesSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_NAMES, on));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));

@@ -32,6 +32,8 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.game.ChatIconManager;
+import net.runelite.client.party.PartyService;
 import net.runelite.client.callback.RenderCallbackManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -56,7 +58,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.33";
+	static final String VERSION = "1.8.34";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -82,6 +84,12 @@ public class PersonalSpacePlugin extends Plugin
 
 	@Inject
 	private OverlayManager overlayManager;
+
+	@Inject
+	private PartyService partyService;
+
+	@Inject
+	private ChatIconManager chatIconManager;
 
 	private NamesOverlay namesOverlay;
 
@@ -154,7 +162,7 @@ public class PersonalSpacePlugin extends Plugin
 	{
 		probe = new StackProbe(client, offsets, stacks);
 		renderCallbackManager.register(probe);
-		namesOverlay = new NamesOverlay(client, config, offsets);
+		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager);
 		overlayManager.add(namesOverlay);
 
 		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
@@ -838,7 +846,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.drawMeInFront = config.drawMeInFront();
-		s.names = config.names();
+		s.names = config.namesFollowPlayers();
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();

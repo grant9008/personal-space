@@ -1,26 +1,50 @@
 package com.grant9008.personalspace;
 
+import java.awt.Color;
 import org.junit.Assert;
 import org.junit.Test;
 
 public class NamesOverlayTest
 {
-	@Test
-	public void friendsAndClanGetPlayerIndicatorsColoursAndStrangersGetNone()
+	private static Color pick(NamesOverlay.Look look, boolean pvp, boolean you, boolean party, boolean friend, boolean friendsChat, boolean team, boolean clan)
 	{
-		PersonalSpaceConfig.Names some = PersonalSpaceConfig.Names.FRIENDS;
-		Assert.assertEquals(NamesOverlay.FRIEND, NamesOverlay.colourFor(some, true, true, true, true));
-		Assert.assertEquals(NamesOverlay.FRIENDS_CHAT, NamesOverlay.colourFor(some, false, true, true, true));
-		Assert.assertEquals(NamesOverlay.TEAM, NamesOverlay.colourFor(some, false, false, true, true));
-		Assert.assertEquals(NamesOverlay.CLAN, NamesOverlay.colourFor(some, false, false, false, true));
-		Assert.assertNull("a stranger gets no name", NamesOverlay.colourFor(some, false, false, false, false));
+		return NamesOverlay.colourFor(look, pvp, you, party, friend, friendsChat, team, clan);
 	}
 
 	@Test
-	public void everyoneGivesStrangersANameAndOffGivesNobodyOne()
+	public void playerIndicatorsDefaultsNameFriendsChatTeamAndClanButNotYouOrStrangers()
 	{
-		Assert.assertEquals(NamesOverlay.OTHERS, NamesOverlay.colourFor(PersonalSpaceConfig.Names.EVERYONE, false, false, false, false));
-		Assert.assertEquals(NamesOverlay.FRIEND, NamesOverlay.colourFor(PersonalSpaceConfig.Names.EVERYONE, true, false, false, false));
-		Assert.assertNull(NamesOverlay.colourFor(PersonalSpaceConfig.Names.OFF, true, true, true, true));
+		NamesOverlay.Look look = new NamesOverlay.Look();
+		Assert.assertEquals(look.friendColour, pick(look, false, false, false, true, true, true, true));
+		Assert.assertEquals(look.friendsChatColour, pick(look, false, false, false, false, true, true, true));
+		Assert.assertEquals(look.teamColour, pick(look, false, false, false, false, false, true, true));
+		Assert.assertEquals(look.clanColour, pick(look, false, false, false, false, false, false, true));
+		Assert.assertEquals(look.partyColour, pick(look, false, false, true, true, false, false, false));
+		Assert.assertNull("a stranger gets no name", pick(look, false, false, false, false, false, false, false));
+		Assert.assertNull("nor do you", pick(look, false, true, false, true, true, true, true));
+	}
+
+	@Test
+	public void switchesAreHonouredInPlayerIndicatorsOrder()
+	{
+		NamesOverlay.Look look = new NamesOverlay.Look();
+		look.own = NamesOverlay.Highlight.ENABLED;
+		look.others = NamesOverlay.Highlight.ENABLED;
+		look.friend = NamesOverlay.Highlight.DISABLED;
+		Assert.assertEquals("you get your own colour", look.ownColour, pick(look, false, true, false, false, false, false, false));
+		Assert.assertEquals("strangers get the others colour", look.othersColour, pick(look, false, false, false, false, false, false, false));
+		Assert.assertEquals("a friend with friends off falls through to others", look.othersColour, pick(look, false, false, false, true, false, false, false));
+		Assert.assertNull("but a friends chat member never counts as others", pick(look, false, false, false, true, true, false, false) == look.friendsChatColour ? null : "x");
+	}
+
+	@Test
+	public void pvpOnlySettingsApplyOnlyWhereYouCanBeAttacked()
+	{
+		NamesOverlay.Look look = new NamesOverlay.Look();
+		look.others = NamesOverlay.Highlight.PVP;
+		Assert.assertNull(pick(look, false, false, false, false, false, false, false));
+		Assert.assertEquals(look.othersColour, pick(look, true, false, false, false, false, false, false));
+		Assert.assertTrue(NamesOverlay.on(NamesOverlay.Highlight.ENABLED, false));
+		Assert.assertFalse(NamesOverlay.on(NamesOverlay.Highlight.DISABLED, true));
 	}
 }

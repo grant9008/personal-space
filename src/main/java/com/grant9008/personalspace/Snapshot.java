@@ -35,7 +35,7 @@ final class Snapshot
 	int maxStack;
 	boolean includeLocal;
 	boolean drawMeInFront;
-	PersonalSpaceConfig.Names names = PersonalSpaceConfig.Names.OFF;
+	boolean names;
 	boolean smallGroupsClose = true;
 	boolean pauseInCombat = true;
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
