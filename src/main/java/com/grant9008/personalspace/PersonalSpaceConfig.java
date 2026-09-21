@@ -230,7 +230,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HOVER,
 		name = "Hover shows who",
-		description = "On: hover a body drawn away from its tile to see who it is, and their lines in the right-click menu light up (the others on that tile dim) for a few seconds. Clicking is unchanged: you still click people where they really stand.",
+		description = "On: hover a body drawn away from its tile to see who it is, with a small arrow to where they really stand. Clicking is unchanged: you still click people where they really stand.",
 		position = 9
 	)
 	default boolean hoverShowsWho()

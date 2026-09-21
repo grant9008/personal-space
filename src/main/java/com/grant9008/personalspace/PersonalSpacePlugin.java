@@ -29,8 +29,6 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
-import net.runelite.api.events.MenuOpened;
-import net.runelite.api.MenuEntry;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
@@ -61,7 +59,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.36";
+	static final String VERSION = "1.8.37";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -229,67 +227,6 @@ public class PersonalSpacePlugin extends Plugin
 			uninstall();
 			resetTickState();
 		});
-	}
-
-	/**
-	 * The right-click menu just opened: light up the lines of the person whose drawn body you
-	 * hovered a moment ago, and dim the others standing on their tile. Nothing is added, removed
-	 * or reordered, so what a click does is exactly what it always was.
-	 */
-	@Subscribe
-	public void onMenuOpened(MenuOpened event)
-	{
-		if (hoverOverlay == null || !config.hoverShowsWho())
-		{
-			return;
-		}
-		int id = hoverOverlay.remembered(client.getTickCount());
-		if (id < 0)
-		{
-			return;
-		}
-		Player who = null;
-		MenuEntry[] entries = event.getMenuEntries();
-		for (MenuEntry entry : entries)
-		{
-			Player p = entry.getPlayer();
-			if (p != null && p.getId() == id)
-			{
-				who = p;
-			}
-		}
-		if (who == null)
-		{
-			return;
-		}
-		for (MenuEntry entry : entries)
-		{
-			Player p = entry.getPlayer();
-			if (p == null)
-			{
-				continue;
-			}
-			if (p == who)
-			{
-				entry.setTarget(HoverOverlay.lit(entry.getTarget()));
-			}
-			else if (sameTile(p, who))
-			{
-				entry.setTarget(HoverOverlay.dimmed(entry.getTarget()));
-			}
-		}
-	}
-
-	/** Whether two players really stand on the same tile. */
-	private static boolean sameTile(Player a, Player b)
-	{
-		LocalPoint la = a.getLocalLocation();
-		LocalPoint lb = b.getLocalLocation();
-		WorldPoint wa = a.getWorldLocation();
-		WorldPoint wb = b.getWorldLocation();
-		return la != null && lb != null && wa != null && wb != null
-			&& la.getSceneX() == lb.getSceneX() && la.getSceneY() == lb.getSceneY()
-			&& la.getWorldView() == lb.getWorldView() && wa.getPlane() == wb.getPlane();
 	}
 
 	@Subscribe

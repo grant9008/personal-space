@@ -1,9 +1,11 @@
 package com.grant9008.personalspace;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
+import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import net.runelite.api.Client;
@@ -14,10 +16,8 @@ import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.ui.overlay.tooltip.Tooltip;
 import net.runelite.client.ui.overlay.tooltip.TooltipManager;
-import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.Text;
 
 /**
@@ -25,21 +25,16 @@ import net.runelite.client.util.Text;
  *
  * <p>Clicking stays with the game: you click people where they really stand, because a plugin
  * may not move a click zone. But you can be told who you're looking at. With the mouse over a
- * body drawn away from its tile, a tooltip gives the name and combat level, the tile they really
- * stand on is outlined, and for a few seconds afterwards their lines in the game's right-click
- * menu are lit up and the other people on that tile dimmed (see the plugin's menu handler), so
- * in a pile of ten you see which "Trade with" is theirs. The menu's order and what a click does
- * are untouched.
+ * body drawn away from its tile, a tooltip gives the name and combat level, and a small arrow
+ * points from the body to where they really stand.
  */
 final class HoverOverlay extends Overlay
 {
-	/** How long the last body you hovered stays lit in the right-click menu: 8 ticks, about 5 s. */
-	static final int HOVER_MEMORY = 8;
-	/** Their lines in the menu, and everyone else's on that tile. */
-	static final Color LIT = new Color(255, 232, 0);
-	static final Color DIMMED = new Color(120, 120, 120);
-	/** The outline of the tile they really stand on. */
-	private static final Color REALLY_HERE = new Color(255, 232, 0, 140);
+	/** The arrow from the body to where they really are. */
+	private static final Color ARROW = new Color(255, 232, 0, 200);
+	private static final BasicStroke ARROW_STROKE = new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+	/** Closer than this on the screen and the arrow would be a smudge: they're standing right there. */
+	private static final int ARROW_MIN = 24;
 
 	private final Client client;
 	private final PersonalSpaceConfig config;
@@ -47,8 +42,9 @@ final class HoverOverlay extends Overlay
 	private final StackRegistry stacks;
 	private final TooltipManager tooltips;
 
-	private int hoveredId = -1;
-	private int hoveredTick = Integer.MIN_VALUE;
+	/** Where the hovered body's feet and its real tile are on the screen this frame. */
+	private Point hoveredFeet;
+	private Point hoveredReal;
 
 	HoverOverlay(Client client, PersonalSpaceConfig config, OffsetTable offsets, StackRegistry stacks, TooltipManager tooltips)
 	{
@@ -60,16 +56,10 @@ final class HoverOverlay extends Overlay
 		setPosition(OverlayPosition.DYNAMIC);
 	}
 
-	/** The player whose drawn body was last under the mouse, if that was in the last few seconds; else -1. */
-	int remembered(int tick)
-	{
-		return tick - hoveredTick <= HOVER_MEMORY ? hoveredId : -1;
-	}
-
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.hoverShowsWho())
+		if (!config.hoverShowsWho() || client.isMenuOpen())
 		{
 			return null;
 		}
@@ -80,66 +70,38 @@ final class HoverOverlay extends Overlay
 		{
 			return null;
 		}
-		int tick = client.getTickCount();
-		if (client.isMenuOpen())
-		{
-			// The mouse is on the menu now: keep showing where the person it's lit for really stands.
-			int id = remembered(tick);
-			Player who = id < 0 ? null : find(top, id);
-			if (who != null)
-			{
-				outline(graphics, who);
-			}
-			return null;
-		}
-		Player best = null;
-		int bestY = Integer.MIN_VALUE;
-		best = nearestUnderMouse(graphics, top, local, mouse, best, bestY);
+		hoveredFeet = null;
+		hoveredReal = null;
+		Player best = nearestUnderMouse(top, local, mouse, null);
 		for (WorldView boat : top.worldViews())
 		{
 			if (boat != null)
 			{
-				best = nearestUnderMouse(graphics, boat, local, mouse, best, bestY);
+				best = nearestUnderMouse(boat, local, mouse, best);
 			}
 		}
 		if (best == null)
 		{
 			return null;
 		}
-		hoveredId = best.getId();
-		hoveredTick = tick;
 		String name = best.getName();
 		if (name != null)
 		{
 			tooltips.add(new Tooltip(Text.sanitize(name) + "  (level-" + best.getCombatLevel() + ")"));
 		}
-		outline(graphics, best);
-		return null;
-	}
-
-	private Player find(WorldView top, int id)
-	{
-		Player p = top.players().byIndex(id);
-		if (p != null)
+		if (hoveredFeet != null && hoveredReal != null)
 		{
-			return p;
-		}
-		for (WorldView boat : top.worldViews())
-		{
-			p = boat == null ? null : boat.players().byIndex(id);
-			if (p != null)
-			{
-				return p;
-			}
+			arrow(graphics, hoveredFeet, hoveredReal);
 		}
 		return null;
 	}
 
 	/** Of this world's players drawn away from where they stand, the one under the mouse nearest the camera. */
-	private Player nearestUnderMouse(Graphics2D graphics, WorldView world, Player local, Point mouse, Player best, int bestY)
+	private Player nearestUnderMouse(WorldView world, Player local, Point mouse, Player best)
 	{
 		int mx = mouse.getX();
 		int my = mouse.getY();
+		int bestY = hoveredFeet == null ? Integer.MIN_VALUE : hoveredFeet.getY();
 		for (Player p : world.players())
 		{
 			if (p == null || p == local)
@@ -173,10 +135,12 @@ final class HoverOverlay extends Overlay
 			}
 			Point feet;
 			Point head;
+			Point realFeet;
 			try
 			{
 				feet = Perspective.localToCanvas(client, drawn, plane);
 				head = Perspective.localToCanvas(client, drawn, plane, p.getLogicalHeight());
+				realFeet = away ? Perspective.localToCanvas(client, lp, plane) : feet;
 			}
 			catch (RuntimeException e)
 			{
@@ -198,7 +162,6 @@ final class HoverOverlay extends Overlay
 			try
 			{
 				Shape hull = p.getConvexHull();
-				Point realFeet = away ? Perspective.localToCanvas(client, lp, plane) : feet;
 				if (hull != null && realFeet != null)
 				{
 					Shape slid = AffineTransform.getTranslateInstance(feet.getX() - realFeet.getX(), feet.getY() - realFeet.getY())
@@ -214,42 +177,40 @@ final class HoverOverlay extends Overlay
 			{
 				best = p;
 				bestY = feet.getY();
+				hoveredFeet = feet;
+				hoveredReal = away ? realFeet : null;
 			}
 		}
 		return best;
 	}
 
-	/** Outline the tile someone really stands on, when they're drawn somewhere else. */
-	private void outline(Graphics2D graphics, Player who)
+	/** A small arrow from the drawn body's feet to where they really stand. */
+	private static void arrow(Graphics2D graphics, Point from, Point to)
 	{
-		LocalPoint lp = who.getLocalLocation();
-		if (lp == null || !offsets.isOffset(who.getId()))
+		double dx = to.getX() - from.getX();
+		double dy = to.getY() - from.getY();
+		double length = Math.hypot(dx, dy);
+		if (length < ARROW_MIN)
 		{
 			return;
 		}
-		try
-		{
-			Polygon tile = Perspective.getCanvasTilePoly(client, lp);
-			if (tile != null)
-			{
-				OverlayUtil.renderPolygon(graphics, tile, REALLY_HERE);
-			}
-		}
-		catch (RuntimeException e)
-		{
-			// no outline, then
-		}
-	}
-
-	/** A menu line for the person you hovered: lit, with a marker. */
-	static String lit(String target)
-	{
-		return ColorUtil.wrapWithColorTag("> " + Text.removeTags(target), LIT);
-	}
-
-	/** A menu line for someone else on that tile: dimmed. */
-	static String dimmed(String target)
-	{
-		return ColorUtil.wrapWithColorTag(Text.removeTags(target), DIMMED);
+		double ux = dx / length;
+		double uy = dy / length;
+		int x1 = (int) Math.round(from.getX() + ux * 8);
+		int y1 = (int) Math.round(from.getY() + uy * 8);
+		int x2 = (int) Math.round(to.getX() - ux * 3);
+		int y2 = (int) Math.round(to.getY() - uy * 3);
+		Object aa = graphics.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+		graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		graphics.setColor(ARROW);
+		graphics.setStroke(ARROW_STROKE);
+		graphics.drawLine(x1, y1, x2, y2);
+		double angle = Math.atan2(dy, dx);
+		Polygon head = new Polygon();
+		head.addPoint(x2, y2);
+		head.addPoint((int) Math.round(x2 - 9 * Math.cos(angle - 0.45)), (int) Math.round(y2 - 9 * Math.sin(angle - 0.45)));
+		head.addPoint((int) Math.round(x2 - 9 * Math.cos(angle + 0.45)), (int) Math.round(y2 - 9 * Math.sin(angle + 0.45)));
+		graphics.fillPolygon(head);
+		graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa == null ? RenderingHints.VALUE_ANTIALIAS_DEFAULT : aa);
 	}
 }
