@@ -38,6 +38,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import org.slf4j.Logger;
@@ -53,7 +54,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.30";
+	static final String VERSION = "1.8.31";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -76,6 +77,11 @@ public class PersonalSpacePlugin extends Plugin
 
 	@Inject
 	private ClientToolbar clientToolbar;
+
+	@Inject
+	private OverlayManager overlayManager;
+
+	private NamesOverlay namesOverlay;
 
 	@Inject
 	private RenderCallbackManager renderCallbackManager;
@@ -144,6 +150,8 @@ public class PersonalSpacePlugin extends Plugin
 	{
 		probe = new StackProbe(client, offsets, stacks);
 		renderCallbackManager.register(probe);
+		namesOverlay = new NamesOverlay(client, config, offsets);
+		overlayManager.add(namesOverlay);
 
 		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
 		BufferedImage icon = ImageUtil.loadImageResource(PersonalSpacePlugin.class, "panel_icon.png");
@@ -178,6 +186,11 @@ public class PersonalSpacePlugin extends Plugin
 	protected void shutDown()
 	{
 		renderCallbackManager.unregister(probe);
+		if (namesOverlay != null)
+		{
+			overlayManager.remove(namesOverlay);
+			namesOverlay = null;
+		}
 		panel = null;
 		if (navButton != null)
 		{
@@ -776,6 +789,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.drawMeInFront = config.drawMeInFront();
+		s.names = config.names();
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();

@@ -25,6 +25,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_POSE = "smallGroupPose";
 	String KEY_PAUSE_IN_COMBAT = "pauseInCombat";
 	String KEY_DRAW_ME_IN_FRONT = "drawMeInFront";
+	String KEY_NAMES = "namesOverPlayers";
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
@@ -86,6 +87,26 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	/** How two or three players standing together in the open are turned. */
+	enum Names
+	{
+		OFF("Off"),
+		FRIENDS("Friends & clan"),
+		EVERYONE("Everyone");
+
+		private final String label;
+
+		Names(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
 	enum Pose
 	{
 		NATURAL("Natural"),
@@ -207,7 +228,7 @@ public interface PersonalSpaceConfig extends Config
 		keyName = KEY_PAUSE_IN_COMBAT,
 		name = "Pause while I'm fighting",
 		description = "On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses.",
-		position = 8
+		position = 9
 	)
 	default boolean pauseInCombat()
 	{
@@ -215,10 +236,21 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = KEY_NAMES,
+		name = "Names over players",
+		description = "Names drawn over players where Personal Space draws them, in Player Indicators' colours. Friends & clan: friends, friends chat, team and clan members. Everyone: all players. Set Player Indicators' 'Player name position' to Disabled so names aren't doubled.",
+		position = 8
+	)
+	default Names names()
+	{
+		return Names.OFF;
+	}
+
+	@ConfigItem(
 		keyName = KEY_SHOW_SIDEBAR,
 		name = "Show sidebar button",
 		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
-		position = 9
+		position = 10
 	)
 	default boolean showSidebarButton()
 	{

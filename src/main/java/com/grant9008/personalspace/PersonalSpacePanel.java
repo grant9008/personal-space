@@ -88,6 +88,9 @@ final class PersonalSpacePanel extends PluginPanel
 	private final PillGroup<PersonalSpaceConfig.Pose> posePills = new PillGroup<>(
 		PersonalSpaceConfig.Pose.values(), labels(PersonalSpaceConfig.Pose.values()));
 
+	private final PillGroup<PersonalSpaceConfig.Names> namesPills = new PillGroup<>(
+		PersonalSpaceConfig.Names.values(), labels(PersonalSpaceConfig.Names.values()));
+
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 	private final ToggleSwitch inFrontSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
@@ -191,6 +194,7 @@ final class PersonalSpacePanel extends PluginPanel
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
 		posePills.select(config.pose());
+		namesPills.select(config.names());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		inFrontSwitch.setOn(config.drawMeInFront());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
@@ -322,6 +326,14 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(0, 0, 0, 0);
 		posePills.setToolTipText(tip("How two or three players in the open are turned. Natural: as they really face. Angled: half towards each other. Facing: towards each other."));
 		card.add(posePills, c);
+
+		c.gridy++;
+		c.insets = new Insets(6, 0, 4, 0);
+		card.add(fieldLabel("Names over players"), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		namesPills.setToolTipText(tip("Names drawn where the bodies are, in Player Indicators' colours. Friends & clan: friends, friends chat, team and clan. Everyone: all players. Set Player Indicators' 'Player name position' to Disabled so names aren't doubled."));
+		card.add(namesPills, c);
 
 		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
@@ -506,6 +518,7 @@ final class PersonalSpacePanel extends PluginPanel
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
+		namesPills.onSelect(v -> write(PersonalSpaceConfig.KEY_NAMES, v));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));

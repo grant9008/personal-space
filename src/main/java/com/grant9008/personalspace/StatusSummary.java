@@ -173,6 +173,7 @@ final class StatusSummary
 			.append(", draw me in front ").append(yesNo(s.drawMeInFront))
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 			.append(", pose ").append(s.pose)
+			.append(", names ").append(s.names)
 			.append(", pause in combat ").append(yesNo(s.pauseInCombat))
 
 			.append(", test offset ").append(s.testOffset).append('\n');
