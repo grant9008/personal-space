@@ -429,9 +429,14 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		boolean touchedSharedModel = false;
 		if (dx != 0 || dz != 0)
 		{
-			int drawOrientation = stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
+			// Someone really walking off (from the bank back to the anvil, say) keeps the game's own
+			// walk and facing while their offset runs out. Drawn with ours instead, they faced back
+			// towards the tile they had left, the way the offset was shrinking, while their body was
+			// carried the other way: moonwalking off until the offset had gone.
+			boolean reallyMoving = reallyMoving(drawn);
+			int drawOrientation = reallyMoving ? orientation : stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
 			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
-			boolean walking = offsets.isWalking(drawnId);
+			boolean walking = offsets.isWalking(drawnId) && !reallyMoving;
 			if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
 			{
 				keep(projection, scene, gameObject, drawn, drawOrientation, offsets.walkOrientation(drawnId), x + dx, drawY, z + dz, walking);
@@ -490,6 +495,15 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				revealErrors++;
 			}
 		}
+	}
+
+	/** Whether the game has this player walking or running for real, rather than standing. */
+	private static boolean reallyMoving(Player player)
+	{
+		int pose = player.getPoseAnimation();
+		return pose != -1 && pose != player.getIdlePoseAnimation()
+			&& (pose == player.getWalkAnimation() || pose == player.getRunAnimation() || pose == player.getWalkRotate180()
+			|| pose == player.getWalkRotateLeft() || pose == player.getWalkRotateRight());
 	}
 
 	/**
