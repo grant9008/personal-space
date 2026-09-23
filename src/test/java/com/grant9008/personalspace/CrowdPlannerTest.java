@@ -2940,4 +2940,74 @@ public class CrowdPlannerTest
 			Assert.assertNull("the newcomer waits", now.get(6));
 		}
 	}
+
+	@Test
+	public void someoneJoiningYouAtAFireGoesStraightToYourSideFromAnyAngle()
+	{
+		// You at a fire on your own; someone joins you. From every camera direction they are put
+		// beside you the tick they arrive and stay there: not round the far side of you first
+		// (judged from where you stood a moment ago), and not round the far side for good (with the
+		// camera on their side, you take that side and they the other).
+		CrowdPlanner.Surroundings fire = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return dz <= 60;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				List<int[]> out = new ArrayList<>();
+				out.add(new int[]{0, 1});
+				return out;
+			}
+		};
+		int[][] cameras = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+		for (int[] camera : cameras)
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			cameraAt(planner, camera[0], camera[1]);
+			List<StackSpreader.Entry> alone = new ArrayList<>();
+			alone.add(new StackSpreader.Entry(99, TILE, true, NORTH));
+			for (int t = 1; t <= 5; t++)
+			{
+				planner.plan(alone, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, fire);
+			}
+			List<StackSpreader.Entry> pair = new ArrayList<>(alone);
+			pair.add(new StackSpreader.Entry(7, TILE, false, NORTH));
+			Map<Integer, int[]> first = null;
+			for (int t = 6; t <= 10; t++)
+			{
+				Map<Integer, int[]> now = spots(planner.plan(pair, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, fire));
+				String where = "camera " + camera[0] + "," + camera[1] + " tick " + t + ": ";
+				Assert.assertEquals(where + "side by side, level with you", now.get(99)[1], now.get(7)[1]);
+				Assert.assertTrue(where + "right beside you", Math.abs(now.get(99)[0] - now.get(7)[0]) <= 64);
+				if (first == null)
+				{
+					first = now;
+				}
+				Assert.assertArrayEquals(where + "they moved", first.get(7), now.get(7));
+			}
+		}
+	}
 }

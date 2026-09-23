@@ -124,6 +124,17 @@ final class SlotBook
 	Set<Integer> busy = new HashSet<>();
 
 	/**
+	 * For the tile you're on, when just you and one other are about to be given spots there: the
+	 * spot to take yourself, the one on the camera's side. Take the other and the one left, with
+	 * the camera off to their side of you, stood between you and it, and was sent round to your
+	 * far side instead of beside you. Chosen once, when the pair forms, and kept while you stay:
+	 * turning the camera afterwards doesn't swap you.
+	 */
+	Map<Long, Integer> pairSideForYou = new HashMap<>();
+	private long yourPickTile = Long.MIN_VALUE;
+	private int yourPick;
+
+	/**
 	 * This tick, people who would have stood between you and the camera with nowhere else on
 	 * their tile to go: they wait without a spot, like anyone past the players-per-tile limit.
 	 */
@@ -266,13 +277,20 @@ final class SlotBook
 			{
 				arriving.add(0, localId);
 			}
-			int yours = 0;
+			int yours = yourPickTile == e.getKey() ? yourPick : 0;
 			Set<Integer> inFront = keepClear.getOrDefault(e.getKey(), Collections.emptySet());
 			for (int id : arriving)
 			{
 				if (t.slotOf.containsKey(id))
 				{
 					continue;
+				}
+				if (id == localId && yourPickTile != e.getKey())
+				{
+					Integer side = pairSideForYou.get(e.getKey());
+					yourPick = side != null && side < capacity ? side : 0;
+					yourPickTile = e.getKey();
+					yours = yourPick;
 				}
 				if (id == localId && yours < capacity && !t.occupant.containsKey(yours) && !t.held(yours, tick))
 				{
@@ -500,6 +518,7 @@ final class SlotBook
 		if (!sawLocal)
 		{
 			localTile = Long.MIN_VALUE;
+			yourPickTile = Long.MIN_VALUE;
 		}
 		return out;
 	}

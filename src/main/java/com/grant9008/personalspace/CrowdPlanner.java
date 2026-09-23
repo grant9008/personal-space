@@ -1276,10 +1276,10 @@ final class CrowdPlanner
 	 * the side, a counter is one long row, and the people at the next booth along are the ones in
 	 * the way.
 	 */
-	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile)
+	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile, long lastYouTile, int lastYouSlot)
 	{
 		Map<Long, Set<Integer>> out = new HashMap<>();
-		if (lastYouAt == null)
+		if (this.lastYouAt == null && lastYouSlot < 0)
 		{
 			return out;
 		}
@@ -1290,6 +1290,10 @@ final class CrowdPlanner
 			// Where your spot is drawn this tick, so a change of spacing isn't judged from the old one.
 			lastYouAt = new double[]{StackRegistry.sceneX(lastYouTile) * 2.0 * HALF_TILE + HALF_TILE + yours.get(lastYouSlot)[0],
 				StackRegistry.sceneY(lastYouTile) * 2.0 * HALF_TILE + HALF_TILE + yours.get(lastYouSlot)[1]};
+		}
+		if (lastYouAt == null)
+		{
+			return out;
 		}
 		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{
@@ -1804,7 +1808,40 @@ final class CrowdPlanner
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal, tick);
 
-		slots.keepClear = spotsInFront(view, spotsByTile);
+		// When just you and one other are about to be given spots on your tile, stand on the
+		// camera's side: see SlotBook.pairSideForYou.
+		slots.pairSideForYou = new HashMap<>();
+		long youTileNow = Long.MIN_VALUE;
+		for (StackSpreader.Entry e : still)
+		{
+			if (e.id == localId)
+			{
+				youTileNow = e.tile;
+			}
+		}
+		List<StackSpreader.Entry> withYou = youTileNow == Long.MIN_VALUE ? null : byTile.get(youTileNow);
+		List<int[]> yourSpots = youTileNow == Long.MIN_VALUE ? null : spotsByTile.get(youTileNow);
+		if (view != null && withYou != null && withYou.size() == 2 && yourSpots != null && yourSpots.size() >= 2)
+		{
+			double east = yourSpots.get(1)[0] - yourSpots.get(0)[0];
+			double north = yourSpots.get(1)[1] - yourSpots.get(0)[1];
+			if (east * view[0] + north * view[1] > VIEW_IN_FRONT && Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP)
+			{
+				slots.pairSideForYou.put(youTileNow, 1);
+			}
+		}
+		// Your personal space and line of sight are judged from where you'll stand. The tick you
+		// are first given a spot you were in the middle of your tile a moment ago, and judged from
+		// there, the spot beside you fell inside you: the other player went round you first and
+		// came back beside you a tick later.
+		long judgeTile = lastYouTile;
+		int judgeSlot = lastYouSlot;
+		if (lastYouSlot < 0 && yourSpots != null)
+		{
+			judgeTile = youTileNow;
+			judgeSlot = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
+		}
+		slots.keepClear = spotsInFront(view, spotsByTile, judgeTile, judgeSlot);
 		slots.spare = new HashMap<>();
 		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{
