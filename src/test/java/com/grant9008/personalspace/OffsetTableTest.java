@@ -39,4 +39,31 @@ public class OffsetTableTest
 		t.advance(0.016f);
 		Assert.assertTrue(t.isWalking(6));
 	}
+
+	@Test
+	public void aPairAtABankStepsApartAndBackRatherThanSliding()
+	{
+		// Two on a counter tile stand 48 apart: 24 each side of the middle.
+		OffsetTable t = new OffsetTable();
+		t.setTarget(5, 24, 0);
+		t.advance(0.016f);
+		Assert.assertTrue("stepping out of the middle walks, however short", t.isWalking(5));
+		t.advance(0.3f);
+		Assert.assertEquals(24, t.dx(5));
+		t.setTarget(5, 0, 0);
+		t.advance(0.016f);
+		Assert.assertTrue("and so does stepping back into it", t.isWalking(5));
+	}
+
+	@Test
+	public void aShortCorrectionBetweenTwoSpotsStillDrifts()
+	{
+		OffsetTable t = new OffsetTable();
+		t.setTarget(5, 48, 0);
+		t.advance(0.5f);
+		Assert.assertEquals(48, t.dx(5));
+		t.setTarget(5, 68, 0);
+		t.advance(0.016f);
+		Assert.assertFalse("a 20-unit correction drifts", t.isWalking(5));
+	}
 }

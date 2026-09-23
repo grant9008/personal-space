@@ -18,8 +18,14 @@ final class OffsetTable
 
 	/** Walking pace: the game's own, one tile (128 units) every 0.6 seconds. */
 	static final float WALK_SPEED = 128f / 0.6f;
-	/** Moves shorter than this just drift into place, with no walk animation, so small corrections don't look like shuffling. */
+	/** Moves between two spots shorter than this just drift into place, with no walk animation, so small corrections don't look like shuffling. */
 	static final float MIN_WALK_DISTANCE = 28f;
+	/**
+	 * Stepping out of the middle of a tile, or back into it, walks from this far. That is a real
+	 * step even when it's short: two at a bank stand half a body's width either side of the middle,
+	 * 24 each, and used to slide apart (and the one left behind slide back) while three walked.
+	 */
+	static final float MIN_STEP_DISTANCE = 12f;
 
 	private final float[] curX = new float[CAPACITY];
 	private final float[] curZ = new float[CAPACITY];
@@ -178,6 +184,8 @@ final class OffsetTable
 		float ez = tgtZ[id] - curZ[id];
 		float dist = (float) Math.hypot(ex, ez);
 		float stride = WALK_SPEED * dt;
+		// Out of the middle of the tile or back into it, rather than from one spot to another.
+		boolean stepInOrOut = (tgtX[id] == 0 && tgtZ[id] == 0) || (curX[id] == 0f && curZ[id] == 0f);
 		if (dist <= Math.max(stride, 0.5f))
 		{
 			curX[id] = tgtX[id];
@@ -190,7 +198,7 @@ final class OffsetTable
 		curZ[id] += ez / dist * stride;
 		if (!walking[id])
 		{
-			if (dist < MIN_WALK_DISTANCE)
+			if (dist < (stepInOrOut ? MIN_STEP_DISTANCE : MIN_WALK_DISTANCE))
 			{
 				return; // a small correction: drift, don't start a walk
 			}
