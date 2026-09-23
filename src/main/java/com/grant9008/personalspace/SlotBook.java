@@ -84,6 +84,12 @@ final class SlotBook
 
 	private final Map<Long, Tile> tiles = new HashMap<>();
 
+	/** Whether this spot is being held for you: the only hold a newcomer doesn't walk into. */
+	private boolean heldForYou(Tile t, int slot, int tick)
+	{
+		return t.held(slot, tick) && yourId >= 0 && Integer.valueOf(yourId).equals(t.heldFor.get(slot));
+	}
+
 	/** Diagnostics: how many times a player who already had a spot was given a different one. */
 	long moves;
 
@@ -92,6 +98,9 @@ final class SlotBook
 	 * tile (the front, where what you're doing looks right); whoever had it swaps with you, once.
 	 */
 	int localId = -1;
+
+	/** Your player id whether or not your character is moved or here now: a spot held for you is never given away. */
+	int yourId = -1;
 
 
 
@@ -268,11 +277,15 @@ final class SlotBook
 					movedYou = true;
 					continue;
 				}
-				// The best free spot out of your way, or, when there is none, any free spot.
+				// The best free spot out of your way, or, when there is none, any free spot. A spot
+				// held for someone who stepped away counts as free to a newcomer: kept for them, it
+				// had a newcomer stand behind (at a bank) for five seconds and then step forward
+				// into it, when walking straight into the gap is what anyone would do. A spot held
+				// for you is never taken.
 				int spot = -1;
 				for (int s : order(e.getKey(), capacity))
 				{
-					if (spot < 0 && s < capacity && !t.occupant.containsKey(s) && !t.held(s, tick) && !inFront.contains(s))
+					if (spot < 0 && s < capacity && !t.occupant.containsKey(s) && !heldForYou(t, s, tick) && !inFront.contains(s))
 					{
 						spot = s;
 					}
@@ -281,7 +294,7 @@ final class SlotBook
 				// between you and the camera.
 				for (int s = 0; s < capacity && spot < 0; s++)
 				{
-					spot = !t.occupant.containsKey(s) && !t.held(s, tick) && !(stepAside && inFront.contains(s)) ? s : -1;
+					spot = !t.occupant.containsKey(s) && !heldForYou(t, s, tick) && !(stepAside && inFront.contains(s)) ? s : -1;
 				}
 				if (spot >= 0)
 				{

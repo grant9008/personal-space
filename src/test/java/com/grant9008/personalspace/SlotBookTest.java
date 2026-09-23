@@ -50,13 +50,25 @@ public class SlotBookTest
 	}
 
 	@Test
-	public void aNewcomerDoesNotTakeAHeldSpot()
+	public void aNewcomerWalksIntoAHeldSpotButNeverOneHeldForYou()
 	{
 		SlotBook book = new SlotBook();
 		step(book, 1, 1, 2, 3);
 		step(book, 2, 1, 3);
 		Map<Integer, Integer> m = step(book, 3, 1, 3, 9);
-		Assert.assertEquals("9 goes past the held spot", 3, (int) m.get(9));
+		Assert.assertEquals("9 walks straight into the gap 2 left", 1, (int) m.get(9));
+		Map<Integer, Integer> back = step(book, 4, 1, 2, 3, 9);
+		Assert.assertEquals("2, back, takes the next free spot; nobody else moves", 3, (int) back.get(2));
+		Assert.assertEquals(1, (int) back.get(9));
+
+		SlotBook yours = new SlotBook();
+		yours.localId = 99;
+		yours.yourId = 99;
+		step(yours, 1, 99, 2, 3);
+		step(yours, 2, 2, 3);
+		Map<Integer, Integer> n = step(yours, 3, 2, 3, 9);
+		Assert.assertNotEquals("your spot is kept for you", 0, (int) n.get(9));
+		Assert.assertEquals("and it's yours when you come back", 0, (int) step(yours, 4, 99, 2, 3, 9).get(99));
 	}
 
 	@Test

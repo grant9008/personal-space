@@ -40,8 +40,9 @@ turns out to be four friends hanging out.
   counter closes up a little to fit everyone, and when a tile has more people than its limit,
   those left waiting are the ones busy alching or skilling. Neighbouring tiles share one line: a busy
   fishing spot fills the water's edge first, then stands in tidy rows just behind it, even when a couple of them are busy casting spells or trading. Around a fire they stay close too. Turn **Auto-space** off and the Spacing slider sets those distances instead, so you can push a group right out for a photo.
-- **Calm crowds.** Everyone keeps their own spot when people come and go. A spot is held for a few
-  seconds for someone who steps away, and only players at the back move forward to fill a gap.
+- **Calm crowds.** Everyone keeps their own spot when people come and go. When someone steps away,
+  nobody standing still shuffles forward into their gap for a few seconds; someone arriving walks
+  straight into it, and a spot held for you stays yours.
   When a crowd shrinks to one player, they step back to the middle of their tile.
 - **Groups side by side don't merge.** On a busy square, groups on neighbouring tiles each keep
   to their own side of the ground between them, so nobody is drawn inside anybody else. A group

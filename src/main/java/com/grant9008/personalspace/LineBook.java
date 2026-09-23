@@ -213,6 +213,9 @@ final class LineBook
 	 */
 	int localId = -1;
 
+	/** Your player id whether or not your character is moved or here now: a spot held for you is never given away. */
+	int yourId = -1;
+
 	/**
 	 * Which way the camera is from you on the ground (east, north), or null when unknown. It never
 	 * moves you: whoever on the line would stand between you and it steps aside to a free spot, so
@@ -539,6 +542,20 @@ final class LineBook
 				}
 				int id = waiting.get(next[i]++);
 				String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, taken, 0);
+				if (best == null || !best.startsWith("0/"))
+				{
+					// Rather than a row behind, a place at the edge being held for someone who
+					// stepped away. Kept free, it made a newcomer stand behind for five seconds and
+					// then step forward into it, when walking straight into the gap is what anyone
+					// would do; the leaver, if they come back, takes the next free spot. People
+					// already standing still don't move into a held gap, and a spot held for you is
+					// never taken: step away for a moment and it is still yours.
+					String edge = heldEdgeFor(line, key, i, id, target[i], lo[i], hi[i], usable, taken);
+					if (edge != null)
+					{
+						best = edge;
+					}
+				}
 				if (best == null)
 				{
 					// Nothing left for this tile; nobody else from it will fit either.
@@ -917,6 +934,46 @@ final class LineBook
 					bestCost = cost;
 					best = point;
 				}
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * The best edge spot for a newcomer among those held for people who stepped away (never one
+	 * held for you), or null. The hold it takes is let go, so the leaver, coming back, is placed
+	 * like anyone arriving.
+	 */
+	private String heldEdgeFor(Line line, String key, int index, int self, double aim, double lo, double hi,
+		Map<String, Boolean> usable, Set<String> taken)
+	{
+		Set<String> edges = new HashSet<>();
+		for (Map.Entry<Integer, Spot> h : held.entrySet())
+		{
+			Spot spot = h.getValue();
+			if (h.getKey() != yourId && spot.line.equals(key) && spot.row == 0)
+			{
+				edges.add(spot.point());
+			}
+		}
+		if (edges.isEmpty())
+		{
+			return null;
+		}
+		Set<String> without = new HashSet<>(taken);
+		without.removeAll(edges);
+		String best = bestFree(line, index, self, aim, lo, hi, usable, without, 0);
+		if (best == null || !best.startsWith("0/") || !edges.contains(key + "/" + best))
+		{
+			return null;
+		}
+		for (Iterator<Map.Entry<Integer, Spot>> it = held.entrySet().iterator(); it.hasNext(); )
+		{
+			Map.Entry<Integer, Spot> h = it.next();
+			if (h.getValue().point().equals(key + "/" + best))
+			{
+				heldUntil.remove(h.getKey());
+				it.remove();
 			}
 		}
 		return best;

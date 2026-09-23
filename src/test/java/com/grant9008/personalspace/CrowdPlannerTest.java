@@ -2795,4 +2795,120 @@ public class CrowdPlannerTest
 			Assert.assertArrayEquals("player " + e.id + " moved when they came back", settled.get(e.id), returned.get(e.id));
 		}
 	}
+
+	/** A short counter: four spots at the edge, so six people means two stand behind. */
+	private static CrowdPlanner.Surroundings shortCounter()
+	{
+		return new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(tile) * 128 + dx;
+				return dz <= 0 && x >= 50 * 128 - 100 && x <= 50 * 128 + 100;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+	}
+
+	@Test
+	public void aStrangerWalksStraightIntoAHeldSpotAtTheCounter()
+	{
+		// Someone at the counter steps away and their spot is held for them. A stranger arriving
+		// then used to stand behind for five seconds and step forward when the hold ran out; now
+		// they walk straight into the gap, and nobody else moves.
+		CrowdPlanner.Surroundings counter = shortCounter();
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> six = bank(new int[]{6}, 1);
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			settled = spots(planner.plan(six, x -> true, 128, 10, true, false, t, counter));
+		}
+		int leaver = -1;
+		for (Map.Entry<Integer, int[]> e : settled.entrySet())
+		{
+			if (Math.abs(e.getValue()[1]) <= StackSpreader.MAX_BOW)
+			{
+				leaver = leaver < 0 || Math.abs(e.getValue()[0]) < Math.abs(settled.get(leaver)[0]) ? e.getKey() : leaver;
+			}
+		}
+		Assert.assertTrue("someone is at the counter", leaver > 0);
+		List<StackSpreader.Entry> without = new ArrayList<>();
+		for (StackSpreader.Entry e : six)
+		{
+			if (e.id != leaver)
+			{
+				without.add(e);
+			}
+		}
+		spots(planner.plan(without, x -> true, 128, 10, true, false, 4, counter));
+		List<StackSpreader.Entry> withStranger = new ArrayList<>(without);
+		withStranger.add(new StackSpreader.Entry(50, StackRegistry.key(0, 50, 50), false, NORTH));
+		Map<Integer, int[]> arrived = spots(planner.plan(withStranger, x -> true, 128, 10, true, false, 5, counter));
+		Assert.assertTrue("the stranger stands " + arrived.get(50)[1] + " back, not at the counter",
+			Math.abs(arrived.get(50)[1]) <= StackSpreader.MAX_BOW);
+		for (StackSpreader.Entry e : without)
+		{
+			Assert.assertArrayEquals("player " + e.id + " moved", settled.get(e.id), arrived.get(e.id));
+		}
+	}
+
+	@Test
+	public void aSpotHeldForYouAtTheCounterStaysYours()
+	{
+		// You step away from the counter for a moment; a stranger arrives meanwhile. They don't
+		// take your spot, and when you come back it is still yours.
+		CrowdPlanner.Surroundings counter = shortCounter();
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> six = bank(new int[]{5}, 1);
+		six.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 3; t++)
+		{
+			settled = spots(planner.plan(six, x -> true, 128, 10, true, true, t, counter));
+		}
+		int[] yours = settled.get(99);
+		Assert.assertTrue("you're at the counter", Math.abs(yours[1]) <= StackSpreader.MAX_BOW);
+		List<StackSpreader.Entry> without = new ArrayList<>();
+		for (StackSpreader.Entry e : six)
+		{
+			if (e.id != 99)
+			{
+				without.add(e);
+			}
+		}
+		spots(planner.plan(without, x -> true, 128, 10, true, true, 4, counter));
+		List<StackSpreader.Entry> withStranger = new ArrayList<>(without);
+		withStranger.add(new StackSpreader.Entry(50, StackRegistry.key(0, 50, 50), false, NORTH));
+		Map<Integer, int[]> arrived = spots(planner.plan(withStranger, x -> true, 128, 10, true, true, 5, counter));
+		Assert.assertFalse("the stranger took your spot", java.util.Arrays.equals(yours, arrived.get(50)));
+		List<StackSpreader.Entry> back = new ArrayList<>(withStranger);
+		back.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
+		Map<Integer, int[]> returned = spots(planner.plan(back, x -> true, 128, 10, true, true, 6, counter));
+		Assert.assertArrayEquals("your spot is still yours", yours, returned.get(99));
+	}
 }

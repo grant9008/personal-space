@@ -508,6 +508,9 @@ final class CrowdPlanner
 		return capacity + (nearYou.contains(tile) ? SPARE_SPOTS : 0);
 	}
 
+	/** Your player id, remembered while you walk about (when you aren't among the still). */
+	private int knownYou = -1;
+
 	/** Tiles where someone the game shows was left in the middle without a spot last tick. */
 	private Set<Long> waited = new HashSet<>();
 
@@ -1403,15 +1406,16 @@ final class CrowdPlanner
 		observePresence(byTile, shown, tick);
 
 		int localId = -1;
-		if (includeLocal)
+		for (StackSpreader.Entry e : still)
 		{
-			for (StackSpreader.Entry e : still)
-			{
-				localId = e.local ? e.id : localId;
-			}
+			knownYou = e.local ? e.id : knownYou;
+			localId = includeLocal && e.local ? e.id : localId;
 		}
 		slots.localId = localId;
 		lineBook.localId = localId;
+		// Who you are even while you're walking about, so a spot held for you stays yours.
+		slots.yourId = knownYou;
+		lineBook.yourId = knownYou;
 		double[] view = viewFrom(still, tick);
 		lineBook.view = view;
 		// Tiles near you get spare spots, for people to step out from between you and the camera
@@ -2059,6 +2063,7 @@ final class CrowdPlanner
 
 	void clear()
 	{
+		knownYou = -1;
 		slots.clear();
 		lineBook.clear();
 		shapes.clear();
