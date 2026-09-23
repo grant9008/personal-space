@@ -49,6 +49,7 @@ final class Snapshot
 	long walkDraws;
 	/** Players and NPCs drawn farthest from the camera first, so whoever is nearer is in front; total. */
 	long orderedDraws;
+	long leanedDraws;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass; should stay 0. */
 	long passMissedFrames;
 	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */

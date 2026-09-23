@@ -60,7 +60,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.53";
+	static final String VERSION = "1.8.54";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -952,6 +952,7 @@ public class PersonalSpacePlugin extends Plugin
 			s.revealErrors = w.revealErrors;
 			s.walkDraws = w.walkDraws;
 			s.orderedDraws = w.orderedDraws;
+			s.leanedDraws = w.leanedDraws;
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;

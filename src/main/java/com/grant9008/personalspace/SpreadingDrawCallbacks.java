@@ -141,6 +141,31 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		double distance;
 	}
 
+	/**
+	 * Someone busy is sorted by where their body is, not their feet: kneeling to cook at a fire
+	 * or reaching over an anvil, it's well in front of the spot they stand on, and sorted by that
+	 * spot, the person standing just in front of it was drawn over them. The shift is the middle
+	 * of their body on the ground (see {@link #middle}), averaged over what they're doing (see
+	 * {@link Leans}), at most this far.
+	 */
+	static final int MAX_LEAN = 96;
+	/** A shift smaller than this is just how their gear hangs, and is ignored. */
+	static final int LEAN_DEAD_ZONE = 16;
+	/**
+	 * The share of a model's points left out at each end when finding its middle, along each
+	 * way: a rod, a staff or a cape is a few points far out, and moved the middle of an upright
+	 * fisher a long way towards the water.
+	 */
+	static final double LEAN_TRIM = 0.2;
+	/** Half the width of the ground the middle is looked for in; points past it count at its edge. */
+	private static final int LEAN_REACH = 512;
+	/** Diagnostics: people drawn by where their body leans, rather than where they stand. */
+	long leanedDraws;
+
+	private final Leans leans = new Leans();
+	private final int[] leanCountsX = new int[2 * LEAN_REACH];
+	private final int[] leanCountsZ = new int[2 * LEAN_REACH];
+
 	private Kept[] kept = new Kept[128];
 	private int keptCount;
 	/**
@@ -175,7 +200,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private int keepFrame = -1;
 	private double keepWithin;
 
-	/** How far from the camera actors are kept back this frame. Worked out once per frame. */
+	/**
+	 * How far from the camera actors are kept back this frame, along the ground. Worked out once
+	 * per frame. Distances here and in the sort are along the ground, heights left out: of two
+	 * people standing upright, whoever is nearer along the ground covers the other wherever they
+	 * overlap, uphill or down. Counted with heights, someone standing up a slope behind another
+	 * came out nearer, and was drawn over them.
+	 */
 	private double keepWithin(WorldView wv)
 	{
 		int frame = offsets.frame();
@@ -183,7 +214,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			keepFrame = frame;
 			double cameraX = client.getCameraX();
-			double cameraHeight = client.getCameraZ();
 			double cameraZ = client.getCameraY();
 			double farthest = -1;
 			for (long tile : stacks.stackedTiles())
@@ -195,9 +225,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				int x = StackRegistry.sceneX(tile) * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_HALF_TILE_SIZE;
 				int z = StackRegistry.sceneY(tile) * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_HALF_TILE_SIZE;
 				double east = x - cameraX;
-				double up = tileHeight(wv, StackRegistry.planeOf(StackRegistry.plane(tile)), x, z) - cameraHeight;
 				double north = z - cameraZ;
-				farthest = Math.max(farthest, Math.sqrt(east * east + up * up + north * north));
+				farthest = Math.max(farthest, Math.sqrt(east * east + north * north));
 			}
 			keepWithin = farthest < 0 ? -1 : farthest + offsets.maxOffset() + KEEP_SLACK;
 		}
@@ -213,9 +242,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			return false;
 		}
 		double east = x - client.getCameraX();
-		double up = y - client.getCameraZ();
 		double north = z - client.getCameraY();
-		return east * east + up * up + north * north <= within * within;
+		return east * east + north * north <= within * within;
 	}
 
 	/** Whether an NPC standing at (x, y, z) on this scene is kept back for the opaque pass. */
@@ -227,25 +255,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		}
 		WorldView wv = client.getTopLevelWorldView();
 		return wv != null && scene == wv.getScene() && withinKeep(wv, x, y, z);
-	}
-
-	/** Ground height at a spot, or 0 if it can't be read. */
-	private int tileHeight(WorldView wv, int plane, int x, int z)
-	{
-		int maxX = wv.getSizeX() * Perspective.LOCAL_TILE_SIZE;
-		int maxZ = wv.getSizeY() * Perspective.LOCAL_TILE_SIZE;
-		if (x < 0 || z < 0 || x >= maxX || z >= maxZ)
-		{
-			return 0;
-		}
-		try
-		{
-			return Perspective.getTileHeight(client, new LocalPoint(x, z, wv), plane);
-		}
-		catch (RuntimeException e)
-		{
-			return 0;
-		}
 	}
 
 	private void keep(Projection projection, Scene scene, GameObject gameObject, Renderable actor, int orientation, int walkOrientation, int x, int y, int z, boolean walk)
@@ -284,7 +293,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			return;
 		}
 		double cameraX = client.getCameraX();
-		double cameraHeight = client.getCameraZ();
 		double cameraZ = client.getCameraY();
 		Player local = client.getLocalPlayer();
 		Kept you = null;
@@ -292,9 +300,32 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			Kept k = kept[i];
 			double east = k.x - cameraX;
-			double up = k.y - cameraHeight;
 			double north = k.z - cameraZ;
-			k.distance = Math.sqrt(east * east + up * up + north * north) - (k.actor == local ? YOU_FIRST_ON_TIES : 0);
+			int animation = k.actor instanceof Player ? ((Player) k.actor).getAnimation() : -1;
+			if (!k.walk && animation != -1)
+			{
+				// Built here to be measured, and again below to be drawn: models share one buffer.
+				try
+				{
+					Player player = (Player) k.actor;
+					Model model = player.getModel();
+					double[] middle = model == null ? null
+						: middle(model.getVerticesX(), model.getVerticesZ(), model.getVerticesCount(), leanCountsX, leanCountsZ);
+					double[] settled = middle == null ? null : leans.settle(player.getId(), animation, middle[0], middle[1]);
+					int[] lean = settled == null ? null : turn(settled[0], settled[1], k.orientation);
+					if (lean != null)
+					{
+						east += lean[0];
+						north += lean[1];
+						leanedDraws++;
+					}
+				}
+				catch (RuntimeException e)
+				{
+					revealErrors++;
+				}
+			}
+			k.distance = Math.sqrt(east * east + north * north) - (k.actor == local ? YOU_FIRST_ON_TIES : 0);
 			if (k.actor == local)
 			{
 				you = k;
@@ -362,6 +393,97 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			k.actor = null;
 		}
 		keptCount = 0;
+	}
+
+	/**
+	 * The middle of a model's body on the ground, (x, z) in the model's own frame: along each way,
+	 * the average of its points once the farthest {@link #LEAN_TRIM} at each end are left out, so a
+	 * rod or a cape hardly counts. Null for an empty model. The count arrays are scratch space,
+	 * {@code 2 * LEAN_REACH} long.
+	 */
+	static double[] middle(float[] xs, float[] zs, int count, int[] countsX, int[] countsZ)
+	{
+		if (xs == null || zs == null)
+		{
+			return null;
+		}
+		int n = Math.min(count, Math.min(xs.length, zs.length));
+		if (n <= 0)
+		{
+			return null;
+		}
+		Arrays.fill(countsX, 0);
+		Arrays.fill(countsZ, 0);
+		for (int i = 0; i < n; i++)
+		{
+			countsX[bucket(xs[i])]++;
+			countsZ[bucket(zs[i])]++;
+		}
+		return new double[]{trimmedAverage(countsX, n), trimmedAverage(countsZ, n)};
+	}
+
+	private static int bucket(float v)
+	{
+		int b = Math.round(v) + LEAN_REACH;
+		return b < 0 ? 0 : b >= 2 * LEAN_REACH ? 2 * LEAN_REACH - 1 : b;
+	}
+
+	/** The average of the points counted, leaving out {@link #LEAN_TRIM} of them at each end. */
+	private static double trimmedAverage(int[] counts, int n)
+	{
+		int skip = (int) (n * LEAN_TRIM);
+		int take = n - 2 * skip;
+		if (take <= 0)
+		{
+			skip = 0;
+			take = n;
+		}
+		double sum = 0;
+		int seen = 0;
+		int taken = 0;
+		for (int b = 0; b < counts.length && taken < take; b++)
+		{
+			int c = counts[b];
+			if (c == 0)
+			{
+				continue;
+			}
+			// Of this bucket's points, those past the ones skipped and within the ones taken.
+			int from = Math.max(seen, skip);
+			int to = Math.min(seen + c, skip + take);
+			if (to > from)
+			{
+				sum += (double) (to - from) * (b - LEAN_REACH);
+				taken += to - from;
+			}
+			seen += c;
+		}
+		return taken == 0 ? 0 : sum / taken;
+	}
+
+	/**
+	 * A middle (x, z) in the model's frame, turned the way the model is drawn (as the renderer
+	 * turns it): the lean on the ground, east and north. Null if it's within
+	 * {@link #LEAN_DEAD_ZONE}; no farther than {@link #MAX_LEAN}.
+	 */
+	static int[] turn(double mx, double mz, int orientation)
+	{
+		int o = orientation & 2047;
+		double sin = Perspective.SINE[o] / 65536.0;
+		double cos = Perspective.COSINE[o] / 65536.0;
+		double east = mx * cos + mz * sin;
+		double north = mz * cos - mx * sin;
+		double length = Math.hypot(east, north);
+		if (length < LEAN_DEAD_ZONE)
+		{
+			return null;
+		}
+		if (length > MAX_LEAN)
+		{
+			east = east * MAX_LEAN / length;
+			north = north * MAX_LEAN / length;
+		}
+		return new int[]{(int) Math.round(east), (int) Math.round(north)};
 	}
 
 	/** Forget everyone kept back, drawing nobody: the frame they belonged to is over. */

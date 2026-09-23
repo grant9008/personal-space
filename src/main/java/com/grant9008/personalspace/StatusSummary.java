@@ -193,6 +193,7 @@ final class StatusSummary
 			.append(", reveal errors: ").append(s.revealErrors)
 			.append(", walk frames drawn: ").append(s.walkDraws)
 			.append(", drawn far to near: ").append(s.orderedDraws)
+			.append(" (by their lean: ").append(s.leanedDraws).append(')')
 			.append(", frames not ordered (should be 0): ").append(s.passMissedFrames)
 			.append(", hidden in your way: ").append(s.hiddenInYourWay)
 			.append(", no walk (busy): ").append(s.walkSkippedBusy)

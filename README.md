@@ -55,7 +55,8 @@ turns out to be four friends hanging out.
   they're drawn a tile from where they stand: someone behind you could be drawn over you, and an
   alcher's staff or a shield beside you poked through you. Personal Space draws a crowd back to
   front instead, nearest the camera last, so whoever is between you and the camera covers you and
-  whoever is behind you doesn't, the way it really looks. Nobody moves out of your way: a crowd
+  whoever is behind you doesn't, the way it really looks, on a slope too. Someone kneeling to cook
+  or leaning into a cast is placed by where their body is, not their feet. Nobody moves out of your way: a crowd
   huddles as it would wherever you stand, and nobody is ever drawn inside you. Turn on **Draw me
   in front** to be drawn over everyone in your crowd instead, whichever way the camera faces.
 - **Names that follow.** Player Indicators puts a name over where someone really stands, which in
@@ -125,7 +126,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Hover shows who | On (the default): hover a body drawn away from its tile and a tooltip says who it is. What a click does is unchanged. |
 | Arrow to their tile | On (the default): hover a body drawn away from its tile and a small arrow points to where they really stand. Works with or without the tooltip. |
 | Draw me in front | Off (the default): whoever is between you and the camera covers you, as they really would. On: you're drawn over everyone in your crowd, whichever way the camera faces, so you can always see yourself. Either way nobody moves out of your way: crowds huddle as they would, and stand as they are when you walk up beside them. |
-| Move my character too | Off: you stay put and others step around you. On: you take a spot too, straight away when you stop rather than off to the side first. Nobody is drawn inside you; to always see yourself in a packed bank or anvil pile, turn on **Draw me in front**. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
+| Move my character too | Off: you stay put and others step around you. On: you take a spot too, straight away when you stop rather than off to the side first. At a bank counter or a fishing spot you get a place at the front, even where the bank is so narrow only one or two fit. Nobody is drawn inside you; to always see yourself in a packed bank or anvil pile, turn on **Draw me in front**. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
 | Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
 | Show sidebar button | On (the default): Personal Space has a button in the sidebar with its settings and a live status. Off: no button, for a tidy sidebar; every setting is still in the plugin's configuration. |
 | Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |

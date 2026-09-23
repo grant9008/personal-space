@@ -680,6 +680,41 @@ final class LineBook
 				}
 			}
 		}
+		// Nobody from your tile at the edge: a narrow bank has room at the water for one or two,
+		// and they can be from the tile beside yours. You swap with whoever at the edge stands
+		// nearest you all the same, rather than fish from the back of the queue. Each of you keeps
+		// the spot on your own tile's account, so it stays put from then on.
+		if (!swappedYou && mine != null && mine.line.equals(key) && mine.row > 0 && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
+		{
+			double here = line.along(mine.row, mine.j);
+			int swapWith = -1;
+			double nearest = Double.MAX_VALUE;
+			for (Member m : members)
+			{
+				for (int id : m.ids)
+				{
+					Spot theirs = spotOf.get(id);
+					if (id == localId || theirs == null || !theirs.line.equals(key) || theirs.row != 0)
+					{
+						continue;
+					}
+					double distance = Math.abs(line.along(0, theirs.j) - here);
+					if (distance < nearest)
+					{
+						nearest = distance;
+						swapWith = id;
+					}
+				}
+			}
+			if (swapWith >= 0)
+			{
+				Spot theirs = spotOf.get(swapWith);
+				spotOf.put(localId, new Spot(key, 0, theirs.j, mine.tile));
+				spotOf.put(swapWith, new Spot(key, mine.row, mine.j, theirs.tile));
+				swappedYou = true;
+				moves++;
+			}
+		}
 
 		// Personal space for you. From a camera off to one side a straight line is one person half
 		// behind the next, so whoever stands beside you on the camera's side covers you, wherever on

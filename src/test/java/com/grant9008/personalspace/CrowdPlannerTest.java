@@ -2647,6 +2647,79 @@ public class CrowdPlannerTest
 		Assert.assertArrayEquals("your spot is still yours", yours, returned.get(99));
 	}
 
+	/** A bank so narrow the water is only in front of one spot: rows behind have room, the edge doesn't. */
+	private static CrowdPlanner.Surroundings narrowBank()
+	{
+		return new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(tile) * 128 + dx;
+				return dz <= 0 && (dz < -10 || Math.abs(x - 50 * 128) <= 20);
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return true;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				return new ArrayList<>();
+			}
+		};
+	}
+
+	@Test
+	public void youGetTheOneSpotAtTheWaterEvenIfSomeoneFromTheNextTileHasIt()
+	{
+		// Fishers queued up a narrow bank, the one spot at the water taken by someone from the tile
+		// beside yours: you swap into it, as at a bank counter, rather than fish from the back.
+		CrowdPlanner.Surroundings bank = narrowBank();
+		for (int spacing : new int[]{42, 128})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = bank(new int[]{4, 3}, 1);
+			Map<Integer, int[]> settled = null;
+			for (int t = 1; t <= 3; t++)
+			{
+				settled = spots(planner.plan(still, x -> true, spacing, 10, true, true, t, bank));
+			}
+			int edgeHolder = -1;
+			for (Map.Entry<Integer, int[]> e : settled.entrySet())
+			{
+				edgeHolder = Math.abs(e.getValue()[1]) <= StackSpreader.MAX_BOW ? e.getKey() : edgeHolder;
+			}
+			Assert.assertTrue("spacing " + spacing + ": someone has the spot at the water", edgeHolder > 0);
+			List<StackSpreader.Entry> withYou = new ArrayList<>(still);
+			withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, 51, 50), true, NORTH));
+			Map<Integer, int[]> now = null;
+			for (int t = 4; t <= 6; t++)
+			{
+				now = spots(planner.plan(withYou, x -> true, spacing, 10, true, true, t, bank));
+			}
+			int[] yours = now.get(99);
+			Assert.assertNotNull("spacing " + spacing + ": you have a spot", yours);
+			Assert.assertTrue("spacing " + spacing + ": you're " + yours[1] + " back from the water", Math.abs(yours[1]) <= StackSpreader.MAX_BOW);
+			Assert.assertNotNull("spacing " + spacing + ": whoever was there still has a spot", now.get(edgeHolder));
+		}
+	}
+
 	@Test
 	public void someoneMidSpellKeepsTheirSpotWhenAFullTileGetsANewcomer()
 	{
