@@ -3010,4 +3010,65 @@ public class CrowdPlannerTest
 			}
 		}
 	}
+
+	@Test
+	public void aPairAtAFireBesideYouKeepsItsShapeUnlessYouAskToBeDrawnFirst()
+	{
+		// A pair at a fire; you stand on the tile diagonally beside theirs, the camera off to one
+		// side, so one of the pair is between you and it. They stay side by side (natural: they
+		// cover you now and then), unless "Draw me in front" asks for you to come first.
+		CrowdPlanner.Surroundings fire = new CrowdPlanner.Surroundings()
+		{
+			@Override
+			public boolean canStand(long tile, int dx, int dz)
+			{
+				return dz <= 60;
+			}
+
+			@Override
+			public boolean facesObstacle(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public boolean isCounter(long tile, double angle)
+			{
+				return false;
+			}
+
+			@Override
+			public boolean facesFire(long tile, double angle)
+			{
+				return Math.abs(angle - Math.PI) < 0.01;
+			}
+
+			@Override
+			public List<int[]> firesNear(long tile)
+			{
+				List<int[]> out = new ArrayList<>();
+				out.add(new int[]{0, 1});
+				return out;
+			}
+		};
+		for (boolean youFirst : new boolean[]{false, true})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			planner.youFirst = youFirst;
+			planner.cameraX = 49 * 128 + 64 + 1061;
+			planner.cameraY = 49 * 128 + 64 + 1061;
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			still.add(new StackSpreader.Entry(1, TILE, false, NORTH));
+			still.add(new StackSpreader.Entry(2, TILE, false, NORTH));
+			still.add(new StackSpreader.Entry(99, StackRegistry.key(0, 49, 49), true, NORTH));
+			boolean split = false;
+			for (int t = 1; t <= 12; t++)
+			{
+				Map<Integer, int[]> now = spots(planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, fire));
+				split |= t >= 4 && Math.abs(now.get(1)[1] - now.get(2)[1]) > 20;
+			}
+			Assert.assertEquals(youFirst ? "with Draw me in front, one steps out of your view" : "the pair stays side by side",
+				youFirst, split);
+		}
+	}
 }

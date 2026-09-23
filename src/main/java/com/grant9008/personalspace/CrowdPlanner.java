@@ -1276,7 +1276,17 @@ final class CrowdPlanner
 	 * the side, a counter is one long row, and the people at the next booth along are the ones in
 	 * the way.
 	 */
-	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile, long lastYouTile, int lastYouSlot)
+	/**
+	 * The "Draw me in front" setting: seeing yourself comes first, so small groups near you step
+	 * out of your line of sight as piles do, rather than keeping their shape.
+	 */
+	boolean youFirst;
+
+	/** A group this small is posed as a group (see the "Pose for 2 or 3 players" setting) and keeps its shape near you. */
+	static final int SMALL_GROUP = 3;
+
+	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile, long lastYouTile, int lastYouSlot,
+		Set<Long> smallGroups)
 	{
 		Map<Long, Set<Integer>> out = new HashMap<>();
 		if (this.lastYouAt == null && lastYouSlot < 0)
@@ -1319,7 +1329,7 @@ final class CrowdPlanner
 				// cramped corner, with a wall behind and nowhere to go, people were squeezed right on
 				// top of you.
 				boolean onYou = Math.hypot(east, north) < YOUR_SPACE;
-				boolean inFront = view != null && east * view[0] + north * view[1] > VIEW_IN_FRONT
+				boolean inFront = view != null && !smallGroups.contains(tile) && east * view[0] + north * view[1] > VIEW_IN_FRONT
 					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
 				if (onYou || inFront)
 				{
@@ -1841,7 +1851,19 @@ final class CrowdPlanner
 			judgeTile = youTileNow;
 			judgeSlot = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
 		}
-		slots.keepClear = spotsInFront(view, spotsByTile, judgeTile, judgeSlot);
+		// Small groups (two or three) on other tiles keep their shape: a pair at a fire beside you
+		// was split into one behind the other because one of them stood in your line of sight.
+		// Being covered by them now and then is how it would really look; nobody is ever drawn
+		// inside you though. Piles still step out of your way, which is where it matters.
+		Set<Long> smallGroups = new HashSet<>();
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			if (!youFirst && e.getKey() != judgeTile && e.getValue().size() <= SMALL_GROUP)
+			{
+				smallGroups.add(e.getKey());
+			}
+		}
+		slots.keepClear = spotsInFront(view, spotsByTile, judgeTile, judgeSlot, smallGroups);
 		slots.spare = new HashMap<>();
 		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{

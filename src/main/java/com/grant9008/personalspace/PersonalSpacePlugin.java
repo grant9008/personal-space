@@ -59,7 +59,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.47";
+	static final String VERSION = "1.8.48";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -499,6 +499,7 @@ public class PersonalSpacePlugin extends Plugin
 
 		planner.smallGroupsClose = config.smallGroupsClose();
 		planner.pose = config.pose();
+		planner.youFirst = config.drawMeInFront();
 		planner.cameraX = client.getCameraX();
 		planner.cameraY = client.getCameraY();
 		if (local.getWorldView() != null && local.getWorldView().getId() != WorldView.TOPLEVEL)
