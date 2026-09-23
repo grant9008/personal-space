@@ -10,6 +10,8 @@ turns out to be four friends hanging out.
 
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
+![Before and after fly fishing at Barbarian Village: one player, then 27](docs/photos/barbarian-fishing.jpg)
+
 ![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
 
 ![Before and after: two players facing each other](docs/photos/pair-facing.jpg)
