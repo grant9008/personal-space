@@ -78,6 +78,8 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private final JSlider perTileSlider = new JSlider(PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK, PersonalSpaceConfig.DEFAULT_STACK);
 	private final JLabel perTileValue = new JLabel();
+	private final JSlider hideBelowSlider = new JSlider(0, PersonalSpaceConfig.MAX_HIDE_BELOW, 0);
+	private final JLabel hideBelowValue = new JLabel();
 	private final PillGroup<Integer> spacingPills = new PillGroup<>(
 		new Integer[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_NORMAL, PersonalSpaceConfig.SPACING_WIDE},
 		new String[]{"Close", "Normal", "Wide"});
@@ -190,6 +192,8 @@ final class PersonalSpacePanel extends PluginPanel
 		activeSwitch.setOn(config.active());
 		setSliderQuietly(perTileSlider, clamp(config.maxStack(), PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK));
 		perTileValue.setText(perTileSlider.getValue() + " players");
+		setSliderQuietly(hideBelowSlider, clamp(config.hideBelowLevel(), 0, PersonalSpaceConfig.MAX_HIDE_BELOW));
+		hideBelowValue.setText(hideBelowText(hideBelowSlider.getValue()));
 		setSliderQuietly(spacingSlider, clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING));
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
@@ -301,6 +305,14 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		perTileSlider.setToolTipText(tip("How many players on one tile get their own spot. 5 suits most places. Raise it if a busy bank leaves a heap in the middle."));
 		card.add(slider(perTileSlider), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 4, 0);
+		card.add(labelWithValue("Hide players below", hideBelowValue), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		hideBelowSlider.setToolTipText(tip("Off, or a combat level: anyone below it isn't drawn, like Entity Hider. Handy for the Grand Exchange's level-3s. Friends, friends chat and clan always stay."));
+		card.add(slider(hideBelowSlider), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 4, 0);
@@ -504,6 +516,14 @@ final class PersonalSpacePanel extends PluginPanel
 			write(PersonalSpaceConfig.KEY_ACTIVE, on);
 			setEverydayEnabled(on);
 		});
+		hideBelowSlider.addChangeListener(e ->
+		{
+			hideBelowValue.setText(hideBelowText(hideBelowSlider.getValue()));
+			if (hideBelowSlider.getValue() != config.hideBelowLevel())
+			{
+				write(PersonalSpaceConfig.KEY_HIDE_BELOW, hideBelowSlider.getValue());
+			}
+		});
 		perTileSlider.addChangeListener(e ->
 		{
 			perTileValue.setText(perTileSlider.getValue() + " players");
@@ -560,6 +580,7 @@ final class PersonalSpacePanel extends PluginPanel
 	private void setEverydayEnabled(boolean enabled)
 	{
 		perTileSlider.setEnabled(enabled);
+		hideBelowSlider.setEnabled(enabled);
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
@@ -644,6 +665,11 @@ final class PersonalSpacePanel extends PluginPanel
 		l.setFont(FontManager.getRunescapeSmallFont());
 		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		return l;
+	}
+
+	private static String hideBelowText(int level)
+	{
+		return level <= 0 ? "Off" : "level " + level;
 	}
 
 	private static JPanel labelWithValue(String text, JLabel value)

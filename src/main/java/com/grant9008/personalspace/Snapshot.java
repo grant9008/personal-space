@@ -38,6 +38,7 @@ final class Snapshot
 	boolean names;
 	boolean hover;
 	boolean hoverArrow;
+	int hideBelow;
 	boolean smallGroupsClose = true;
 	boolean pauseInCombat = true;
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;

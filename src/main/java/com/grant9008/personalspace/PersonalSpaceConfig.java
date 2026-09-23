@@ -28,6 +28,8 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_NAMES = "namesFollowPlayers";
 	String KEY_HOVER = "hoverShowsWho";
 	String KEY_HOVER_ARROW = "hoverArrow";
+	String KEY_HIDE_BELOW = "hideBelowLevel";
+	int MAX_HIDE_BELOW = 126;
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
@@ -250,11 +252,23 @@ public interface PersonalSpaceConfig extends Config
 		return true;
 	}
 
+	@Range(min = 0, max = MAX_HIDE_BELOW)
+	@ConfigItem(
+		keyName = KEY_HIDE_BELOW,
+		name = "Hide players below level",
+		description = "0 (the default) is off. Otherwise anyone below this combat level isn't drawn or clickable, as with Entity Hider. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight.",
+		position = 12
+	)
+	default int hideBelowLevel()
+	{
+		return 0;
+	}
+
 	@ConfigItem(
 		keyName = KEY_SHOW_SIDEBAR,
 		name = "Show sidebar button",
 		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
-		position = 12
+		position = 13
 	)
 	default boolean showSidebarButton()
 	{

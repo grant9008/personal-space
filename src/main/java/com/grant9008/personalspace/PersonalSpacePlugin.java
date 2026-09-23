@@ -59,7 +59,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.40";
+	static final String VERSION = "1.8.41";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -96,6 +96,8 @@ public class PersonalSpacePlugin extends Plugin
 	private TooltipManager tooltipManager;
 
 	private HoverOverlay hoverOverlay;
+
+	private LevelFilter levelFilter;
 
 	private NamesOverlay namesOverlay;
 
@@ -168,9 +170,11 @@ public class PersonalSpacePlugin extends Plugin
 	{
 		probe = new StackProbe(client, offsets, stacks);
 		renderCallbackManager.register(probe);
-		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager);
+		levelFilter = new LevelFilter(client);
+		renderCallbackManager.register(levelFilter);
+		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager, levelFilter);
 		overlayManager.add(namesOverlay);
-		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager);
+		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager, levelFilter);
 		overlayManager.add(hoverOverlay);
 
 		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
@@ -206,6 +210,11 @@ public class PersonalSpacePlugin extends Plugin
 	protected void shutDown()
 	{
 		renderCallbackManager.unregister(probe);
+		if (levelFilter != null)
+		{
+			renderCallbackManager.unregister(levelFilter);
+			levelFilter = null;
+		}
 		if (namesOverlay != null)
 		{
 			overlayManager.remove(namesOverlay);
@@ -384,6 +393,8 @@ public class PersonalSpacePlugin extends Plugin
 			return;
 		}
 		gate = newGate;
+		levelFilter.below = config.hideBelowLevel();
+		levelFilter.enabled = true;
 
 		if (wrapper == null && !warnedNoRenderer && client.getDrawCallbacks() == null)
 		{
@@ -598,6 +609,10 @@ public class PersonalSpacePlugin extends Plugin
 		if (probe != null)
 		{
 			probe.enabled = false;
+		}
+		if (levelFilter != null)
+		{
+			levelFilter.enabled = false;
 		}
 		offsets.snapAllToZero();
 		stacks.clear();
@@ -862,6 +877,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.names = config.namesFollowPlayers();
 		s.hover = config.hoverShowsWho();
 		s.hoverArrow = config.hoverArrow();
+		s.hideBelow = config.hideBelowLevel();
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();

@@ -143,13 +143,15 @@ final class NamesOverlay extends Overlay
 	private final OffsetTable offsets;
 	private final PartyService party;
 	private final ChatIconManager icons;
+	private final LevelFilter filter;
 
 	/** Player Indicators' settings, re-read once a game tick. */
 	private Look look;
 	private int lookTick = -1;
 
-	NamesOverlay(Client client, PersonalSpaceConfig config, ConfigManager configs, OffsetTable offsets, PartyService party, ChatIconManager icons)
+	NamesOverlay(Client client, PersonalSpaceConfig config, ConfigManager configs, OffsetTable offsets, PartyService party, ChatIconManager icons, LevelFilter filter)
 	{
+		this.filter = filter;
 		this.client = client;
 		this.config = config;
 		this.configs = configs;
@@ -197,7 +199,7 @@ final class NamesOverlay extends Overlay
 		boolean inParty = look.party != Highlight.DISABLED && party.isInParty();
 		for (Player player : world.players())
 		{
-			if (player == null)
+			if (player == null || filter.hides(player))
 			{
 				continue;
 			}

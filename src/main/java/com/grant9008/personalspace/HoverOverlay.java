@@ -41,13 +41,15 @@ final class HoverOverlay extends Overlay
 	private final OffsetTable offsets;
 	private final StackRegistry stacks;
 	private final TooltipManager tooltips;
+	private final LevelFilter filter;
 
 	/** Where the hovered body's feet and its real tile are on the screen this frame. */
 	private Point hoveredFeet;
 	private Point hoveredReal;
 
-	HoverOverlay(Client client, PersonalSpaceConfig config, OffsetTable offsets, StackRegistry stacks, TooltipManager tooltips)
+	HoverOverlay(Client client, PersonalSpaceConfig config, OffsetTable offsets, StackRegistry stacks, TooltipManager tooltips, LevelFilter filter)
 	{
+		this.filter = filter;
 		this.client = client;
 		this.config = config;
 		this.offsets = offsets;
@@ -107,7 +109,7 @@ final class HoverOverlay extends Overlay
 		int bestY = hoveredFeet == null ? Integer.MIN_VALUE : hoveredFeet.getY();
 		for (Player p : world.players())
 		{
-			if (p == null || p == local)
+			if (p == null || p == local || filter.hides(p))
 			{
 				continue;
 			}
