@@ -1192,124 +1192,6 @@ public class CrowdPlannerTest
 		}
 	}
 
-	@Test
-	public void onABusyBoothOfItsOwnNobodyStandsBetweenYouAndTheCamera()
-	{
-		// Eight people on one booth's own counter row, you among them, the camera off to one side:
-		// whoever would stand between you and it steps to one of the free spots instead.
-		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
-		for (int side : new int[]{1, -1})
-		{
-			List<StackSpreader.Entry> still = new ArrayList<>();
-			for (int i = 1; i <= 7; i++)
-			{
-				still.add(new StackSpreader.Entry(i, TILE, false, NORTH));
-			}
-			still.add(new StackSpreader.Entry(99, TILE, true, NORTH));
-			CrowdPlanner planner = new CrowdPlanner();
-			cameraAt(planner, side, -1);
-			CrowdPlanner.Plan plan = null;
-			for (int t = 1; t <= 12; t++)
-			{
-				plan = planner.plan(still, x -> true, 128, 16, true, true, t, counter);
-			}
-			Assert.assertEquals("everyone still has a spot", 8, plan.placements.size());
-			int[] me = yours(plan);
-			double vx = side * Math.sqrt(0.5);
-			double vy = -Math.sqrt(0.5);
-			for (Map.Entry<Integer, int[]> e : spots(plan).entrySet())
-			{
-				double east = e.getValue()[0] - me[0];
-				double north = e.getValue()[1] - me[1];
-				Assert.assertFalse("camera " + (side > 0 ? "south-east" : "south-west") + ": player " + e.getKey()
-					+ " stands between you and the camera",
-					e.getKey() != 99 && east * vx + north * vy > 24 && Math.abs(north * vx - east * vy) < 48);
-			}
-		}
-	}
-
-	@Test
-	public void aDiagonalCameraKeepsTheSpotBesideYouOnABankLineEmpty()
-	{
-		// Four busy booths share one line. From a camera off to one side a straight line is one
-		// person half behind the next, so the person beside you on the camera's side covered you,
-		// wherever on the line you were. That spot is now kept empty, and nobody loses a spot for it.
-		CrowdPlanner.Surroundings counter = new CrowdPlanner.Surroundings()
-		{
-			@Override
-			public boolean canStand(long tile, int dx, int dz)
-			{
-				return dz <= 0;
-			}
-
-			@Override
-			public boolean facesObstacle(long tile, double angle)
-			{
-				return Math.abs(angle - Math.PI) < 0.01;
-			}
-
-			@Override
-			public boolean isCounter(long tile, double angle)
-			{
-				return facesObstacle(tile, angle);
-			}
-
-			@Override
-			public boolean facesFire(long tile, double angle)
-			{
-				return false;
-			}
-
-			@Override
-			public List<int[]> firesNear(long tile)
-			{
-				return new ArrayList<>();
-			}
-		};
-		for (int yourBooth = 50; yourBooth <= 52; yourBooth++)
-		{
-			for (int side : new int[]{1, -1})
-			{
-				List<StackSpreader.Entry> still = new ArrayList<>();
-				int id = 1;
-				for (int x = 50; x <= 53; x++)
-				{
-					for (int i = 0; i < 3; i++)
-					{
-						boolean you = x == yourBooth && i == 0;
-						still.add(new StackSpreader.Entry(you ? 99 : id++, StackRegistry.key(0, x, 50), you, NORTH));
-					}
-				}
-				CrowdPlanner planner = new CrowdPlanner();
-				planner.cameraX = 51 * 128 + 64 + side * 2500;
-				planner.cameraY = 50 * 128 + 64 - 2500;
-				CrowdPlanner.Plan plan = null;
-				for (int t = 1; t <= 16; t++)
-				{
-					plan = planner.plan(still, x -> true, 128, 16, true, true, t, counter);
-				}
-				Assert.assertEquals("everyone still has a spot", still.size(), plan.placements.size());
-				Map<Integer, double[]> at = new HashMap<>();
-				for (StackSpreader.Placement pl : plan.placements)
-				{
-					at.put(pl.id, new double[]{StackRegistry.sceneX(pl.tile) * 128 + pl.dx, pl.dz});
-				}
-				double[] me = at.get(99);
-				double vx = side * Math.sqrt(0.5);
-				double vy = -Math.sqrt(0.5);
-				for (Map.Entry<Integer, double[]> e : at.entrySet())
-				{
-					double east = e.getValue()[0] - me[0];
-					double north = e.getValue()[1] - me[1];
-					boolean inFront = e.getKey() != 99 && east * vx + north * vy > 24 && Math.abs(north * vx - east * vy) < 48;
-					Assert.assertFalse("booth " + (yourBooth - 49) + ", camera " + (side > 0 ? "south-east" : "south-west")
-						+ ": player " + e.getKey() + " stands between you and the camera", inFront);
-				}
-			}
-		}
-	}
-
-	/** Whether anyone is drawn between you and a camera off towards (east, north). */
 	private static String inYourWay(CrowdPlanner.Plan plan, double east, double north)
 	{
 		double len = Math.hypot(east, north);
@@ -1336,7 +1218,7 @@ public class CrowdPlannerTest
 	}
 
 	@Test
-	public void youKeepTheFrontAtYourBoothAndWhoeverWouldHideYouStepsAside()
+	public void youKeepTheFrontAtYourBoothWhicheverWayTheCameraLooks()
 	{
 		// You take the front spot at your own booth, and whichever way the camera looks, anyone who
 		// would stand between you and it moves out of the way instead of you.
@@ -1364,78 +1246,6 @@ public class CrowdPlannerTest
 			}
 			Assert.assertArrayEquals("the camera looking from (" + camera[0] + "," + camera[1] + ") moved you",
 				front, yours(plan));
-			Assert.assertNull("camera (" + camera[0] + "," + camera[1] + ")", inYourWay(plan, camera[0], camera[1]));
-		}
-	}
-
-	@Test
-	public void fromTheSideNobodyAtTheNextBoothsStandsBetweenYouAndTheCamera()
-	{
-		// Seen from the side a counter is one long row, and the people at the booths along from yours
-		// are the ones in the way. Booths side by side share one line with you, and nobody on it
-		// stands between you and the camera. Booths with a gap each have their own row: other tiles,
-		// which stand as they would unless "Draw me in front" puts seeing yourself first.
-		CrowdPlanner.Surroundings counter = new CrowdPlanner.Surroundings()
-		{
-			@Override
-			public boolean canStand(long tile, int dx, int dz)
-			{
-				return dz <= 0 && dz >= -300;
-			}
-
-			@Override
-			public boolean facesObstacle(long tile, double angle)
-			{
-				return Math.abs(angle - Math.PI) < 0.01;
-			}
-
-			@Override
-			public boolean isCounter(long tile, double angle)
-			{
-				return facesObstacle(tile, angle);
-			}
-
-			@Override
-			public boolean facesFire(long tile, double angle)
-			{
-				return false;
-			}
-
-			@Override
-			public List<int[]> firesNear(long tile)
-			{
-				return new ArrayList<>();
-			}
-		};
-		for (int step : new int[]{1, 2})
-		{
-			for (int side : new int[]{1, -1})
-			{
-				boolean youFirst = step == 2;
-				List<StackSpreader.Entry> still = new ArrayList<>();
-				int id = 1;
-				int yourBooth = side > 0 ? 0 : 2;
-				for (int b = 0; b < 3; b++)
-				{
-					for (int i = 0; i < 4; i++)
-					{
-						boolean you = b == yourBooth && i == 0;
-						still.add(new StackSpreader.Entry(you ? 99 : id++, StackRegistry.key(0, 50 + b * step, 50), you, NORTH));
-					}
-				}
-				CrowdPlanner planner = new CrowdPlanner();
-				planner.youFirst = youFirst;
-				planner.cameraX = (50 + step) * 128 + 64 + side * 3000;
-				planner.cameraY = 50 * 128 + 64;
-				CrowdPlanner.Plan plan = null;
-				for (int t = 1; t <= 14; t++)
-				{
-					plan = planner.plan(still, x -> true, 128, 16, true, true, t, counter);
-				}
-				Assert.assertEquals("everyone still has a spot", still.size(), plan.placements.size());
-				Assert.assertNull((step == 1 ? "booths side by side" : "booths with a gap, Draw me in front on") + ", camera from the "
-					+ (side > 0 ? "east" : "west"), inYourWay(plan, side, 0));
-			}
 		}
 	}
 
@@ -2524,85 +2334,6 @@ public class CrowdPlannerTest
 	}
 
 	@Test
-	public void atAPackedAnvilNobodyIsDrawnBetweenYouAndTheCamera()
-	{
-		// Six smithing on each of three tiles at an anvil, you at the front of the middle one, the
-		// camera behind the crowd. Every spot behind you is in front of you from there, so whoever
-		// would stand in your way with nowhere else to go waits, out of sight, instead.
-		CrowdPlanner.Surroundings anvil = new CrowdPlanner.Surroundings()
-		{
-			@Override
-			public boolean canStand(long tile, int dx, int dz)
-			{
-				return dz <= 32;
-			}
-
-			@Override
-			public boolean facesObstacle(long tile, double angle)
-			{
-				return Math.abs(angle - Math.PI) < 0.01;
-			}
-
-			@Override
-			public boolean isCounter(long tile, double angle)
-			{
-				return false;
-			}
-
-			@Override
-			public boolean facesFire(long tile, double angle)
-			{
-				return false;
-			}
-
-			@Override
-			public List<int[]> firesNear(long tile)
-			{
-				return new ArrayList<>();
-			}
-		};
-		List<StackSpreader.Entry> still = new ArrayList<>();
-		int id = 1;
-		for (int x = -1; x <= 1; x++)
-		{
-			for (int i = 0; i < 6; i++)
-			{
-				boolean you = x == 0 && i == 0;
-				still.add(new StackSpreader.Entry(you ? 99 : id++, StackRegistry.key(0, 50 + x, 50), you, NORTH, !you));
-			}
-		}
-		CrowdPlanner planner = new CrowdPlanner();
-		cameraAt(planner, 0, -1);
-		CrowdPlanner.Plan plan = null;
-		for (int t = 1; t <= 20; t++)
-		{
-			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 6, true, true, t, anvil);
-		}
-		double[] you = null;
-		for (StackSpreader.Placement p : plan.placements)
-		{
-			if (p.id == 99)
-			{
-				you = new double[]{StackRegistry.sceneX(p.tile) * 128 + p.dx, StackRegistry.sceneY(p.tile) * 128 + p.dz};
-			}
-		}
-		Assert.assertNotNull("you have a spot", you);
-		for (StackSpreader.Placement p : plan.placements)
-		{
-			double east = StackRegistry.sceneX(p.tile) * 128 + p.dx - you[0];
-			double north = StackRegistry.sceneY(p.tile) * 128 + p.dz - you[1];
-			Assert.assertFalse("player " + p.id + " drawn right in front of you", p.id != 99 && -north > 24 && Math.abs(east) < 40);
-		}
-		for (StackSpreader.Placement p : plan.unplaced)
-		{
-			double east = StackRegistry.sceneX(p.tile) * 128 - you[0];
-			double north = StackRegistry.sceneY(p.tile) * 128 - you[1];
-			Assert.assertTrue("player " + p.id + " waits in the middle of a tile in front of you, and would be drawn there",
-				!(-north > 24 && Math.abs(east) < 40) || plan.middleOutOfSight.contains(p.tile));
-		}
-	}
-
-	@Test
 	public void onAFullTileThePeopleLeftWaitingAreTheBusyOnes()
 	{
 		// Eight on a tile with room for five: the three left without a spot are people busy alching,
@@ -3055,10 +2786,9 @@ public class CrowdPlannerTest
 				return out;
 			}
 		};
-		for (boolean youFirst : new boolean[]{false, true})
+		for (boolean youFirst : new boolean[]{false})
 		{
 			CrowdPlanner planner = new CrowdPlanner();
-			planner.youFirst = youFirst;
 			planner.cameraX = 49 * 128 + 64 + 1061;
 			planner.cameraY = 49 * 128 + 64 + 1061;
 			List<StackSpreader.Entry> still = new ArrayList<>();
@@ -3079,9 +2809,10 @@ public class CrowdPlannerTest
 	@Test
 	public void standingATileAwayFromAPileLeavesItAsItIs()
 	{
-		// A pile at an anvil; you stand alone on the tile beside it, the camera looking across
-		// both. Nobody on the pile's tile steps out of your line of sight: it stays as it is
-		// whether you're there or not.
+		// A pile at an anvil; you stand alone on the tile beside it (level with the anvil's end, or
+		// diagonally), the camera looking across both. The pile stays as it is whether you're
+		// there or not: nobody steps out of your line of sight, it doesn't back away from you, and
+		// its curve doesn't stop short of you.
 		CrowdPlanner.Surroundings anvil = surroundings(true, false, false);
 		int[][] cameras = {{0, -1}, {1, 0}, {-1, 0}, {0, 1}};
 		for (int[] camera : cameras)
@@ -3099,7 +2830,7 @@ public class CrowdPlannerTest
 				without = spots(planner.plan(pile, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, anvil));
 			}
 			List<StackSpreader.Entry> withYou = new ArrayList<>(pile);
-			withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, 51, 49), true, NORTH));
+			withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, camera[0] == 0 ? 49 : 51, camera[0] == 0 ? 50 : 49), true, NORTH));
 			for (int t = 13; t <= 24; t++)
 			{
 				Map<Integer, int[]> now = spots(planner.plan(withYou, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, anvil));
@@ -3107,6 +2838,57 @@ public class CrowdPlannerTest
 				{
 					Assert.assertArrayEquals("camera " + camera[0] + "," + camera[1] + " tick " + t + ": player " + i + " moved for you",
 						without.get(i), now.get(i));
+				}
+			}
+		}
+	}
+
+	@Test
+	public void nobodyStepsOutOfYourLineOfSight()
+	{
+		// A crowd huddles as it would wherever the camera is: at a busy booth, along a bank line
+		// of three booths, in a pile at an anvil. Everyone else stands exactly where they would
+		// with no camera to go by. (Seeing yourself over them is "Draw me in front".)
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		CrowdPlanner.Surroundings anvil = surroundings(true, false, false);
+		int[][] cameras = {{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}};
+		for (int scene = 0; scene < 3; scene++)
+		{
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			int id = 1;
+			int tiles = scene == 0 ? 1 : 3;
+			int each = scene == 0 ? 8 : scene == 1 ? 4 : 6;
+			for (int x = 0; x < tiles; x++)
+			{
+				for (int i = 0; i < each; i++)
+				{
+					boolean you = x == tiles / 2 && i == 0;
+					still.add(new StackSpreader.Entry(you ? 99 : id++, StackRegistry.key(0, 50 + x, 50), you, NORTH, scene == 2 && !you));
+				}
+			}
+			CrowdPlanner.Surroundings around = scene == 2 ? anvil : counter;
+			CrowdPlanner blind = new CrowdPlanner();
+			Map<Integer, int[]> without = null;
+			for (int t = 1; t <= 16; t++)
+			{
+				without = spots(blind.plan(still, q -> true, 128, 16, true, true, t, around));
+			}
+			for (int[] camera : cameras)
+			{
+				CrowdPlanner planner = new CrowdPlanner();
+				cameraAt(planner, camera[0], camera[1]);
+				Map<Integer, int[]> with = null;
+				for (int t = 1; t <= 16; t++)
+				{
+					with = spots(planner.plan(still, q -> true, 128, 16, true, true, t, around));
+				}
+				for (StackSpreader.Entry e : still)
+				{
+					if (e.id != 99)
+					{
+						Assert.assertArrayEquals("scene " + scene + ", camera " + camera[0] + "," + camera[1] + ": player " + e.id + " moved out of your way",
+							without.get(e.id), with.get(e.id));
+					}
 				}
 			}
 		}

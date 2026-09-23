@@ -50,8 +50,8 @@ import net.runelite.client.callback.RenderCallbackManager;
  * while a crowd is being spread, players and NPCs aren't drawn as they come. They are kept until
  * the renderer asks for its opaque pass, and drawn then, farthest from the camera first, so
  * whoever is between you and the camera covers you and whoever is behind you doesn't, as in the
- * real world. (With "Draw me in front" on you count as a body's width nearer than you are, so
- * nobody right up against you is drawn over you.) Each kept model is built again at that point
+ * real world. (With "Draw me in front" on you're drawn after everyone in your crowd, so nobody
+ * near you is drawn over you.) Each kept model is built again at that point
  * (the game's animated models share one
  * buffer), so to save that work anyone farther from the camera than every crowd, and than
  * anywhere anyone is drawn, is drawn straight away as before: they belong under the kept set
@@ -153,12 +153,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private boolean passMissed;
 
 	/**
-	 * With "Draw me in front" on, how far ahead of your own distance you're drawn: a body's width,
-	 * the closest anyone stands beside you at a counter. Whoever is right up against you is then
-	 * drawn behind you whichever way the camera faces, even someone really between you and it.
+	 * With "Draw me in front" on, you're drawn over everyone this close to you (a tile and a
+	 * half, your crowd), whichever way the camera faces: seeing yourself comes from the order
+	 * people are drawn in, not from anyone moving out of your way.
 	 */
-	static final int YOU_AHEAD = PersonalSpaceConfig.COUNTER_SPACING;
-	/** Otherwise you're drawn where you are, and only win a dead heat: a hair ahead. */
+	static final int NEAR_YOU = 192;
+	/** You're drawn where you are, and only win a dead heat: a hair ahead. */
 	static final int YOU_FIRST_ON_TIES = 4;
 	/** The "Draw me in front" setting; kept up to date by the plugin. */
 	volatile boolean drawMeInFront;
@@ -287,14 +287,30 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		double cameraHeight = client.getCameraZ();
 		double cameraZ = client.getCameraY();
 		Player local = client.getLocalPlayer();
+		Kept you = null;
 		for (int i = 0; i < keptCount; i++)
 		{
 			Kept k = kept[i];
 			double east = k.x - cameraX;
 			double up = k.y - cameraHeight;
 			double north = k.z - cameraZ;
-			int ahead = k.actor != local ? 0 : drawMeInFront ? YOU_AHEAD : YOU_FIRST_ON_TIES;
-			k.distance = Math.sqrt(east * east + up * up + north * north) - ahead;
+			k.distance = Math.sqrt(east * east + up * up + north * north) - (k.actor == local ? YOU_FIRST_ON_TIES : 0);
+			if (k.actor == local)
+			{
+				you = k;
+			}
+		}
+		if (drawMeInFront && you != null)
+		{
+			// Nearer the camera than anyone in your crowd, so drawn after them all, on top.
+			for (int i = 0; i < keptCount; i++)
+			{
+				Kept k = kept[i];
+				if (k != you && Math.abs(k.x - you.x) <= NEAR_YOU && Math.abs(k.z - you.z) <= NEAR_YOU)
+				{
+					you.distance = Math.min(you.distance, k.distance - 1);
+				}
+			}
 		}
 		// The game hands actors over roughly back to front already, so a plain insertion sort is
 		// quick here and, unlike Arrays.sort, allocates nothing.

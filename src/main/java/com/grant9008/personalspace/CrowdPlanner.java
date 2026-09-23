@@ -422,8 +422,11 @@ final class CrowdPlanner
 				continue;
 			}
 			int who = e.getValue().counted(tick, fresh);
-			if (who == 0)
+			if (who == 0 || who == 1 && other == yourTileNow)
 			{
+				// Nobody, or just you: a group doesn't back away from you standing beside it. It
+				// parted like the sea wherever you stood. Your personal space keeps anyone from
+				// being drawn inside you, and only whoever would be steps aside.
 				continue;
 			}
 			double x = (StackRegistry.sceneX(other) - StackRegistry.sceneX(tile)) * 2.0 * HALF_TILE;
@@ -510,6 +513,8 @@ final class CrowdPlanner
 
 	/** Your player id, remembered while you walk about (when you aren't among the still). */
 	private int knownYou = -1;
+	/** The tile you're standing still on this tick, or none. */
+	private long yourTileNow = Long.MIN_VALUE;
 
 	/** Tiles where someone the game shows was left in the middle without a spot last tick. */
 	private Set<Long> waited = new HashSet<>();
@@ -780,7 +785,7 @@ final class CrowdPlanner
 	 * side of the same thing: {anticlockwise, clockwise}, in radians, each half the angle to the
 	 * nearest occupied tile around what the row faces (or {@link Double#MAX_VALUE} if there's none).
 	 */
-	private static double[] arcLimits(Map<Long, List<StackSpreader.Entry>> byTile, int plane, int sceneX, int sceneY, double angle)
+	private static double[] arcLimits(Map<Long, List<StackSpreader.Entry>> byTile, int plane, int sceneX, int sceneY, double angle, long ignore)
 	{
 		int aheadX = (int) Math.round(-Math.sin(angle));
 		int aheadY = (int) Math.round(-Math.cos(angle));
@@ -794,7 +799,7 @@ final class CrowdPlanner
 				int nx = sceneX + aheadX + ox;
 				int ny = sceneY + aheadY + oy;
 				if ((ox == 0 && oy == 0) || (nx == sceneX && ny == sceneY)
-					|| !byTile.containsKey(StackRegistry.key(plane, nx, ny)))
+					|| !byTile.containsKey(StackRegistry.key(plane, nx, ny)) || StackRegistry.key(plane, nx, ny) == ignore)
 				{
 					continue;
 				}
@@ -825,11 +830,12 @@ final class CrowdPlanner
 	 * may reach back into the gap), and otherwise as far as the pattern goes.
 	 */
 	private static double counterReach(Map<Long, List<StackSpreader.Entry>> byTile, int plane, int sceneX, int sceneY,
-		int sideX, int sideY, int spacing)
+		int sideX, int sideY, int spacing, long ignore)
 	{
 		for (int k = 1; k <= LINE_LOOKOUT; k++)
 		{
-			List<StackSpreader.Entry> there = byTile.get(StackRegistry.key(plane, sceneX + k * sideX, sceneY + k * sideY));
+			long key = StackRegistry.key(plane, sceneX + k * sideX, sceneY + k * sideY);
+			List<StackSpreader.Entry> there = key == ignore ? null : byTile.get(key);
 			if (there != null)
 			{
 				return reachTowards(there.size(), k, spacing);
@@ -1276,14 +1282,7 @@ final class CrowdPlanner
 	 * the side, a counter is one long row, and the people at the next booth along are the ones in
 	 * the way.
 	 */
-	/**
-	 * The "Draw me in front" setting: seeing yourself comes first, so people on tiles near yours
-	 * step out of your line of sight too, not only those on your own tile.
-	 */
-	boolean youFirst;
-
-	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile, long lastYouTile, int lastYouSlot,
-		Set<Long> otherTiles)
+	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile, long lastYouTile, int lastYouSlot)
 	{
 		Map<Long, Set<Integer>> out = new HashMap<>();
 		if (this.lastYouAt == null && lastYouSlot < 0)
@@ -1326,7 +1325,7 @@ final class CrowdPlanner
 				// cramped corner, with a wall behind and nowhere to go, people were squeezed right on
 				// top of you.
 				boolean onYou = Math.hypot(east, north) < YOUR_SPACE;
-				boolean inFront = view != null && !otherTiles.contains(tile) && east * view[0] + north * view[1] > VIEW_IN_FRONT
+				boolean inFront = view != null && east * view[0] + north * view[1] > VIEW_IN_FRONT
 					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
 				if (onYou || inFront)
 				{
@@ -1417,9 +1416,11 @@ final class CrowdPlanner
 		observePresence(byTile, shown, tick);
 
 		int localId = -1;
+		yourTileNow = Long.MIN_VALUE;
 		for (StackSpreader.Entry e : still)
 		{
 			knownYou = e.local ? e.id : knownYou;
+			yourTileNow = e.local ? e.tile : yourTileNow;
 			localId = includeLocal && e.local ? e.id : localId;
 		}
 		slots.localId = localId;
@@ -1428,7 +1429,9 @@ final class CrowdPlanner
 		slots.yourId = knownYou;
 		lineBook.yourId = knownYou;
 		double[] view = viewFrom(still, tick);
-		lineBook.view = view;
+		// Nobody on a line steps out of your line of sight: a crowd huddles as it would, and
+		// seeing yourself is the draw order's job ("Draw me in front").
+		lineBook.view = null;
 		// Tiles near you get spare spots, for people to step out from between you and the camera
 		// even when every ordinary spot is taken.
 		nearYou.clear();
@@ -1443,7 +1446,7 @@ final class CrowdPlanner
 			{
 				for (long other : byTile.keySet())
 				{
-					if ((youFirst || other == e.tile) && StackRegistry.plane(other) == StackRegistry.plane(e.tile)
+					if (other == e.tile && StackRegistry.plane(other) == StackRegistry.plane(e.tile)
 						&& Math.abs(StackRegistry.sceneX(other) - StackRegistry.sceneX(e.tile)) <= VIEW_TILES
 						&& Math.abs(StackRegistry.sceneY(other) - StackRegistry.sceneY(e.tile)) <= VIEW_TILES)
 					{
@@ -1616,14 +1619,19 @@ final class CrowdPlanner
 			int sceneY = StackRegistry.sceneY(tile);
 			int sideX = (int) Math.round(alongX);
 			int sideY = (int) Math.round(alongZ);
-			double reachAhead = straight ? counterReach(byTile, plane, sceneX, sceneY, sideX, sideY, tileSpacing) : Double.MAX_VALUE;
-			double reachBehind = straight ? counterReach(byTile, plane, sceneX, sceneY, -sideX, -sideY, tileSpacing) : Double.MAX_VALUE;
+			// You standing alone next door don't cut a counter row or a curve short: they reached
+			// round you as if you weren't there only for the crowd to re-form when you stepped off.
+			// Your personal space keeps anyone from being drawn inside you.
+			long youAlone = yourTileNow != Long.MIN_VALUE && byTile.containsKey(yourTileNow) && byTile.get(yourTileNow).size() == 1
+				? yourTileNow : Long.MIN_VALUE;
+			double reachAhead = straight ? counterReach(byTile, plane, sceneX, sceneY, sideX, sideY, tileSpacing, youAlone) : Double.MAX_VALUE;
+			double reachBehind = straight ? counterReach(byTile, plane, sceneX, sceneY, -sideX, -sideY, tileSpacing, youAlone) : Double.MAX_VALUE;
 
 			// Around a tree, anvil or fire with people on more than one side, each tile's curve keeps
 			// to its own share of the ring, squeezing its players closer rather than reaching round
 			// behind the people on the next side.
 			double[] arc = row && !straight
-				? arcLimits(byTile, plane, sceneX, sceneY, angle)
+				? arcLimits(byTile, plane, sceneX, sceneY, angle, youAlone)
 				: new double[]{Double.MAX_VALUE, Double.MAX_VALUE};
 			// Sharing what you face with the tile next door limits how much of the ring is yours, and
 			// so how far apart your crowd can stand within it. The whole share, not half of it: what
@@ -1848,21 +1856,11 @@ final class CrowdPlanner
 			judgeTile = youTileNow;
 			judgeSlot = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
 		}
-		// People only step out of your line of sight on the tile you're standing on (and along a
-		// bank line you're part of). Standing a tile away from a pile at an anvil, the whole pile
-		// shuffled away from you, as if avoiding you; a pair at a fire split into one behind the
-		// other. Other tiles now stand as they would and cover you now and then, as they really
-		// would; nobody is ever drawn inside you though. "Draw me in front" puts seeing yourself
-		// first, and brings the wider reach back.
-		Set<Long> otherTiles = new HashSet<>();
-		for (long tile : byTile.keySet())
-		{
-			if (!youFirst && tile != judgeTile)
-			{
-				otherTiles.add(tile);
-			}
-		}
-		slots.keepClear = spotsInFront(view, spotsByTile, judgeTile, judgeSlot, otherTiles);
+		// Only your personal space is kept clear: nobody is drawn inside you. Nobody steps out of
+		// your line of sight any more, on your tile or any other: people moving aside for you
+		// parted a crowd like the sea wherever you stood. A crowd huddles as it would, and seeing
+		// yourself over it is the draw order's job ("Draw me in front").
+		slots.keepClear = spotsInFront(null, spotsByTile, judgeTile, judgeSlot);
 		slots.spare = new HashMap<>();
 		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{
@@ -2063,27 +2061,14 @@ final class CrowdPlanner
 		}
 		if (youAt != null)
 		{
-			long yourTile = Long.MIN_VALUE;
-			for (StackSpreader.Entry e : still)
-			{
-				if (e.local)
-				{
-					yourTile = e.tile;
-				}
-			}
-			// Nobody waiting in the middle of a tile is drawn where they'd stand in front of you, or
-			// right up against you: someone who gave up their spot for you waits there. In front
-			// of you only counts on your own tile, as above.
+			// Nobody waiting in the middle of a tile is drawn right up against you: someone who gave
+			// up their spot for you waits there. (In front of you is fine: that's how it looks.)
 			for (long tile : byTile.keySet())
 			{
 				double east = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE - youAt[0];
 				double north = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE - youAt[1];
 				boolean against = Math.hypot(east, north) < NEIGHBOUR_GAP;
-				boolean inFront = view != null && slots.stepAside && (youFirst || tile == yourTile)
-					&& Math.abs(east) <= VIEW_TILES * 2 * HALF_TILE && Math.abs(north) <= VIEW_TILES * 2 * HALF_TILE
-					&& east * view[0] + north * view[1] > VIEW_IN_FRONT
-					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
-				if ((against || inFront) && StackRegistry.plane(tile) == yourPlane(still))
+				if (against && StackRegistry.plane(tile) == yourPlane(still))
 				{
 					plan.middleOutOfSight.add(tile);
 				}

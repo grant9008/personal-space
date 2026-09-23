@@ -354,7 +354,7 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Draw me in front", inFrontSwitch,
-			"Off: whoever is between you and the camera covers you, as they really would, and only people on your own tile step out of your view. On: you're drawn over anyone right up against you, and people on tiles near you step out of your view too."), c);
+			"Off: whoever is between you and the camera covers you, as they really would. On: you're drawn over everyone in your crowd. Nobody moves out of your way either way."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
