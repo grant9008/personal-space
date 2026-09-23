@@ -9,7 +9,8 @@ import net.runelite.client.callback.RenderCallback;
  * Hides players below a combat level you choose: the Grand Exchange's level-3 crowd, say.
  *
  * <p>Works the way RuneLite's own Entity Hider does, through a render callback: a hidden player
- * isn't drawn, can't be clicked, and so isn't given a spot in a crowd either (the rest of the
+ * isn't drawn, nor is their overhead chat, health bar or hitsplats, can't be clicked, and so
+ * isn't given a spot in a crowd either (the rest of the
  * plugin only lays out players the render callbacks allow). Friends, friends chat and clan
  * members are never hidden, nor are you. It is off unless a level is set, and it switches off
  * with the rest of the plugin in PvP areas and while you fight.
@@ -31,7 +32,10 @@ final class LevelFilter implements RenderCallback
 	@Override
 	public boolean addEntity(Renderable renderable, boolean drawingUI)
 	{
-		if (drawingUI || !(renderable instanceof Player))
+		// Asked twice for each player: for the body, and (drawingUI) for what's drawn over it,
+		// their overhead chat, health bar and hitsplats. Both go, or a hidden casino bot's spam
+		// still floated over the empty spot where it stood.
+		if (!(renderable instanceof Player))
 		{
 			return true;
 		}
