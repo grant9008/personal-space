@@ -66,8 +66,9 @@ turns out to be four friends hanging out.
   a plugin may not move a click zone), but hover a body drawn away from its tile and a tooltip
   names them, with a small arrow to where they really stand.
 - **Hide the level-3s.** Optional: set a combat level and anyone below it isn't drawn, the way
-  Entity Hider hides people. Handy at the Grand Exchange. Friends, friends chat and clan members
-  always stay.
+  Entity Hider hides people, and their chat goes too. Good for hiding the level-3 bots at the
+  Grand Exchange. It goes by combat level only: the game never tells you anyone else's total
+  level. Friends, friends chat and clan members always stay.
 - **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
   changes: you click, trade and follow them where they really stand, and names, chat and minimap
   dots stay put.

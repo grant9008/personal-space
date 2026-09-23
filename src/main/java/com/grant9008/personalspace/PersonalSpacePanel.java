@@ -310,10 +310,16 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 4, 0);
-		card.add(labelWithValue("Hide players below", hideBelowValue), c);
+		JPanel hideBelowLabel = labelWithValue("Hide players below", hideBelowValue);
+		card.add(hideBelowLabel, c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		hideBelowSlider.setToolTipText(tip("Off, or a combat level: anyone below it isn't drawn, nor is their overhead chat, like Entity Hider. Handy for the Grand Exchange's level-3 spam bots. Friends, friends chat and clan always stay."));
+		String hideBelowTip = tip("Off, or a combat level: anyone below it isn't drawn, nor is their overhead chat, like Entity Hider. "
+			+ "Good for hiding bots at the Grand Exchange: most are level 3, so set it to 4. "
+			+ "It goes by combat level only; total level can't be used, as the game never tells you anyone else's. "
+			+ "Friends, friends chat and clan always stay.");
+		hideBelowLabel.setToolTipText(hideBelowTip);
+		hideBelowSlider.setToolTipText(hideBelowTip);
 		card.add(slider(hideBelowSlider), c);
 		c.gridy++;
 		c.insets = new Insets(4, 0, 0, 0);

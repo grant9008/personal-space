@@ -259,7 +259,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HIDE_BELOW,
 		name = "Hide players below level",
-		description = "3 (the default) is off: nobody is below level 3. Set 4 to hide the level-3s, or higher. Anyone below this combat level isn't drawn or clickable, nor is their overhead chat, as with Entity Hider. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight.",
+		description = "3 (the default) is off: nobody is below level 3. Set 4 to hide the level-3s, or higher: good for hiding bots at the Grand Exchange. It goes by combat level only; total level can't be used, as the game never tells you anyone else's. Anyone below this combat level isn't drawn or clickable, nor is their overhead chat, as with Entity Hider. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight.",
 		position = 12
 	)
 	default int hideBelowLevel()
