@@ -18,7 +18,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1846.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1850.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
