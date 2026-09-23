@@ -2911,4 +2911,33 @@ public class CrowdPlannerTest
 		Map<Integer, int[]> returned = spots(planner.plan(back, x -> true, 128, 10, true, true, 6, counter));
 		Assert.assertArrayEquals("your spot is still yours", yours, returned.get(99));
 	}
+
+	@Test
+	public void someoneMidSpellKeepsTheirSpotWhenAFullTileGetsANewcomer()
+	{
+		// Five on a tile with room for five, one of them alching. Someone who isn't busy arrives:
+		// they wait, rather than the alcher sliding off to the middle mid-cast.
+		List<StackSpreader.Entry> five = new ArrayList<>();
+		for (int i = 1; i <= 5; i++)
+		{
+			five.add(new StackSpreader.Entry(i, TILE, false, NORTH, i == 3));
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> settled = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			settled = spots(planner.plan(five, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, false, t, OPEN));
+		}
+		Assert.assertNotNull("the alcher has a spot", settled.get(3));
+		List<StackSpreader.Entry> six = new ArrayList<>(five);
+		six.add(new StackSpreader.Entry(6, TILE, false, NORTH, false));
+		for (int t = 6; t <= 10; t++)
+		{
+			Map<Integer, int[]> now = spots(planner.plan(six, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 5, true, false, t, OPEN));
+			Assert.assertNotNull("tick " + t + ": the alcher was sent to the middle mid-cast", now.get(3));
+			double moved = Math.hypot(now.get(3)[0] - settled.get(3)[0], now.get(3)[1] - settled.get(3)[1]);
+			Assert.assertTrue("tick " + t + ": the alcher was moved " + moved + " mid-cast", moved < 16);
+			Assert.assertNull("the newcomer waits", now.get(6));
+		}
+	}
 }

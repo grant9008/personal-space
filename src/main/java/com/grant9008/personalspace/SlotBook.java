@@ -259,6 +259,9 @@ final class SlotBook
 			// player id takes the front spot and you swap with them a few ticks later, which looks
 			// like the pair shuffling about once for no reason.
 			List<Integer> arriving = new ArrayList<>(ids);
+			// Those not busy with anything first, so when there aren't spots for everyone arriving
+			// the ones left waiting are the busy ones (a stable sort: otherwise in the order given).
+			arriving.sort(Comparator.comparingInt(id -> busy.contains(id) ? 1 : 0));
 			if (arriving.remove((Integer) localId))
 			{
 				arriving.add(0, localId);
@@ -330,32 +333,11 @@ final class SlotBook
 					moves++;
 				}
 			}
-			// More people than spots: whoever is busy with something (alching, an emote) gives up
-			// theirs to someone who isn't, so the ones left waiting in the middle are the busy ones.
-			for (int id : arriving)
-			{
-				if (t.slotOf.containsKey(id) || busy.contains(id))
-				{
-					continue;
-				}
-				int from = -1;
-				for (Map.Entry<Integer, Integer> o : t.occupant.entrySet())
-				{
-					if (from < 0 && o.getKey() < capacity && busy.contains(o.getValue()) && o.getValue() != localId
-						&& !inFront.contains(o.getKey()))
-					{
-						from = o.getKey();
-					}
-				}
-				if (from < 0)
-				{
-					break;
-				}
-				t.vacate(t.occupant.get(from), tick, false);
-				t.assign(id, from);
-				movedYou |= id == localId;
-				moves++;
-			}
+			// More people than spots: those who aren't busy with anything (alching, an emote) come
+			// first in the queue for a free spot, so the ones left waiting are the busy ones. But
+			// nobody is turned out of a spot they already have for a newcomer who isn't busy:
+			// someone busy can't walk without their spell being cut short, so they slid off to the
+			// middle of the tile mid-cast, which at a counter is behind the row.
 			// You get the best spot going the moment you have one: a free one if there is one, else
 			// whoever has the front spot takes yours. A front spot being held for someone who stepped
 			// away is yours too: you'd otherwise stand waiting for their hold to run out, and if they
