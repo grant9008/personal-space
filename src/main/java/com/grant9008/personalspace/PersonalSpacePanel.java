@@ -94,6 +94,7 @@ final class PersonalSpacePanel extends PluginPanel
 	private final ToggleSwitch inFrontSwitch = new ToggleSwitch();
 	private final ToggleSwitch namesSwitch = new ToggleSwitch();
 	private final ToggleSwitch hoverSwitch = new ToggleSwitch();
+	private final ToggleSwitch hideChatSwitch = new ToggleSwitch();
 	private final ToggleSwitch arrowSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
 	private final ToggleSwitch combatSwitch = new ToggleSwitch();
@@ -200,6 +201,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.select(config.pose());
 		namesSwitch.setOn(config.namesFollowPlayers());
 		hoverSwitch.setOn(config.hoverShowsWho());
+		hideChatSwitch.setOn(config.hideTheirChat());
 		arrowSwitch.setOn(config.hoverArrow());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		inFrontSwitch.setOn(config.drawMeInFront());
@@ -313,6 +315,20 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(0, 0, 0, 0);
 		hideBelowSlider.setToolTipText(tip("Off, or a combat level: anyone below it isn't drawn, nor is their overhead chat, like Entity Hider. Handy for the Grand Exchange's level-3 spam bots. Friends, friends chat and clan always stay."));
 		card.add(slider(hideBelowSlider), c);
+		c.gridy++;
+		c.insets = new Insets(4, 0, 0, 0);
+		JPanel hideChat = switchRow("Hide their chat too", hideChatSwitch,
+			"On: chat from the players hidden above is dropped from the chat box too, even after they walk off. Nothing while the level is Off.");
+		// Small, like the other labels in this card: it belongs to the slider above it.
+		for (java.awt.Component part : hideChat.getComponents())
+		{
+			if (part instanceof JLabel)
+			{
+				part.setFont(FontManager.getRunescapeSmallFont());
+				part.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			}
+		}
+		card.add(hideChat, c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 4, 0);
@@ -551,6 +567,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
 		namesSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_NAMES, on));
 		hoverSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HOVER, on));
+		hideChatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HIDE_CHAT, on));
 		arrowSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HOVER_ARROW, on));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
@@ -581,6 +598,7 @@ final class PersonalSpacePanel extends PluginPanel
 	{
 		perTileSlider.setEnabled(enabled);
 		hideBelowSlider.setEnabled(enabled);
+		hideChatSwitch.setEnabled(enabled);
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);

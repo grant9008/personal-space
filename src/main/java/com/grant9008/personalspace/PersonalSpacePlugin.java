@@ -29,6 +29,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
@@ -59,7 +60,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.51";
+	static final String VERSION = "1.8.52";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -98,6 +99,8 @@ public class PersonalSpacePlugin extends Plugin
 	private HoverOverlay hoverOverlay;
 
 	private LevelFilter levelFilter;
+
+	private ChatHider chatHider;
 
 	private NamesOverlay namesOverlay;
 
@@ -172,6 +175,7 @@ public class PersonalSpacePlugin extends Plugin
 		renderCallbackManager.register(probe);
 		levelFilter = new LevelFilter(client);
 		renderCallbackManager.register(levelFilter);
+		chatHider = new ChatHider(client, levelFilter);
 		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager, levelFilter);
 		overlayManager.add(namesOverlay);
 		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager, levelFilter);
@@ -215,6 +219,14 @@ public class PersonalSpacePlugin extends Plugin
 			renderCallbackManager.unregister(levelFilter);
 			levelFilter = null;
 		}
+		chatHider = null;
+		clientThread.invoke(() ->
+		{
+			if (client.getGameState() == GameState.LOGGED_IN)
+			{
+				client.refreshChat();
+			}
+		});
 		if (namesOverlay != null)
 		{
 			overlayManager.remove(namesOverlay);
@@ -238,12 +250,44 @@ public class PersonalSpacePlugin extends Plugin
 		});
 	}
 
+	/** As each chat line is built: drop it if it's from someone the level filter hides. */
+	@Subscribe
+	public void onScriptCallbackEvent(ScriptCallbackEvent event)
+	{
+		ChatHider hider = chatHider;
+		if (hider != null && "chatFilterCheck".equals(event.getEventName()) && config.hideTheirChat())
+		{
+			hider.check();
+		}
+	}
+
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
 		if (!PersonalSpaceConfig.GROUP.equals(event.getGroup()))
 		{
 			return;
+		}
+		if (PersonalSpaceConfig.KEY_HIDE_CHAT.equals(event.getKey()) || PersonalSpaceConfig.KEY_HIDE_BELOW.equals(event.getKey()))
+		{
+			// Rebuild the chat box, so lines appear or go as the setting changes. The new level
+			// goes in first (the tick would only set it later), and who was remembered as hidden
+			// is forgotten, or lowering the level would keep hiding them.
+			boolean newLevel = PersonalSpaceConfig.KEY_HIDE_BELOW.equals(event.getKey());
+			clientThread.invoke(() ->
+			{
+				LevelFilter filter = levelFilter;
+				ChatHider hider = chatHider;
+				if (newLevel && filter != null && hider != null)
+				{
+					filter.below = config.hideBelowLevel();
+					hider.clear();
+				}
+				if (client.getGameState() == GameState.LOGGED_IN)
+				{
+					client.refreshChat();
+				}
+			});
 		}
 		PersonalSpacePanel p = panel;
 		if (p != null)
@@ -878,6 +922,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.hover = config.hoverShowsWho();
 		s.hoverArrow = config.hoverArrow();
 		s.hideBelow = config.hideBelowLevel();
+		s.hideChat = config.hideTheirChat();
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();

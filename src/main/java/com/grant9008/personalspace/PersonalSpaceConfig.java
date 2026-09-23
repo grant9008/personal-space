@@ -29,6 +29,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_HOVER = "hoverShowsWho";
 	String KEY_HOVER_ARROW = "hoverArrow";
 	String KEY_HIDE_BELOW = "hideBelowLevel";
+	String KEY_HIDE_CHAT = "hideTheirChat";
 	/** Nobody is below level 3, where everyone starts, so up to 3 the filter hides nobody: it's off. */
 	int MIN_HIDE_BELOW = 3;
 	int MAX_HIDE_BELOW = 126;
@@ -267,10 +268,21 @@ public interface PersonalSpaceConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = KEY_HIDE_CHAT,
+		name = "Hide their chat too",
+		description = "On (the default): public chat from players hidden by 'Hide players below' is dropped from the chat box as well, and stays dropped for the session after they walk out of view. Does nothing while that filter is off.",
+		position = 13
+	)
+	default boolean hideTheirChat()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = KEY_SHOW_SIDEBAR,
 		name = "Show sidebar button",
 		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
-		position = 13
+		position = 14
 	)
 	default boolean showSidebarButton()
 	{
