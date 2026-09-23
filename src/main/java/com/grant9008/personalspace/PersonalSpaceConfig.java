@@ -29,6 +29,8 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_HOVER = "hoverShowsWho";
 	String KEY_HOVER_ARROW = "hoverArrow";
 	String KEY_HIDE_BELOW = "hideBelowLevel";
+	/** Nobody is below level 3, where everyone starts, so up to 3 the filter hides nobody: it's off. */
+	int MIN_HIDE_BELOW = 3;
 	int MAX_HIDE_BELOW = 126;
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
@@ -252,16 +254,16 @@ public interface PersonalSpaceConfig extends Config
 		return true;
 	}
 
-	@Range(min = 0, max = MAX_HIDE_BELOW)
+	@Range(min = MIN_HIDE_BELOW, max = MAX_HIDE_BELOW)
 	@ConfigItem(
 		keyName = KEY_HIDE_BELOW,
 		name = "Hide players below level",
-		description = "0 (the default) is off. Otherwise anyone below this combat level isn't drawn or clickable, as with Entity Hider. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight.",
+		description = "3 (the default) is off: nobody is below level 3. Set 4 to hide the level-3s, or higher. Anyone below this combat level isn't drawn or clickable, as with Entity Hider. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight.",
 		position = 12
 	)
 	default int hideBelowLevel()
 	{
-		return 0;
+		return MIN_HIDE_BELOW;
 	}
 
 	@ConfigItem(

@@ -78,7 +78,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private final JSlider perTileSlider = new JSlider(PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK, PersonalSpaceConfig.DEFAULT_STACK);
 	private final JLabel perTileValue = new JLabel();
-	private final JSlider hideBelowSlider = new JSlider(0, PersonalSpaceConfig.MAX_HIDE_BELOW, 0);
+	private final JSlider hideBelowSlider = new JSlider(PersonalSpaceConfig.MIN_HIDE_BELOW, PersonalSpaceConfig.MAX_HIDE_BELOW, PersonalSpaceConfig.MIN_HIDE_BELOW);
 	private final JLabel hideBelowValue = new JLabel();
 	private final PillGroup<Integer> spacingPills = new PillGroup<>(
 		new Integer[]{PersonalSpaceConfig.SPACING_CLOSE, PersonalSpaceConfig.SPACING_NORMAL, PersonalSpaceConfig.SPACING_WIDE},
@@ -192,7 +192,7 @@ final class PersonalSpacePanel extends PluginPanel
 		activeSwitch.setOn(config.active());
 		setSliderQuietly(perTileSlider, clamp(config.maxStack(), PersonalSpaceConfig.MIN_STACK, PersonalSpaceConfig.MAX_STACK));
 		perTileValue.setText(perTileSlider.getValue() + " players");
-		setSliderQuietly(hideBelowSlider, clamp(config.hideBelowLevel(), 0, PersonalSpaceConfig.MAX_HIDE_BELOW));
+		setSliderQuietly(hideBelowSlider, clamp(config.hideBelowLevel(), PersonalSpaceConfig.MIN_HIDE_BELOW, PersonalSpaceConfig.MAX_HIDE_BELOW));
 		hideBelowValue.setText(hideBelowText(hideBelowSlider.getValue()));
 		setSliderQuietly(spacingSlider, clamp(config.spacing(), PersonalSpaceConfig.MIN_SPACING, PersonalSpaceConfig.MAX_SPACING));
 		showSpacing(spacingSlider.getValue());
@@ -669,7 +669,8 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private static String hideBelowText(int level)
 	{
-		return level <= 0 ? "Off" : "level " + level;
+		// The far left is Off, and the next step already hides the level-3s: nobody is below 3.
+		return level <= PersonalSpaceConfig.MIN_HIDE_BELOW ? "Off" : "level " + level;
 	}
 
 	private static JPanel labelWithValue(String text, JLabel value)

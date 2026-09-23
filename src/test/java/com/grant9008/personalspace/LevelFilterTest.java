@@ -14,6 +14,8 @@ public class LevelFilterTest
 		Assert.assertFalse("a friends chat member stays", LevelFilter.hides(4, 3, false, true, false));
 		Assert.assertFalse("a clan member stays", LevelFilter.hides(4, 3, false, false, true));
 		Assert.assertFalse("off at 0", LevelFilter.hides(0, 3, false, false, false));
+		Assert.assertFalse("the slider's Off, 3, hides nobody: nobody is below level 3",
+			LevelFilter.hides(PersonalSpaceConfig.MIN_HIDE_BELOW, 3, false, false, false));
 		Assert.assertFalse("an unknown level is never hidden", LevelFilter.hides(4, 0, false, false, false));
 	}
 }

@@ -176,7 +176,7 @@ final class StatusSummary
 			.append(", names over players ").append(yesNo(s.names))
 			.append(", hover shows who ").append(yesNo(s.hover))
 			.append(", arrow to their tile ").append(yesNo(s.hoverArrow))
-			.append(", hide below level ").append(s.hideBelow <= 0 ? "off" : String.valueOf(s.hideBelow))
+			.append(", hide below level ").append(s.hideBelow <= PersonalSpaceConfig.MIN_HIDE_BELOW ? "off" : String.valueOf(s.hideBelow))
 			.append(", pause in combat ").append(yesNo(s.pauseInCombat))
 
 			.append(", test offset ").append(s.testOffset).append('\n');
