@@ -1277,16 +1277,13 @@ final class CrowdPlanner
 	 * the way.
 	 */
 	/**
-	 * The "Draw me in front" setting: seeing yourself comes first, so small groups near you step
-	 * out of your line of sight as piles do, rather than keeping their shape.
+	 * The "Draw me in front" setting: seeing yourself comes first, so people on tiles near yours
+	 * step out of your line of sight too, not only those on your own tile.
 	 */
 	boolean youFirst;
 
-	/** A group this small is posed as a group (see the "Pose for 2 or 3 players" setting) and keeps its shape near you. */
-	static final int SMALL_GROUP = 3;
-
 	private Map<Long, Set<Integer>> spotsInFront(double[] view, Map<Long, List<int[]>> spotsByTile, long lastYouTile, int lastYouSlot,
-		Set<Long> smallGroups)
+		Set<Long> otherTiles)
 	{
 		Map<Long, Set<Integer>> out = new HashMap<>();
 		if (this.lastYouAt == null && lastYouSlot < 0)
@@ -1329,7 +1326,7 @@ final class CrowdPlanner
 				// cramped corner, with a wall behind and nowhere to go, people were squeezed right on
 				// top of you.
 				boolean onYou = Math.hypot(east, north) < YOUR_SPACE;
-				boolean inFront = view != null && !smallGroups.contains(tile) && east * view[0] + north * view[1] > VIEW_IN_FRONT
+				boolean inFront = view != null && !otherTiles.contains(tile) && east * view[0] + north * view[1] > VIEW_IN_FRONT
 					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;
 				if (onYou || inFront)
 				{
@@ -1446,7 +1443,7 @@ final class CrowdPlanner
 			{
 				for (long other : byTile.keySet())
 				{
-					if (StackRegistry.plane(other) == StackRegistry.plane(e.tile)
+					if ((youFirst || other == e.tile) && StackRegistry.plane(other) == StackRegistry.plane(e.tile)
 						&& Math.abs(StackRegistry.sceneX(other) - StackRegistry.sceneX(e.tile)) <= VIEW_TILES
 						&& Math.abs(StackRegistry.sceneY(other) - StackRegistry.sceneY(e.tile)) <= VIEW_TILES)
 					{
@@ -1851,19 +1848,21 @@ final class CrowdPlanner
 			judgeTile = youTileNow;
 			judgeSlot = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
 		}
-		// Small groups (two or three) on other tiles keep their shape: a pair at a fire beside you
-		// was split into one behind the other because one of them stood in your line of sight.
-		// Being covered by them now and then is how it would really look; nobody is ever drawn
-		// inside you though. Piles still step out of your way, which is where it matters.
-		Set<Long> smallGroups = new HashSet<>();
-		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		// People only step out of your line of sight on the tile you're standing on (and along a
+		// bank line you're part of). Standing a tile away from a pile at an anvil, the whole pile
+		// shuffled away from you, as if avoiding you; a pair at a fire split into one behind the
+		// other. Other tiles now stand as they would and cover you now and then, as they really
+		// would; nobody is ever drawn inside you though. "Draw me in front" puts seeing yourself
+		// first, and brings the wider reach back.
+		Set<Long> otherTiles = new HashSet<>();
+		for (long tile : byTile.keySet())
 		{
-			if (!youFirst && e.getKey() != judgeTile && e.getValue().size() <= SMALL_GROUP)
+			if (!youFirst && tile != judgeTile)
 			{
-				smallGroups.add(e.getKey());
+				otherTiles.add(tile);
 			}
 		}
-		slots.keepClear = spotsInFront(view, spotsByTile, judgeTile, judgeSlot, smallGroups);
+		slots.keepClear = spotsInFront(view, spotsByTile, judgeTile, judgeSlot, otherTiles);
 		slots.spare = new HashMap<>();
 		for (Map.Entry<Long, List<int[]>> e : spotsByTile.entrySet())
 		{
@@ -2064,14 +2063,23 @@ final class CrowdPlanner
 		}
 		if (youAt != null)
 		{
+			long yourTile = Long.MIN_VALUE;
+			for (StackSpreader.Entry e : still)
+			{
+				if (e.local)
+				{
+					yourTile = e.tile;
+				}
+			}
 			// Nobody waiting in the middle of a tile is drawn where they'd stand in front of you, or
-			// right up against you: someone who gave up their spot for you waits there.
+			// right up against you: someone who gave up their spot for you waits there. In front
+			// of you only counts on your own tile, as above.
 			for (long tile : byTile.keySet())
 			{
 				double east = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE - youAt[0];
 				double north = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE - youAt[1];
 				boolean against = Math.hypot(east, north) < NEIGHBOUR_GAP;
-				boolean inFront = view != null && slots.stepAside
+				boolean inFront = view != null && slots.stepAside && (youFirst || tile == yourTile)
 					&& Math.abs(east) <= VIEW_TILES * 2 * HALF_TILE && Math.abs(north) <= VIEW_TILES * 2 * HALF_TILE
 					&& east * view[0] + north * view[1] > VIEW_IN_FRONT
 					&& Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP;

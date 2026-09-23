@@ -202,7 +202,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_DRAW_ME_IN_FRONT,
 		name = "Draw me in front",
-		description = "Off: people are drawn front to back as they really stand, so someone between you and the camera covers you, and small groups near you keep their shape. On: you're drawn over anyone right up against you, whichever way the camera faces, and small groups near you step out of your line of sight too.",
+		description = "Off: people are drawn front to back as they really stand, so someone between you and the camera covers you, and only people on your own tile step out of your line of sight. On: you're drawn over anyone right up against you, whichever way the camera faces, and people on tiles near you step out of your line of sight too.",
 		position = 5
 	)
 	default boolean drawMeInFront()

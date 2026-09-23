@@ -1372,7 +1372,9 @@ public class CrowdPlannerTest
 	public void fromTheSideNobodyAtTheNextBoothsStandsBetweenYouAndTheCamera()
 	{
 		// Seen from the side a counter is one long row, and the people at the booths along from yours
-		// are the ones in the way - whether the booths share one line or each has its own row.
+		// are the ones in the way. Booths side by side share one line with you, and nobody on it
+		// stands between you and the camera. Booths with a gap each have their own row: other tiles,
+		// which stand as they would unless "Draw me in front" puts seeing yourself first.
 		CrowdPlanner.Surroundings counter = new CrowdPlanner.Surroundings()
 		{
 			@Override
@@ -1409,6 +1411,7 @@ public class CrowdPlannerTest
 		{
 			for (int side : new int[]{1, -1})
 			{
+				boolean youFirst = step == 2;
 				List<StackSpreader.Entry> still = new ArrayList<>();
 				int id = 1;
 				int yourBooth = side > 0 ? 0 : 2;
@@ -1421,6 +1424,7 @@ public class CrowdPlannerTest
 					}
 				}
 				CrowdPlanner planner = new CrowdPlanner();
+				planner.youFirst = youFirst;
 				planner.cameraX = (50 + step) * 128 + 64 + side * 3000;
 				planner.cameraY = 50 * 128 + 64;
 				CrowdPlanner.Plan plan = null;
@@ -1429,7 +1433,7 @@ public class CrowdPlannerTest
 					plan = planner.plan(still, x -> true, 128, 16, true, true, t, counter);
 				}
 				Assert.assertEquals("everyone still has a spot", still.size(), plan.placements.size());
-				Assert.assertNull((step == 1 ? "booths side by side" : "booths with a gap") + ", camera from the "
+				Assert.assertNull((step == 1 ? "booths side by side" : "booths with a gap, Draw me in front on") + ", camera from the "
 					+ (side > 0 ? "east" : "west"), inYourWay(plan, side, 0));
 			}
 		}
@@ -3069,6 +3073,42 @@ public class CrowdPlannerTest
 			}
 			Assert.assertEquals(youFirst ? "with Draw me in front, one steps out of your view" : "the pair stays side by side",
 				youFirst, split);
+		}
+	}
+
+	@Test
+	public void standingATileAwayFromAPileLeavesItAsItIs()
+	{
+		// A pile at an anvil; you stand alone on the tile beside it, the camera looking across
+		// both. Nobody on the pile's tile steps out of your line of sight: it stays as it is
+		// whether you're there or not.
+		CrowdPlanner.Surroundings anvil = surroundings(true, false, false);
+		int[][] cameras = {{0, -1}, {1, 0}, {-1, 0}, {0, 1}};
+		for (int[] camera : cameras)
+		{
+			List<StackSpreader.Entry> pile = new ArrayList<>();
+			for (int i = 1; i <= 8; i++)
+			{
+				pile.add(new StackSpreader.Entry(i, TILE, false, NORTH, i % 3 == 0));
+			}
+			CrowdPlanner planner = new CrowdPlanner();
+			cameraAt(planner, camera[0], camera[1]);
+			Map<Integer, int[]> without = null;
+			for (int t = 1; t <= 12; t++)
+			{
+				without = spots(planner.plan(pile, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, anvil));
+			}
+			List<StackSpreader.Entry> withYou = new ArrayList<>(pile);
+			withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, 51, 49), true, NORTH));
+			for (int t = 13; t <= 24; t++)
+			{
+				Map<Integer, int[]> now = spots(planner.plan(withYou, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, anvil));
+				for (int i = 1; i <= 8; i++)
+				{
+					Assert.assertArrayEquals("camera " + camera[0] + "," + camera[1] + " tick " + t + ": player " + i + " moved for you",
+						without.get(i), now.get(i));
+				}
+			}
 		}
 	}
 }
