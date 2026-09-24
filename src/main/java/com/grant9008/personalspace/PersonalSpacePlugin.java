@@ -41,6 +41,8 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.PluginInstantiationException;
+import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -60,7 +62,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.54";
+	static final String VERSION = "1.8.55";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -95,6 +97,9 @@ public class PersonalSpacePlugin extends Plugin
 
 	@Inject
 	private TooltipManager tooltipManager;
+
+	@Inject
+	private PluginManager pluginManager;
 
 	private HoverOverlay hoverOverlay;
 
@@ -160,6 +165,10 @@ public class PersonalSpacePlugin extends Plugin
 	private long lastRevealedDraws;
 	private long lastSceneMismatches;
 	private int noDrawsStreak;
+	/** Diagnostics: times spreading was switched off mid-way, ticks where most of the crowd lost its spot, and shims installed. */
+	private long resets;
+	private long planDips;
+	private long shimInstalls;
 	private int nothingMovedStreak;
 
 	@Provides
@@ -182,6 +191,7 @@ public class PersonalSpacePlugin extends Plugin
 		overlayManager.add(hoverOverlay);
 
 		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
+		newPanel.onTurnOnGpu(this::turnOnGpu);
 		BufferedImage icon = ImageUtil.loadImageResource(PersonalSpacePlugin.class, "panel_icon.png");
 		navButton = NavigationButton.builder()
 			.tooltip("Personal Space")
@@ -383,6 +393,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		wrapper = new SpreadingDrawCallbacks(client, offsets, stacks, probe, renderCallbackManager, target);
 		client.setDrawCallbacks(wrapper);
+		shimInstalls++;
 		log.debug("Hooked draw callbacks in front of {}", target.getClass().getName());
 	}
 
@@ -580,6 +591,10 @@ public class PersonalSpacePlugin extends Plugin
 		aboard = onBoats;
 		still = entries.size();
 		stackedTiles = StackSpreader.stackedTiles(entries);
+		if (moving >= 6 && plan.placements.size() * 2 < moving)
+		{
+			planDips++;
+		}
 		moving = plan.placements.size();
 		skippedIds = skipped;
 		unseen = plan.unseen;
@@ -650,6 +665,10 @@ public class PersonalSpacePlugin extends Plugin
 	/** Everyone back to their real spot immediately and forget what the last tick found. Client thread. */
 	private void resetTickState()
 	{
+		if (moving > 0)
+		{
+			resets++;
+		}
 		if (probe != null)
 		{
 			probe.enabled = false;
@@ -935,6 +954,8 @@ public class PersonalSpacePlugin extends Plugin
 		SpreadingDrawCallbacks w = wrapper;
 		s.hooked = w != null && current == w;
 		s.renderer = current == null ? null : rendererName(s.hooked ? w.getDelegate() : current);
+		Plugin hd = findPlugin("HdPlugin");
+		s.hdEnabled = hd != null && pluginManager.isPluginEnabled(hd);
 
 		double seconds = lastPanelNanos == 0 ? 0 : (now - lastPanelNanos) / 1_000_000_000.0;
 		boolean ratesKnown = w != null && w == countedWrapper && seconds > 0;
@@ -945,6 +966,9 @@ public class PersonalSpacePlugin extends Plugin
 			s.revealedDrawsPerSec = perSecond(w.revealedDraws - lastRevealedDraws, seconds);
 			s.sceneMismatchesPerSec = perSecond(w.sceneMismatches - lastSceneMismatches, seconds);
 		}
+		s.resets = resets;
+		s.planDips = planDips;
+		s.shimInstalls = shimInstalls;
 		if (w != null)
 		{
 			s.playersInOtherCalls = w.playersInOtherCalls;
@@ -953,6 +977,15 @@ public class PersonalSpacePlugin extends Plugin
 			s.walkDraws = w.walkDraws;
 			s.orderedDraws = w.orderedDraws;
 			s.leanedDraws = w.leanedDraws;
+			s.keptDips = w.keptDips;
+			s.probeBlackouts = w.probeBlackouts;
+			s.droppedUndrawn = w.droppedUndrawn;
+			s.blinkNoMiddle = w.blinkNoMiddle;
+			s.blinkUnconfirmed = w.blinkUnconfirmed;
+			s.blinkOthersHid = w.blinkOthersHid;
+			s.blinkMoved = w.blinkMoved;
+			s.blinkOther = w.blinkOther;
+			s.keptWithoutModel = w.keptWithoutModel;
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
@@ -1000,6 +1033,42 @@ public class PersonalSpacePlugin extends Plugin
 		return count <= 0 ? 0 : (int) Math.round(count / seconds);
 	}
 
+	/** RuneLite's GPU plugin, or 117 HD: found by class name, as neither can be referred to directly. */
+	private Plugin findPlugin(String simpleName)
+	{
+		for (Plugin p : pluginManager.getPlugins())
+		{
+			if (simpleName.equals(p.getClass().getSimpleName()))
+			{
+				return p;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The sidebar's Turn on GPU button: switches on RuneLite's GPU plugin, just as ticking it in the
+	 * plugin list does. Swing thread. Never over 117 HD: the button isn't offered while it's on.
+	 */
+	private void turnOnGpu()
+	{
+		Plugin hd = findPlugin("HdPlugin");
+		Plugin gpu = findPlugin("GpuPlugin");
+		if (gpu == null || (hd != null && pluginManager.isPluginEnabled(hd)) || pluginManager.isPluginActive(gpu))
+		{
+			return;
+		}
+		pluginManager.setPluginEnabled(gpu, true);
+		try
+		{
+			pluginManager.startPlugin(gpu);
+		}
+		catch (PluginInstantiationException e)
+		{
+			log.warn("Couldn't turn on the GPU plugin", e);
+		}
+	}
+
 	private static String rendererName(DrawCallbacks callbacks)
 	{
 		String name = callbacks.getClass().getSimpleName();
@@ -1007,7 +1076,7 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return "GPU plugin";
 		}
-		if (name.toLowerCase().contains("hd"))
+		if (name.toLowerCase().contains("hd") || callbacks.getClass().getName().startsWith("rs117."))
 		{
 			return "117 HD";
 		}

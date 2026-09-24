@@ -107,6 +107,8 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JPanel checksPanel = new JPanel(new GridBagLayout());
 	private final List<JLabel[]> checkRows = new ArrayList<>();
 	private final JButton copyButton = new JButton("Copy report");
+	private final JButton gpuButton = new JButton("Turn on GPU");
+	private Runnable turnOnGpu = () -> { };
 	private final Timer copyReset = new Timer(2500, e -> copyButton.setText("Copy report"));
 
 	private Snapshot last = new Snapshot();
@@ -154,6 +156,12 @@ final class PersonalSpacePanel extends PluginPanel
 
 	// ---- called by the plugin ----------------------------------------------------------
 
+	/** What the Turn on GPU button does. */
+	void onTurnOnGpu(Runnable action)
+	{
+		turnOnGpu = action;
+	}
+
 	/** Swing thread. Show a fresh snapshot. Only the Troubleshooting section shows it, and only while open. */
 	void update(Snapshot s)
 	{
@@ -163,6 +171,7 @@ final class PersonalSpacePanel extends PluginPanel
 		liveLine.setText(h.title);
 		shapeLine.setText(s.yourShape == null ? "" : wrap(s.yourShape));
 		shapeLine.setVisible(s.yourShape != null);
+		gpuButton.setVisible(s.renderer == null && !s.hdEnabled && s.gate != Snapshot.Gate.NOT_LOGGED_IN);
 		if (!troubleshootingBody.isVisible())
 		{
 			return;
@@ -268,10 +277,28 @@ final class PersonalSpacePanel extends PluginPanel
 		shapeLine.setToolTipText(tip("The shape your own tile is using right now."));
 		shapeLine.setVisible(false);
 
+		// Offered only while no GPU renderer is running and 117 HD isn't switched on: Personal Space
+		// can't do anything without one, and finding the GPU plugin in RuneLite's list is a hunt.
+		gpuButton.setFocusPainted(false);
+		gpuButton.setFont(FontManager.getRunescapeSmallFont());
+		gpuButton.setToolTipText(tip("Switches on RuneLite's GPU plugin, which Personal Space needs to draw crowds. "
+			+ "Same as ticking it in RuneLite's plugin list. 117 HD works too, instead."));
+		gpuButton.addActionListener(e -> turnOnGpu.run());
+		gpuButton.setVisible(false);
+		JPanel gpuRow = new JPanel(new BorderLayout());
+		gpuRow.setOpaque(false);
+		gpuRow.setBorder(new EmptyBorder(6, 0, 0, 0));
+		gpuRow.add(gpuButton, BorderLayout.CENTER);
+
+		JPanel under = new JPanel(new BorderLayout());
+		under.setOpaque(false);
+		under.add(shapeLine, BorderLayout.NORTH);
+		under.add(gpuRow, BorderLayout.SOUTH);
+
 		JPanel lines = new JPanel(new BorderLayout());
 		lines.setOpaque(false);
 		lines.add(live, BorderLayout.NORTH);
-		lines.add(shapeLine, BorderLayout.SOUTH);
+		lines.add(under, BorderLayout.SOUTH);
 		p.add(lines, BorderLayout.SOUTH);
 		return p;
 	}

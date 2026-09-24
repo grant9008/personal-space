@@ -161,6 +161,101 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private static final int LEAN_REACH = 512;
 	/** Diagnostics: people drawn by where their body leans, rather than where they stand. */
 	long leanedDraws;
+	/**
+	 * Diagnostics, for a crowd that vanishes for a moment: frames where under half as many people
+	 * were held back to be drawn in order as the frame before; frames where the stack probe held
+	 * a tile's people back and the game then drew nobody on it, so none of them were drawn; and
+	 * people held back but thrown away undrawn when the scene changed.
+	 */
+	long keptDips;
+	long probeBlackouts;
+	long droppedUndrawn;
+	private int lastKeptCount;
+	/**
+	 * Diagnostics for one tile's crowd blinking out for a frame: its stackmates drawn this frame and
+	 * the last, and why any were left out. Tiles whose crowd drew 3 or more one frame and under half
+	 * that the next count as a blink, put down to what left most of them out: the game drawing
+	 * nobody in the middle of the tile that frame (so there was nobody to draw them with), their
+	 * showing not being confirmed, another plugin hiding them, them having moved, or no model.
+	 */
+	private static final class TileDraws
+	{
+		int frame = -1;
+		int count;
+		int lastFrame = -1;
+		int lastCount;
+		int unconfirmed;
+		int othersHid;
+		int moved;
+	}
+
+	private final Map<Long, TileDraws> tileDraws = new HashMap<>();
+	long blinkNoMiddle;
+	long blinkUnconfirmed;
+	long blinkOthersHid;
+	long blinkMoved;
+	long blinkOther;
+	/** Held back, then no model to draw them with. */
+	long keptWithoutModel;
+
+	private TileDraws tileDraws(long tileKey, int frame)
+	{
+		TileDraws td = tileDraws.computeIfAbsent(tileKey, k -> new TileDraws());
+		if (td.frame != frame)
+		{
+			td.lastFrame = td.frame;
+			td.lastCount = td.count;
+			td.frame = frame;
+			td.count = 0;
+			td.unconfirmed = 0;
+			td.othersHid = 0;
+			td.moved = 0;
+		}
+		return td;
+	}
+
+	/** Once a frame, before the held-back crowd is drawn: see {@link TileDraws}. */
+	private void countBlinks(int frame)
+	{
+		for (java.util.Iterator<TileDraws> it = tileDraws.values().iterator(); it.hasNext(); )
+		{
+			TileDraws td = it.next();
+			if (td.frame < frame - 50)
+			{
+				it.remove();
+			}
+			else if (td.frame == frame - 1 && td.count >= 3)
+			{
+				// Drawn last frame, and this frame the game drew nobody in the middle of the tile.
+				blinkNoMiddle++;
+			}
+			else if (td.frame == frame && td.lastFrame == frame - 1 && td.lastCount >= 3 && td.count * 2 < td.lastCount)
+			{
+				int most = Math.max(td.unconfirmed, Math.max(td.othersHid, td.moved));
+				if (most == 0)
+				{
+					blinkOther++;
+				}
+				else if (most == td.unconfirmed)
+				{
+					blinkUnconfirmed++;
+				}
+				else if (most == td.othersHid)
+				{
+					blinkOthersHid++;
+				}
+				else
+				{
+					blinkMoved++;
+				}
+			}
+		}
+	}
+
+	/** Stacked tiles whose middle player the game drew this frame, so their stackmates were drawn too. */
+	private final long[] tilesDrawnThisFrame = new long[256];
+	private int tilesDrawnCount;
+	private int tilesDrawnFrame = -1;
 
 	private final Leans leans = new Leans();
 	private final int[] leanCountsX = new int[2 * LEAN_REACH];
@@ -304,14 +399,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			int animation = k.actor instanceof Player ? ((Player) k.actor).getAnimation() : -1;
 			if (!k.walk && animation != -1)
 			{
-				// Built here to be measured, and again below to be drawn: models share one buffer.
+				// Their lean so far: measured from the models drawn in earlier frames (below), so no
+				// model is built just to be measured.
 				try
 				{
 					Player player = (Player) k.actor;
-					Model model = player.getModel();
-					double[] middle = model == null ? null
-						: middle(model.getVerticesX(), model.getVerticesZ(), model.getVerticesCount(), leanCountsX, leanCountsZ);
-					double[] settled = middle == null ? null : leans.settle(player.getId(), animation, middle[0], middle[1]);
+					double[] settled = leans.average(player.getId(), animation);
 					int[] lean = settled == null ? null : turn(settled[0], settled[1], k.orientation);
 					if (lean != null)
 					{
@@ -376,11 +469,16 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				if (model == null)
 				{
 					model = k.actor.getModel();
+					sampleLean(k, model);
 				}
 				if (model != null)
 				{
 					delegate.drawTemp(k.projection, k.scene, k.gameObject, model, orientation, k.x, k.y, k.z);
 					orderedDraws++;
+				}
+				else
+				{
+					keptWithoutModel++;
 				}
 			}
 			catch (RuntimeException e)
@@ -393,6 +491,26 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			k.actor = null;
 		}
 		keptCount = 0;
+	}
+
+	/** Add this frame's model to a busy player's lean average, for the frames after. */
+	private void sampleLean(Kept k, Model model)
+	{
+		if (model == null || k.walk || !(k.actor instanceof Player))
+		{
+			return;
+		}
+		Player player = (Player) k.actor;
+		int animation = player.getAnimation();
+		if (animation == -1)
+		{
+			return;
+		}
+		double[] middle = middle(model.getVerticesX(), model.getVerticesZ(), model.getVerticesCount(), leanCountsX, leanCountsZ);
+		if (middle != null)
+		{
+			leans.settle(player.getId(), animation, middle[0], middle[1]);
+		}
 	}
 
 	/**
@@ -489,6 +607,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	/** Forget everyone kept back, drawing nobody: the frame they belonged to is over. */
 	private void dropKept()
 	{
+		droppedUndrawn += keptCount;
 		for (int i = 0; i < keptCount; i++)
 		{
 			Kept k = kept[i];
@@ -498,6 +617,44 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			k.actor = null;
 		}
 		keptCount = 0;
+	}
+
+	private void noteTileDrawn(long key)
+	{
+		int frame = offsets.frame();
+		if (tilesDrawnFrame != frame)
+		{
+			tilesDrawnFrame = frame;
+			tilesDrawnCount = 0;
+		}
+		if (tilesDrawnCount < tilesDrawnThisFrame.length)
+		{
+			tilesDrawnThisFrame[tilesDrawnCount++] = key;
+		}
+	}
+
+	/** See {@link #keptDips}. Once a frame, as the held-back crowd is about to be drawn. */
+	private void countDrops()
+	{
+		if (lastKeptCount >= 6 && keptCount * 2 < lastKeptCount)
+		{
+			keptDips++;
+		}
+		lastKeptCount = keptCount;
+		int frame = offsets.frame();
+		long[] heldTiles = probe.heldTiles(frame);
+		for (long tile : heldTiles)
+		{
+			boolean drawn = false;
+			for (int i = 0; tilesDrawnFrame == frame && i < tilesDrawnCount && !drawn; i++)
+			{
+				drawn = tilesDrawnThisFrame[i] == tile;
+			}
+			if (!drawn)
+			{
+				probeBlackouts++;
+			}
+		}
 	}
 
 	/** Draws were kept back for an opaque pass that never came: this renderer draws in its own order. */
@@ -616,6 +773,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// Only a player standing exactly in the middle of its tile hides others there.
 		if (!stacks.isEmpty() && StillnessTracker.isCentred(x, z))
 		{
+			noteTileDrawn(StackRegistry.key(layer, x >> 7, z >> 7));
 			touchedSharedModel |= drawHiddenStackmates(projection, scene, gameObject, drawn, wv, plane, x, y, z, mayKeep);
 		}
 
@@ -803,6 +961,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		Player local = client.getLocalPlayer();
 		int localId = local == null ? -1 : local.getId();
 		int total = mates.length + heldCount;
+		TileDraws td = tileDraws(tileKey, frame);
 		for (int i = 0; i < total; i++)
 		{
 			int id = i < mates.length ? mates[i] : held[i - mates.length];
@@ -821,6 +980,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				LocalPoint lp = mate.getLocalLocation();
 				if (lp == null || lp.getX() != x || lp.getY() != z)
 				{
+					td.moved++;
 					continue;
 				}
 				int mdx = offsets.dx(id);
@@ -830,12 +990,14 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				{
 					continue;
 				}
-				if (!probe.isConfirmed(id, mate, cycle))
+				if (!probe.mayDraw(id, mate, cycle))
 				{
+					td.unconfirmed++;
 					continue; // the game hasn't shown this player recently, e.g. hidden by the server: never draw them
 				}
 				if (!probe.othersAllow(renderCallbacks, mate))
 				{
+					td.othersHid++;
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
 				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);
@@ -870,6 +1032,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				}
 				revealedFrame[id] = frame;
 				revealedDraws++;
+				td.count++;
 				middleDrawn |= inMiddle;
 			}
 			catch (RuntimeException e)
@@ -1052,6 +1215,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			// The game has handed over everyone for this frame: now they're drawn, farthest first.
 			opaquePassSeen = true;
+			countDrops();
+			countBlinks(offsets.frame());
 			drawKept();
 		}
 		delegate.drawPass(projection, scene, pass);

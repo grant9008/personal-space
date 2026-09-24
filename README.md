@@ -10,17 +10,17 @@ turns out to be four friends hanging out.
 
 ![Before and after at a busy Grand Exchange](docs/photos/grand-exchange-busy.jpg)
 
+![Before and after at Varrock West Bank on 117 HD: 39 people on 5 tiles](docs/photos/bank-117hd.jpg)
+
 ![Before and after fly fishing at Barbarian Village: one player, then 27](docs/photos/barbarian-fishing.jpg)
 
 ![Before and after smithing at the Varrock anvil: one player, then 34](docs/photos/anvil-crowd.jpg)
-
-![Before and after: two players facing each other](docs/photos/pair-facing.jpg)
 
 ![Before and after round a bonfire](docs/photos/bonfire.jpg)
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1852.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1855.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -81,21 +81,19 @@ turns out to be four friends hanging out.
   It never shows players the game itself (or another plugin such as Entity Hider) keeps hidden,
   and they never push anyone else aside.
 
-Needs the **GPU** plugin or **117 HD** turned on. Works alongside **True Tile Movement Animations**.
+Needs the **GPU** plugin or **117 HD** turned on; if neither is, the sidebar has a **Turn on GPU** button. Works alongside **True Tile Movement Animations**.
 
 <br clear="right">
 
 ## In game
 
-![Before and after along the Varrock West Bank counter](docs/photos/bank-counter-row.jpg)
+![Before and after at the bank counter, seen from above: 31 people on 5 tiles](docs/photos/bank-from-above.jpg)
 
 ![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithers.jpg)
 
 ![Before and after chopping yews](docs/photos/yews.jpg)
 
 ![Before and after woodcutting at the willows](docs/photos/willows.jpg)
-
-![Before and after at a fishing spot with a bonfire behind it](docs/photos/fishing-and-bonfire.jpg)
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 

@@ -27,6 +27,16 @@ final class Leans
 		Arrays.fill(animation, -1);
 	}
 
+	/** The average so far for a player playing this animation, or null if there's none yet. */
+	double[] average(int id, int anim)
+	{
+		if (id < 0 || id >= OffsetTable.CAPACITY || animation[id] != anim || count[id] == 0)
+		{
+			return null;
+		}
+		return new double[]{sumX[id] / count[id], sumZ[id] / count[id]};
+	}
+
 	/**
 	 * Adds this frame's middle of the model, (x, z) in the model's own frame, for a player playing
 	 * this animation, and returns their average so far. Null if the id is out of range.

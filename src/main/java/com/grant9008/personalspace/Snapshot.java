@@ -50,6 +50,18 @@ final class Snapshot
 	/** Players and NPCs drawn farthest from the camera first, so whoever is nearer is in front; total. */
 	long orderedDraws;
 	long leanedDraws;
+	long keptDips;
+	long probeBlackouts;
+	long droppedUndrawn;
+	long resets;
+	long planDips;
+	long shimInstalls;
+	long blinkNoMiddle;
+	long blinkUnconfirmed;
+	long blinkOthersHid;
+	long blinkMoved;
+	long blinkOther;
+	long keptWithoutModel;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass; should stay 0. */
 	long passMissedFrames;
 	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */
@@ -66,6 +78,8 @@ final class Snapshot
 	// renderer hook
 	/** Display name of the renderer we sit in front of, or null when no GPU renderer is running. */
 	String renderer;
+	/** Whether 117 HD is switched on in the plugin list (running or not), so we don't offer the GPU plugin over it. */
+	boolean hdEnabled;
 	boolean hooked;
 	int playerDrawsPerSec;
 	/** Draws of players the game showed, drawn at a ring slot. */

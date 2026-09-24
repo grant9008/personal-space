@@ -58,6 +58,13 @@ public class RenderSidebar
 		set(s, "pauseInCombat", true);
 		set(s, "hover", true);
 		set(s, "hoverArrow", true);
+		if (args.length > 2 && args[2].equals("nogpu"))
+		{
+			// As it looks with no GPU renderer running: the Turn on GPU button shows.
+			set(s, "renderer", null);
+			set(s, "hooked", false);
+			set(s, "yourShape", null);
+		}
 		for (Method m : PersonalSpacePanel.class.getDeclaredMethods())
 		{
 			if (m.getName().equals("update") && m.getParameterCount() == 1)

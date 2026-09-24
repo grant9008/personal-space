@@ -41,6 +41,14 @@ final class StackProbe implements RenderCallback
 	 * crowd, which would make everyone walk in and back out. 10 seconds.
 	 */
 	static final int SHOWN_GRACE_CYCLES = 500;
+	/**
+	 * How long past its {@link #FRESH_CYCLES} a confirmation still lets a stackmate be drawn: 5
+	 * seconds. Everyone on a tile is confirmed again in the same frame, so their confirmations all
+	 * run out together, and the game lets only one of them through a frame to be confirmed again:
+	 * with 16 on a tile, most of the crowd vanished for a moment and came back one by one, every 10
+	 * seconds. Now they stay drawn while that happens.
+	 */
+	static final int DRAW_GRACE_CYCLES = 250;
 	/** How long to leave a player alone after they failed to show up: 60 seconds. */
 	static final int GIVE_UP_CYCLES = 3000;
 
@@ -141,6 +149,15 @@ final class StackProbe implements RenderCallback
 			&& cycle - confirmedCycle[id] <= FRESH_CYCLES;
 	}
 
+	/** True if this stackmate may be drawn: confirmed lately, or being confirmed again right now. */
+	boolean mayDraw(int id, Player player, int cycle)
+	{
+		return id >= 0 && id < OffsetTable.CAPACITY
+			&& confirmed[id] == player
+			&& cycle - confirmedCycle[id] <= FRESH_CYCLES + DRAW_GRACE_CYCLES
+			&& leaveAloneUntil[id] <= cycle;
+	}
+
 	/**
 	 * True if the game has shown this player recently enough for them to count in a crowd. Players
 	 * the game never shows (hidden by the server or by another plugin) never count, so they can't
@@ -170,6 +187,30 @@ final class StackProbe implements RenderCallback
 			}
 		}
 		return n;
+	}
+
+	/** The tiles on which players were held back this frame, each once. */
+	long[] heldTiles(int frame)
+	{
+		if (heldFrame != frame || heldCount == 0)
+		{
+			return new long[0];
+		}
+		long[] out = new long[heldCount];
+		int n = 0;
+		for (int i = 0; i < heldCount; i++)
+		{
+			boolean seen = false;
+			for (int j = 0; j < n && !seen; j++)
+			{
+				seen = out[j] == heldTiles[i];
+			}
+			if (!seen)
+			{
+				out[n++] = heldTiles[i];
+			}
+		}
+		return java.util.Arrays.copyOf(out, n);
 	}
 
 	/** Forget everything, e.g. on logout or world hop. */

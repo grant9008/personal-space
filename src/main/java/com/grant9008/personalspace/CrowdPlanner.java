@@ -1047,6 +1047,8 @@ final class CrowdPlanner
 	{
 		busyLineUntil.values().removeIf(until -> until < tick);
 		boolean bowRows = arrangement != PersonalSpaceConfig.Arrangement.ROW;
+		long youAlone = yourTileNow != Long.MIN_VALUE && byTile.containsKey(yourTileNow) && byTile.get(yourTileNow).size() == 1
+			? yourTileNow : Long.MIN_VALUE;
 		List<LineBook.Line> shared = new ArrayList<>();
 		Map<String, List<Straight>> lines = new LinkedHashMap<>();
 
@@ -1194,8 +1196,8 @@ final class CrowdPlanner
 						}
 					}
 					shared.add(new LineBook.Line(first.plane, first.sideX, first.sideY, first.across, first.angle, spacing, members,
-						first.centre() - lineEnd(byTile, loneId, first, -1, spacing),
-						last.centre() + lineEnd(byTile, loneId, last, 1, spacing), roomToBow));
+						first.centre() - lineEnd(byTile, loneId, first, -1, spacing, youAlone),
+						last.centre() + lineEnd(byTile, loneId, last, 1, spacing, youAlone), roomToBow));
 				}
 				start = i;
 			}
@@ -1203,14 +1205,19 @@ final class CrowdPlanner
 		return shared;
 	}
 
-	/** How far a shared line may reach past its end: halfway to the next row along it, or three tiles. */
+	/**
+	 * How far a shared line may reach past its end: halfway to the next row along it, or three tiles.
+	 * You standing alone next to it don't stop it: a line of fishers stopped short of you and left
+	 * the bank beyond you empty, all of them squeezed into rows behind. Its spots keep a spacing
+	 * clear of you anyway (see the terrain given to {@link LineBook}).
+	 */
 	private static double lineEnd(Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, Integer> loneId, Straight end,
-		int direction, int spacing)
+		int direction, int spacing, long ignore)
 	{
 		for (int k = 1; k <= LINE_LOOKOUT; k++)
 		{
 			long key = end.keyAt(end.along + direction * k);
-			List<StackSpreader.Entry> there = byTile.get(key);
+			List<StackSpreader.Entry> there = key == ignore && !loneId.containsKey(key) ? null : byTile.get(key);
 			if (there != null)
 			{
 				// Someone standing alone who has joined a line of their own stands out on that line,

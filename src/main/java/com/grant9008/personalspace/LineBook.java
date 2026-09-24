@@ -35,6 +35,19 @@ final class LineBook
 	static final int ROWS_BEHIND = 3;
 	/** Least distance between rows, so rods and axes from behind clear the people in front. */
 	static final int ROW_GAP = 48;
+	/**
+	 * Nobody is drawn further along the line than this from their own tile: a tile and a half. Any
+	 * spot at the edge used to beat any spot in a row behind, however far along it was, and at a
+	 * packed bank an alcher went to the far end of a free stretch of counter, over two tiles from
+	 * where they stood. What doesn't fit within reach stands in a row behind instead.
+	 */
+	static final int MAX_REACH = 192;
+
+	/** {@link #MAX_REACH}, or a spacing and a half on a line spread wider than a tile, so a wide line still has room. */
+	static double reach(Line line)
+	{
+		return Math.max(MAX_REACH, 1.5 * line.spacing);
+	}
 
 	private static final int TILE = 128;
 	/** Any edge spot in a tile's stretch is better than any spot in a row behind. */
@@ -275,6 +288,127 @@ final class LineBook
 	 * all: judged without the curve, someone placed just out of your line of sight was drawn just
 	 * inside it.
 	 */
+	/** See the call in {@link #layOut}. Returns whether you moved. */
+	private boolean moveAlongToYourTile(Line line, String key, Spot mine, Map<String, Boolean> usable, Set<String> taken,
+		double[] target, double[] lo, double[] hi)
+	{
+		double home = homeOf(line, localId);
+		if (Double.isNaN(home))
+		{
+			return false;
+		}
+		// Who stands at each spot at the edge.
+		Map<Long, Integer> atEdge = new HashMap<>();
+		for (Member m : line.members)
+		{
+			for (int id : m.ids)
+			{
+				Spot spot = spotOf.get(id);
+				if (id != localId && spot != null && spot.line.equals(key) && spot.row == 0)
+				{
+					atEdge.put(spot.j, id);
+				}
+			}
+		}
+		int s = line.spacing;
+		double reach = reach(line);
+		double yours = Math.abs(line.along(0, mine.j) - home);
+		// Spots at the edge a whole step or more nearer your tile than yours, nearest first.
+		List<Long> nearer = new ArrayList<>();
+		for (long j = (long) Math.floor((home - reach) / s) - 1; j <= (long) Math.ceil((home + reach) / s) + 1; j++)
+		{
+			double p = line.along(0, j);
+			double distance = Math.abs(p - home);
+			if (distance <= reach && distance <= yours - s && j != mine.j
+				&& Boolean.TRUE.equals(usable.get("0/" + j)) && !blockedByMiddle(line, 0, p)
+				&& (atEdge.containsKey(j) || !taken.contains(key + "/0/" + j))) // not one held for someone who stepped away
+			{
+				nearer.add(j);
+			}
+		}
+		nearer.sort(Comparator.comparingDouble(j -> Math.abs(line.along(0, j) - home)));
+		for (long j : nearer)
+		{
+			Spot there = new Spot(key, 0, j, mine.tile);
+			Integer other = atEdge.get(j);
+			if (other == null)
+			{
+				taken.remove(mine.point());
+				taken.add(there.point());
+				spotOf.put(localId, there);
+				moves++;
+				return true;
+			}
+			Spot partner = partnerSpot(line, key, other, spotOf.get(other), mine, there, usable, taken, target, lo, hi);
+			if (partner == null)
+			{
+				continue;
+			}
+			commitSwap(other, partner, mine, there, taken);
+			moves++;
+			return true;
+		}
+		return false;
+	}
+
+	/** The middle of the tile this player is on along the line, or NaN if they're not on it. */
+	private static double homeOf(Line line, int id)
+	{
+		for (Member m : line.members)
+		{
+			if (m.ids.contains(id))
+			{
+				return m.centre();
+			}
+		}
+		return Double.NaN;
+	}
+
+	/**
+	 * Where someone you swap with goes: your old spot if it's within reach of their own tile, else
+	 * the nearest free spot that is, or null if there's none. Then there's no swap with them: they
+	 * were left with no spot at all, and their tile's middle hid the very spot you'd taken.
+	 */
+	private Spot partnerSpot(Line line, String key, int id, Spot theirs, Spot yourOld, Spot yourNew, Map<String, Boolean> usable,
+		Set<String> taken, double[] target, double[] lo, double[] hi)
+	{
+		int i = -1;
+		for (int k = 0; k < line.members.size(); k++)
+		{
+			i = line.members.get(k).ids.contains(id) ? k : i;
+		}
+		if (i < 0)
+		{
+			return null;
+		}
+		if (Math.abs(line.along(yourOld.row, yourOld.j) - line.members.get(i).centre()) <= reach(line))
+		{
+			return new Spot(key, yourOld.row, yourOld.j, theirs.tile);
+		}
+		Set<String> avoid = new HashSet<>(taken);
+		avoid.add(yourNew.point());
+		String best = bestFree(line, i, id, target[i], lo[i], hi[i], usable, avoid, 0);
+		if (best == null)
+		{
+			return null;
+		}
+		String[] parts = best.split("/");
+		return new Spot(key, Integer.parseInt(parts[0]), Long.parseLong(parts[1]), theirs.tile);
+	}
+
+	/** You take their spot, they take {@code partner}; the spots in use are kept up to date. */
+	private void commitSwap(int id, Spot partner, Spot yourOld, Spot yourNew, Set<String> taken)
+	{
+		if (!partner.point().equals(yourOld.point()))
+		{
+			taken.remove(yourOld.point());
+			taken.add(partner.point());
+		}
+		spotOf.put(localId, yourNew);
+		spotOf.put(id, partner);
+	}
+
+
 	private double[] ground(Line line, int row, long j)
 	{
 		double along = line.along(row, j);
@@ -463,6 +597,7 @@ final class LineBook
 			{
 				Spot spot = spotOf.get(id);
 				if (spot != null && kept < m.capacity && Boolean.TRUE.equals(usable.get(spot.row + "/" + spot.j))
+					&& Math.abs(line.along(spot.row, spot.j) - m.centre()) <= reach(line)
 					&& !blockedByMiddle(line, spot.row, line.along(spot.row, spot.j)) && taken.add(spot.point()))
 				{
 					kept++;
@@ -687,33 +822,46 @@ final class LineBook
 		if (!swappedYou && mine != null && mine.line.equals(key) && mine.row > 0 && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
 		{
 			double here = line.along(mine.row, mine.j);
-			int swapWith = -1;
-			double nearest = Double.MAX_VALUE;
+			double yourHome = homeOf(line, localId);
+			// Only a spot within your reach, or the swap would be undone next tick; nearest you first.
+			List<Integer> candidates = new ArrayList<>();
 			for (Member m : members)
 			{
 				for (int id : m.ids)
 				{
 					Spot theirs = spotOf.get(id);
-					if (id == localId || theirs == null || !theirs.line.equals(key) || theirs.row != 0)
+					if (id != localId && theirs != null && theirs.line.equals(key) && theirs.row == 0 && !Double.isNaN(yourHome)
+						&& Math.abs(line.along(0, theirs.j) - yourHome) <= reach(line))
 					{
-						continue;
-					}
-					double distance = Math.abs(line.along(0, theirs.j) - here);
-					if (distance < nearest)
-					{
-						nearest = distance;
-						swapWith = id;
+						candidates.add(id);
 					}
 				}
 			}
-			if (swapWith >= 0)
+			candidates.sort(Comparator.comparingDouble(id -> Math.abs(line.along(0, spotOf.get(id).j) - here)));
+			for (int id : candidates)
 			{
-				Spot theirs = spotOf.get(swapWith);
-				spotOf.put(localId, new Spot(key, 0, theirs.j, mine.tile));
-				spotOf.put(swapWith, new Spot(key, mine.row, mine.j, theirs.tile));
+				Spot theirs = spotOf.get(id);
+				Spot yoursNow = new Spot(key, 0, theirs.j, mine.tile);
+				Spot partner = partnerSpot(line, key, id, theirs, mine, yoursNow, usable, taken, target, lo, hi);
+				if (partner == null)
+				{
+					continue; // nowhere for them to go: someone else, or nobody
+				}
+				commitSwap(id, partner, mine, yoursNow, taken);
 				swappedYou = true;
 				moves++;
+				break;
 			}
+		}
+
+		// At the edge already, but out along it from where you really stand: you move along to the
+		// nearest spot at the edge in front of your own tile, swapping with whoever has it. Getting to
+		// a quiet counter you were given your tile's share out at the end by the wall, and when the
+		// counter filled up you stayed there, beside the booth you were using rather than at it.
+		// Only a move of a whole step or more, so it never dithers between two spots.
+		if (!swappedYou && mine != null && mine.line.equals(key) && mine.row == 0 && tick - localSince >= SlotBook.LOCAL_SWAP_DELAY)
+		{
+			swappedYou = moveAlongToYourTile(line, key, mine, usable, taken, target, lo, hi);
 		}
 
 		// Personal space for you. From a camera off to one side a straight line is one person half
@@ -910,6 +1058,7 @@ final class LineBook
 		int s = line.spacing;
 		String best = null;
 		double bestCost = Double.MAX_VALUE;
+		double home = line.members.get(index).centre();
 		for (int row = firstRow; row <= ROWS_BEHIND; row++)
 		{
 			// Keep tiles in order along this row: nobody past someone from a tile further along.
@@ -957,7 +1106,7 @@ final class LineBook
 			{
 				double p = line.along(row, j);
 				String point = row + "/" + j;
-				if (p < rowFrom || p >= rowTo || p <= before || p >= after
+				if (p < rowFrom || p >= rowTo || p <= before || p >= after || Math.abs(p - home) > reach(line)
 					|| !Boolean.TRUE.equals(usable.get(point)) || taken.contains(line.key() + "/" + point)
 					|| blockedByMiddle(line, row, p))
 				{

@@ -2647,6 +2647,173 @@ public class CrowdPlannerTest
 		Assert.assertArrayEquals("your spot is still yours", yours, returned.get(99));
 	}
 
+	@Test
+	public void aBusyLineReachesPastYouStandingAloneBesideIt()
+	{
+		// Two packed tiles along a riverbank and you alone on the next tile along, not fishing. The
+		// line used to stop short of you and leave the bank beyond you empty.
+		CrowdPlanner.Surroundings bank = surroundings(true, true, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> still = bank(new int[]{10, 10}, 1);
+		still.add(new StackSpreader.Entry(99, StackRegistry.key(0, 52, 50), true, SOUTH));
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 4; t++)
+		{
+			plan = planner.plan(still, x -> true, 128, 16, true, true, t, bank);
+		}
+		int farthest = Integer.MIN_VALUE;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (p.id != 99)
+			{
+				farthest = Math.max(farthest, StackRegistry.sceneX(p.tile) * 128 + p.dx);
+				Assert.assertTrue("player " + p.id + " is drawn on top of you",
+					Math.hypot(StackRegistry.sceneX(p.tile) * 128 + p.dx - 52 * 128, p.dz) >= CrowdPlanner.YOUR_SPACE);
+			}
+		}
+		Assert.assertTrue("the line stops at " + farthest + ", short of you at " + 52 * 128, farthest > 52 * 128);
+	}
+
+	@Test
+	public void nobodyOnABusyLineIsDrawnFarAlongFromTheirOwnTile()
+	{
+		// Two packed tiles at a long counter with free counter beyond them. The edge used to win over
+		// a row behind however far along it was, and people went to the far end of the free stretch.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		for (int spacing : new int[]{42, 128, 256})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = bank(new int[]{14, 14}, 1);
+			CrowdPlanner.Plan plan = null;
+			for (int t = 1; t <= 4; t++)
+			{
+				plan = planner.plan(still, x -> true, spacing, 16, true, false, t, counter);
+			}
+			Assert.assertFalse(plan.placements.isEmpty());
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				Assert.assertTrue("spacing " + spacing + ": player " + p.id + " is drawn " + p.dx + " along from their tile",
+					Math.abs(p.dx) <= Math.max(LineBook.MAX_REACH, 1.5 * spacing) + 1);
+			}
+		}
+	}
+
+	@Test
+	public void atABusyCounterYouStandInFrontOfYourOwnTile()
+	{
+		// A packed counter shared by two tiles; you arrive last on the first. You used to get whatever
+		// front spot was left, out at the end by the wall; now you stand at the counter in front of
+		// where you really are, and whoever had that spot takes yours.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		for (int spacing : new int[]{42, 128})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = bank(new int[]{12, 12}, 1);
+			for (int t = 1; t <= 3; t++)
+			{
+				planner.plan(still, x -> true, spacing, 16, true, true, t, counter);
+			}
+			List<StackSpreader.Entry> withYou = new ArrayList<>(still);
+			withYou.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
+			Map<Integer, int[]> now = null;
+			for (int t = 4; t <= 7; t++)
+			{
+				now = spots(planner.plan(withYou, x -> true, spacing, 16, true, true, t, counter));
+			}
+			int[] yours = now.get(99);
+			Assert.assertNotNull("spacing " + spacing + ": you have a spot", yours);
+			Assert.assertTrue("spacing " + spacing + ": you're " + yours[1] + " back from the counter", Math.abs(yours[1]) <= StackSpreader.MAX_BOW);
+			Assert.assertTrue("spacing " + spacing + ": you're " + yours[0] + " along from your tile", Math.abs(yours[0]) <= 48);
+			Assert.assertEquals("spacing " + spacing + ": everyone still has a spot", 25, now.size());
+		}
+	}
+
+	@Test
+	public void atTheCounterYouEndUpInFrontOfYourOwnTileAsItFillsUp()
+	{
+		// You get to the counter while your tile is quiet and the next one packed, so your tile's
+		// share of the counter is out at the end; then your tile fills up too. You used to keep your
+		// spot out at the end by the wall; you move along to the counter in front of where you stand.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		for (int spacing : new int[]{48, 128})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = bank(new int[]{2, 8}, 1);
+			still.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
+			int t = 1;
+			for (; t <= 4; t++)
+			{
+				planner.plan(still, x -> true, spacing, 8, true, true, t, counter);
+			}
+			for (int i = 0; i < 5; i++)
+			{
+				still.add(new StackSpreader.Entry(200 + i, StackRegistry.key(0, 50, 50), false, NORTH));
+			}
+			Map<Integer, int[]> now = null;
+			for (; t <= 10; t++)
+			{
+				now = spots(planner.plan(still, x -> true, spacing, 8, true, true, t, counter));
+			}
+			int[] yours = now.get(99);
+			Assert.assertNotNull("spacing " + spacing + ": you have a spot", yours);
+			Assert.assertTrue("spacing " + spacing + ": you're " + yours[1] + " back from the counter", Math.abs(yours[1]) <= StackSpreader.MAX_BOW);
+			Assert.assertTrue("spacing " + spacing + ": you're " + yours[0] + " along from your tile", Math.abs(yours[0]) <= spacing);
+		}
+	}
+
+	@Test
+	public void swappingYouToTheFrontNeverLeavesAnyoneWithoutASpot()
+	{
+		// A narrow bank with room at the water for one, a packed tile beside yours. Whoever you swap
+		// with must have somewhere within reach to go, or they were left without a spot and their
+		// tile's middle hid the spot you'd taken, both of you vanishing for good.
+		CrowdPlanner.Surroundings bank = narrowBank();
+		for (int spacing : new int[]{42, 128})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = bank(new int[]{9, 4}, 1);
+			int t = 1;
+			for (; t <= 3; t++)
+			{
+				planner.plan(still, x -> true, spacing, 16, true, true, t, bank);
+			}
+			int before = spots(planner.plan(still, x -> true, spacing, 16, true, true, t++, bank)).size();
+			still.add(new StackSpreader.Entry(99, StackRegistry.key(0, 51, 50), true, NORTH));
+			for (; t <= 12; t++)
+			{
+				Map<Integer, int[]> now = spots(planner.plan(still, x -> true, spacing, 16, true, true, t, bank));
+				Assert.assertTrue("spacing " + spacing + " tick " + t + ": you have no spot", now.containsKey(99));
+				Assert.assertTrue("spacing " + spacing + " tick " + t + ": " + now.size() + " placed, " + before + " before you came",
+					now.size() >= before);
+			}
+		}
+	}
+
+	@Test
+	public void aWideLineStillHasRoomForEveryone()
+	{
+		// Auto-space off and the slider wide: the line's spacing is wider than a tile. A fixed reach
+		// of a tile and a half left people without a spot and hid the whole front row.
+		CrowdPlanner.Surroundings counter = surroundings(true, true, false);
+		for (int spacing : new int[]{192, 256})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = bank(new int[]{5, 5}, 1);
+			Map<Integer, int[]> now = null;
+			for (int t = 1; t <= 6; t++)
+			{
+				now = spots(planner.plan(still, x -> true, spacing, 5, false, false, t, counter));
+			}
+			Assert.assertEquals("spacing " + spacing + ": everyone has a spot", 10, now.size());
+			int atCounter = 0;
+			for (int[] spot : now.values())
+			{
+				atCounter += Math.abs(spot[1]) <= StackSpreader.MAX_BOW ? 1 : 0;
+			}
+			Assert.assertTrue("spacing " + spacing + ": nobody at the counter", atCounter > 0);
+		}
+	}
+
 	/** A bank so narrow the water is only in front of one spot: rows behind have room, the edge doesn't. */
 	private static CrowdPlanner.Surroundings narrowBank()
 	{

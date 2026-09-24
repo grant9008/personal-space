@@ -69,7 +69,9 @@ final class StatusSummary
 		if (s.renderer == null)
 		{
 			return new Headline(Level.PROBLEM, "Needs the GPU plugin",
-				"Turn on the GPU plugin (or 117 HD) in RuneLite's plugin list.");
+				s.hdEnabled
+					? "117 HD is switched on but isn't running. Check it in RuneLite's plugin list."
+					: "Press Turn on GPU above, or turn on 117 HD in RuneLite's plugin list.");
 		}
 		if (!s.hooked)
 		{
@@ -196,6 +198,18 @@ final class StatusSummary
 			.append(" (by their lean: ").append(s.leanedDraws).append(')')
 			.append(", frames not ordered (should be 0): ").append(s.passMissedFrames)
 			.append(", hidden in your way: ").append(s.hiddenInYourWay)
+			.append(", crowd drops: ordered ").append(s.keptDips)
+			.append(" probe ").append(s.probeBlackouts)
+			.append(" thrown away ").append(s.droppedUndrawn)
+			.append(" plan ").append(s.planDips)
+			.append(" switched off ").append(s.resets)
+			.append(" hooked ").append(s.shimInstalls)
+			.append(", tile blinks: nobody in the middle ").append(s.blinkNoMiddle)
+			.append(" unconfirmed ").append(s.blinkUnconfirmed)
+			.append(" other plugins ").append(s.blinkOthersHid)
+			.append(" moved ").append(s.blinkMoved)
+			.append(" other ").append(s.blinkOther)
+			.append(", held with no model ").append(s.keptWithoutModel)
 			.append(", no walk (busy): ").append(s.walkSkippedBusy)
 			.append(", no walk (animation not loaded): ").append(s.walkSkippedNoAnimation)
 			.append(", held for confirmation: ").append(s.probeHeld)
