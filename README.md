@@ -12,7 +12,7 @@ turns out to be four friends hanging out.
 
 ![Before and after fly fishing at Barbarian Village: one player, then 27](docs/photos/barbarian-fishing.jpg)
 
-![Before and after at Varrock West Bank](docs/photos/varrock-west-bank.jpg)
+![Before and after smithing at the Varrock anvil: one player, then 34](docs/photos/anvil-crowd.jpg)
 
 ![Before and after: two players facing each other](docs/photos/pair-facing.jpg)
 
@@ -98,6 +98,10 @@ Needs the **GPU** plugin or **117 HD** turned on. Works alongside **True Tile Mo
 ![Before and after at a fishing spot with a bonfire behind it](docs/photos/fishing-and-bonfire.jpg)
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
+
+### Who's who
+
+![Hovering a player drawn away from their tile shows their name and level, and an arrow to where they really stand](docs/photos/hover-who.jpg)
 
 ### Posing a pair or a group
 
