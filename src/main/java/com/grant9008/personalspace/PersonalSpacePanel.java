@@ -284,8 +284,30 @@ final class PersonalSpacePanel extends PluginPanel
 
 		// Offered only while no GPU renderer is running and 117 HD isn't switched on: Personal Space
 		// can't do anything without one, and finding the GPU plugin in RuneLite's list is a hunt.
+		// Bright, as it's the one thing to do while it shows: nothing is spread out until it's pressed.
 		gpuButton.setFocusPainted(false);
-		gpuButton.setFont(FontManager.getRunescapeSmallFont());
+		gpuButton.setFont(FontManager.getRunescapeBoldFont());
+		gpuButton.setForeground(Color.BLACK);
+		gpuButton.setBackground(ColorScheme.BRAND_ORANGE);
+		gpuButton.setOpaque(true);
+		gpuButton.setContentAreaFilled(true);
+		gpuButton.setBorderPainted(false);
+		gpuButton.setBorder(new EmptyBorder(7, 10, 7, 10));
+		gpuButton.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		gpuButton.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent e)
+			{
+				gpuButton.setBackground(ColorScheme.BRAND_ORANGE.brighter());
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent e)
+			{
+				gpuButton.setBackground(ColorScheme.BRAND_ORANGE);
+			}
+		});
 		gpuButton.setToolTipText(tip("Switches on RuneLite's GPU plugin, which Personal Space needs to draw crowds. "
 			+ "Same as ticking it in RuneLite's plugin list. 117 HD works too, instead."));
 		gpuButton.addActionListener(e -> turnOnGpu.run());
