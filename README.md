@@ -63,11 +63,7 @@ Needs the **GPU** plugin or **117 HD** (the sidebar has a **Turn on GPU** button
 
 ![Before and after at the bank counter, seen from above: 31 people on 5 tiles](docs/photos/bank-from-above.jpg)
 
-![Before and after smithing at a Varrock anvil](docs/photos/anvil-smithers.jpg)
-
 ![Before and after chopping yews](docs/photos/yews.jpg)
-
-![Before and after woodcutting at the willows](docs/photos/willows.jpg)
 
 ![Before and after beside the Grand Exchange booths](docs/photos/grand-exchange-crowd.jpg)
 
