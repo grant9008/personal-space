@@ -62,7 +62,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.70";
+	static final String VERSION = "1.8.72";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -1024,6 +1024,7 @@ public class PersonalSpacePlugin extends Plugin
 			s.sceneMismatchesPerSec = perSecond(w.sceneMismatches - lastSceneMismatches, seconds);
 		}
 		s.resets = resets;
+		s.insideYouHidden = planner.insideYouHidden;
 		s.spotLosses = spotLosses;
 		s.planDips = planDips;
 		s.shimInstalls = shimInstalls;

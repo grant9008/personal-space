@@ -56,21 +56,4 @@ public class DrawOrderTest
 		SpreadingDrawCallbacks.settle(order, new double[]{1000, 990, 1005}, 3, SpreadingDrawCallbacks.SORT_TOLERANCE, fresh, null);
 		Assert.assertArrayEquals(new int[]{2, 0, 1}, order);
 	}
-
-	@Test
-	public void aTightRowIsNeverLeftDrawnBackToFront()
-	{
-		// Five in a row, each a near-tie with the next but the far end clearly farther than the
-		// near end: the far end goes first, though nobody is clearly farther than their neighbour.
-		int[] order = {0, 1, 2, 3, 4};
-		SpreadingDrawCallbacks.settle(order, new double[]{1000, 1030, 1060, 1090, 1120}, 5, SpreadingDrawCallbacks.SORT_TOLERANCE, null, null);
-		int far = -1;
-		int near = -1;
-		for (int i = 0; i < 5; i++)
-		{
-			far = order[i] == 4 ? i : far;
-			near = order[i] == 0 ? i : near;
-		}
-		Assert.assertTrue("the farthest is drawn before the nearest: " + java.util.Arrays.toString(order), far < near);
-	}
 }

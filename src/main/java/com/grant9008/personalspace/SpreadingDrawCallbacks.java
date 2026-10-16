@@ -226,26 +226,26 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 */
 	static void settle(int[] order, double[] distance, int n, double tolerance, boolean[] fresh, double[] box)
 	{
+		// One step at a time: someone only passes the one just ahead of them. Letting them jump ahead
+		// past a near-tie to anyone they overlap and are clearly farther than (to stop a tight row
+		// staying drawn back to front after a slow swing of the camera) carried them past others
+		// they were nearer than, and crowds flashed and were drawn the wrong way round.
 		for (int i = 1; i < n; i++)
 		{
 			int k = order[i];
-			double t0 = fresh != null && fresh[k] ? 0 : tolerance;
-			int to = i;
-			for (int j = i - 1; j >= 0; j--)
+			int j = i - 1;
+			while (j >= 0)
 			{
 				int o = order[j];
-				boolean over = overlaps(box, k, o);
-				// Past those it's farther than, one after another, as before; and past a near-tie
-				// too, in front of anyone it overlaps and is clearly farther than. Stopping at the
-				// first near-tie, a tightly packed row never re-sorted and, after a slow swing of
-				// the camera, was drawn back to front.
-				if (distance[k] > distance[o] + (over ? t0 : 0) && (over || to == j + 1))
+				double t = fresh != null && fresh[k] || !overlaps(box, k, o) ? 0 : tolerance;
+				if (!(distance[k] > distance[o] + t))
 				{
-					to = j;
+					break;
 				}
+				order[j + 1] = o;
+				j--;
 			}
-			System.arraycopy(order, to, order, to + 1, i - to);
-			order[to] = k;
+			order[j + 1] = k;
 		}
 	}
 

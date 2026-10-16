@@ -213,6 +213,7 @@ final class StatusSummary
 			.append(" other plugins ").append(s.skippedOthersHid)
 			.append(" moved ").append(s.skippedMoved)
 			.append(", lost their spot: ").append(s.spotLosses)
+			.append(", kept from being drawn inside you: ").append(s.insideYouHidden)
 			.append(", visible swaps: camera moving ").append(s.swapsCameraMoving)
 			.append(" camera still ").append(s.swapsCameraStill)
 			.append(" (someone moved ").append(s.stillSwapsMoved)

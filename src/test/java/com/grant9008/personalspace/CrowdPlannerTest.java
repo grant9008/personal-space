@@ -1877,10 +1877,18 @@ public class CrowdPlannerTest
 	@Test
 	public void peopleAtAFireStayClose()
 	{
+		// A pair stays close, with a gap between them; a big crowd closer still.
 		CrowdPlanner.Plan plan = new CrowdPlanner().plan(players(1, NORTH, 2, NORTH),
 			id -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, 1, surroundings(false, false, true));
-		Assert.assertEquals(PersonalSpaceConfig.FIRE_SPACING, plan.tiles.get(TILE).spacing);
+		Assert.assertEquals(PersonalSpaceConfig.SMALL_FIRE_SPACING, plan.tiles.get(TILE).spacing);
 		Assert.assertTrue(plan.curvedRows.contains(TILE));
+		List<StackSpreader.Entry> crowd = new ArrayList<>();
+		for (int i = 1; i <= 8; i++)
+		{
+			crowd.add(new StackSpreader.Entry(i, TILE, false, NORTH));
+		}
+		CrowdPlanner.Plan big = new CrowdPlanner().plan(crowd, id -> true, PersonalSpaceConfig.SPACING_WIDE, 16, true, false, 1, surroundings(false, false, true));
+		Assert.assertEquals(PersonalSpaceConfig.FIRE_SPACING, big.tiles.get(TILE).spacing);
 	}
 
 	/** Where everyone is drawn, in scene units: placed people at their spot, one person at the middle of each other tile. */
@@ -2908,6 +2916,47 @@ public class CrowdPlannerTest
 			last = now;
 		}
 		Assert.assertTrue("the whole crowd moved " + wholeCrowdMoves + " times in 200 ticks", wholeCrowdMoves <= 8);
+	}
+
+	@Test
+	public void nobodyFromTheNextTileIsEverDrawnInsideYou()
+	{
+		// A packed tile beside yours, every kind of layout and spacing: whoever would be drawn
+		// within a body's width of you waits in the middle of their tile instead.
+		for (CrowdPlanner.Surroundings around : new CrowdPlanner.Surroundings[]{OPEN, surroundings(true, true, false), surroundings(true, false, true)})
+		{
+			for (int spacing : new int[]{40, 79, 128, 256})
+			{
+				CrowdPlanner planner = new CrowdPlanner();
+				List<StackSpreader.Entry> still = new ArrayList<>();
+				for (int i = 1; i <= 14; i++)
+				{
+					still.add(new StackSpreader.Entry(i, StackRegistry.key(0, 51, 50), false, NORTH));
+				}
+				still.add(new StackSpreader.Entry(99, StackRegistry.key(0, 50, 50), true, NORTH));
+				CrowdPlanner.Plan plan = null;
+				for (int t = 1; t <= 4; t++)
+				{
+					plan = planner.plan(still, x -> true, spacing, 16, true, true, t, around);
+				}
+				double[] you = {50 * 128 + 64, 50 * 128 + 64};
+				for (StackSpreader.Placement p : plan.placements)
+				{
+					if (p.id == 99)
+					{
+						you = new double[]{StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx, StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz};
+					}
+				}
+				for (StackSpreader.Placement p : plan.placements)
+				{
+					if (p.id != 99)
+					{
+						double d = Math.hypot(StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx - you[0], StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz - you[1]);
+						Assert.assertTrue("spacing " + spacing + ": player " + p.id + " is drawn " + d + " from you", d >= CrowdPlanner.YOUR_SPACE);
+					}
+				}
+			}
+		}
 	}
 
 	/** A bank so narrow the water is only in front of one spot: rows behind have room, the edge doesn't. */

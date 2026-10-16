@@ -62,6 +62,7 @@ final class Snapshot
 	long blinkOther;
 	long keptWithoutModel;
 	long spotLosses;
+	long insideYouHidden;
 	long swapsCameraMoving;
 	long swapsCameraStill;
 	long stillSwapsMoved;

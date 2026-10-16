@@ -73,6 +73,13 @@ public interface PersonalSpaceConfig extends Config
 	int LINE_SPACING = 42;
 	/** Smart keeps people around a fire at most this far apart, whatever the slider says. */
 	int FIRE_SPACING = 46;
+	/**
+	 * ...and a small group round a fire, at most this many, this far apart: at 46, about one body's
+	 * width, three people round a fire stood so close that from most angles one vanished into the
+	 * next. A big crowd keeps to 46, or it pushes into its neighbours and gets squeezed.
+	 */
+	int SMALL_FIRE_GROUP = 4;
+	int SMALL_FIRE_SPACING = 60;
 
 	enum Mode
 	{

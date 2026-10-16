@@ -528,6 +528,8 @@ final class CrowdPlanner
 	 * people beside you at a counter keep their places, but nobody is drawn inside you.
 	 */
 	static final int YOUR_SPACE = 40;
+	/** Diagnostics: people who'd have been drawn inside you, left waiting in the middle of their tile instead. */
+	long insideYouHidden;
 
 	/** Spots past the players-per-tile limit that tiles near you lay out, for stepping out of your way. */
 	static final int SPARE_SPOTS = 4;
@@ -1626,7 +1628,8 @@ final class CrowdPlanner
 				if (fire != null || (row && around.facesFire(tile, rowAngle)))
 				{
 					tileSpacing = smallGroupsClose
-						? Math.min(tileSpacing, PersonalSpaceConfig.FIRE_SPACING)
+						? Math.min(tileSpacing, group.size() <= PersonalSpaceConfig.SMALL_FIRE_GROUP
+							? PersonalSpaceConfig.SMALL_FIRE_SPACING : PersonalSpaceConfig.FIRE_SPACING)
 						: tileSpacing;
 					kind = row ? "fire row" : "crowd round a fire";
 				}
@@ -1820,7 +1823,9 @@ final class CrowdPlanner
 				// Keeping to its share of the ground would squeeze this row into a ring tighter than a
 				// crowd ever closes up for its neighbours. Better a row that leans into them a little.
 				List<double[]> kept = new ArrayList<>(rowShares);
-				rowShares.clear();
+				// The ground the neighbours have may be leaned into a little, but never the people
+				// standing on it: someone alone on the next tile keeps their gap.
+				rowShares.removeIf(h -> !Double.isNaN(h[2]));
 				boolean[] plain = {false};
 				int[] plainUsed = {tileSpacing};
 				int[] plainBlocked = {0};
@@ -1835,6 +1840,7 @@ final class CrowdPlanner
 				}
 				else
 				{
+					rowShares.clear();
 					rowShares.addAll(kept);
 				}
 			}
@@ -2157,6 +2163,33 @@ final class CrowdPlanner
 		}
 		if (youAt != null)
 		{
+			// Last of all, whatever laid them out (a crowd, a shared row, a row leaning into its
+			// neighbours): nobody is drawn inside you. Anyone who would be waits in the middle of
+			// their tile instead. A row squeezed round a fire, leaning into the ground beside it,
+			// stood people right where you stood, and one of you vanished into the other.
+			// People on your own tile are left to its layout: their spacing is the one you chose.
+			int yourPlaneNow = yourPlane(still);
+			long yourTileHere = Long.MIN_VALUE;
+			for (StackSpreader.Entry e : still)
+			{
+				yourTileHere = e.local ? e.tile : yourTileHere;
+			}
+			for (java.util.Iterator<StackSpreader.Placement> it = plan.placements.iterator(); it.hasNext(); )
+			{
+				StackSpreader.Placement p = it.next();
+				if (p.id == localId || p.tile == yourTileHere || StackRegistry.plane(p.tile) != yourPlaneNow)
+				{
+					continue;
+				}
+				double px = StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx;
+				double pz = StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz;
+				if (Math.hypot(px - youAt[0], pz - youAt[1]) < YOUR_SPACE)
+				{
+					it.remove();
+					plan.unplaced.add(new StackSpreader.Placement(p.id, p.tile, 0, 0));
+					insideYouHidden++;
+				}
+			}
 			// Nobody waiting in the middle of a tile is drawn right up against you: someone who gave
 			// up their spot for you waits there. (In front of you is fine: that's how it looks.)
 			for (long tile : byTile.keySet())
