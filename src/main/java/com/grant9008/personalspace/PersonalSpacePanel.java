@@ -105,6 +105,7 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
 	private final ToggleSwitch testModeSwitch = new ToggleSwitch();
+	private final ToggleSwitch depthTestSwitch = new ToggleSwitch();
 	private final JSlider testOffsetSlider = new JSlider(PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET, 32);
 	private final JLabel testOffsetValue = new JLabel();
 	private final JPanel checksPanel = new JPanel(new GridBagLayout());
@@ -220,6 +221,7 @@ final class PersonalSpacePanel extends PluginPanel
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		combatSwitch.setOn(config.pauseInCombat());
 		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
+		depthTestSwitch.setOn(config.depthBetweenPlayers());
 		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
 		testOffsetValue.setText(testOffsetSlider.getValue() + " units");
 		setEverydayEnabled(config.active());
@@ -483,6 +485,11 @@ final class PersonalSpacePanel extends PluginPanel
 
 		b.gridy++;
 		b.insets = new Insets(8, 0, 0, 0);
+		troubleshootingBody.add(switchRow("Depth between players", depthTestSwitch,
+			"On: each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front and behind as you turn the camera. Turn off only if you see glitches inside characters."), b);
+
+		b.gridy++;
+		b.insets = new Insets(8, 0, 0, 0);
 		checksPanel.setBackground(CARD);
 		checksPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
 		troubleshootingBody.add(checksPanel, b);
@@ -622,6 +629,7 @@ final class PersonalSpacePanel extends PluginPanel
 		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
+		depthTestSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DEPTH, on));
 		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
 			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
 		testOffsetSlider.addChangeListener(e ->

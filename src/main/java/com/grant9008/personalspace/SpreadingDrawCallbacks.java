@@ -117,6 +117,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		this.probe = probe;
 		this.renderCallbacks = renderCallbacks;
 		this.delegate = delegate;
+		this.depthKnown = delegate.getClass().getSimpleName().equals("GpuPlugin") || delegate.getClass().getName().startsWith("rs117.");
 	}
 
 	DrawCallbacks getDelegate()
@@ -433,6 +434,17 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	static final int YOU_FIRST_ON_TIES = 4;
 	/** The "Draw me in front" setting; kept up to date by the plugin. */
 	volatile boolean drawMeInFront;
+	/**
+	 * The "Depth between players" setting; kept up to date by the plugin. The game draws its people
+	 * with no depth between them, each a whole layer over the one drawn before, so no order is right
+	 * from every side: a shield reaching into a neighbour popped in front and behind as the camera
+	 * turned, and someone's hat vanished behind the head in front. Drawn with depth (see
+	 * {@link DepthTestedObject}), each part is hidden only where someone really is in front of it.
+	 */
+	volatile boolean depthBetweenPlayers = true;
+	private final DepthTestedObject depthTested = new DepthTestedObject();
+	/** Renderers this is known to work with: RuneLite's GPU plugin, and 117 HD. */
+	private final boolean depthKnown;
 
 	/**
 	 * Actors are kept back when they are drawn no farther from the camera than the farthest
@@ -724,7 +736,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				}
 				if (model != null)
 				{
-					delegate.drawTemp(k.projection, k.scene, k.gameObject, model, orientation, k.x, k.y, k.z);
+					GameObject object = depthBetweenPlayers && depthKnown ? depthTested.wrap(k.gameObject) : k.gameObject;
+					delegate.drawTemp(k.projection, k.scene, object, model, orientation, k.x, k.y, k.z);
 					orderedDraws++;
 				}
 				else

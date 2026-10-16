@@ -173,6 +173,7 @@ final class StatusSummary
 			.append(", max per tile ").append(s.maxStack)
 			.append(", move me ").append(yesNo(s.includeLocal))
 			.append(", draw me in front ").append(yesNo(s.drawMeInFront))
+			.append(", depth between players ").append(yesNo(s.depthTest))
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 			.append(", pose ").append(s.pose)
 			.append(", names over players ").append(yesNo(s.names))

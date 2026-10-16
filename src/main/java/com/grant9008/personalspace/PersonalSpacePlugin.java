@@ -62,7 +62,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.72";
+	static final String VERSION = "1.8.74";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -348,6 +348,7 @@ public class PersonalSpacePlugin extends Plugin
 		if (wrapper != null)
 		{
 			wrapper.drawMeInFront = config.drawMeInFront();
+			wrapper.depthBetweenPlayers = config.depthBetweenPlayers();
 		}
 
 		long now = System.nanoTime();
@@ -994,6 +995,7 @@ public class PersonalSpacePlugin extends Plugin
 		s.maxStack = config.maxStack();
 		s.includeLocal = config.includeLocalPlayer();
 		s.drawMeInFront = config.drawMeInFront();
+		s.depthTest = config.depthBetweenPlayers();
 		s.names = config.namesFollowPlayers();
 		s.hover = config.hoverShowsWho();
 		s.hoverArrow = config.hoverArrow();

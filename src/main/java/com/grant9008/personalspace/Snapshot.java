@@ -35,6 +35,7 @@ final class Snapshot
 	int maxStack;
 	boolean includeLocal;
 	boolean drawMeInFront;
+	boolean depthTest;
 	boolean names;
 	boolean hover;
 	boolean hoverArrow;

@@ -34,6 +34,7 @@ public interface PersonalSpaceConfig extends Config
 	int MIN_HIDE_BELOW = 3;
 	int MAX_HIDE_BELOW = 126;
 	String KEY_TEST_OFFSET = "testOffset";
+	String KEY_DEPTH = "depthBetweenPlayers";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
 	int MIN_STACK = 2;
@@ -341,5 +342,17 @@ public interface PersonalSpaceConfig extends Config
 	default int testOffset()
 	{
 		return 32;
+	}
+
+	@ConfigItem(
+		keyName = KEY_DEPTH,
+		name = "Depth between players",
+		description = "On (the default): crowds are drawn so each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front of and behind people as the camera turns. Turn off only if you see glitches inside characters.",
+		position = 13,
+		section = TROUBLESHOOTING
+	)
+	default boolean depthBetweenPlayers()
+	{
+		return true;
 	}
 }

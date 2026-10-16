@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1872.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1874.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -51,12 +51,11 @@ turns out to be four friends hanging out.
   makes room by sliding over or closing up together, keeping its shape, and eases back out a few
   seconds after its neighbours leave. Someone who only pauses for a moment on the way past isn't
   made room for, and nobody makes room for players the game isn't showing.
-- **Drawn in the right order.** The game draws people in tile order, which goes wrong once
-  they're drawn a tile from where they stand: someone behind you could be drawn over you, and an
-  alcher's staff or a shield beside you poked through you. Personal Space draws a crowd back to
-  front instead, nearest the camera last, so whoever is between you and the camera covers you and
-  whoever is behind you doesn't, the way it really looks, on a slope too. Turning the camera doesn't make
-  people flicker in front of and behind each other. Nobody moves out of your way: a crowd
+- **Drawn as they really stand.** The game draws its people as whole layers, one over another,
+  which goes wrong once they're drawn a tile from where they stand: someone behind you could be
+  drawn over you, and a shield, cape or hat beside you popped in front and behind as the camera
+  turned. Personal Space draws a crowd with depth, so each part of each body is hidden only where
+  someone really is in front of it, from every side, with the GPU plugin or 117 HD. Nobody moves out of your way: a crowd
   huddles as it would wherever you stand, and nobody is ever drawn inside you. Turn on **Draw me
   in front** to be drawn over everyone in your crowd instead, whichever way the camera faces.
 - **Names that follow.** Player Indicators puts a name over where someone really stands, which in
@@ -131,7 +130,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Move my character too | Off: you stay put and others step around you. On: you take a spot too, straight away when you stop rather than off to the side first. At a bank counter or a fishing spot you get a place at the front, even where the bank is so narrow only one or two fit. Nobody is drawn inside you; to always see yourself in a packed bank or anvil pile, turn on **Draw me in front**. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
 | Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
 | Show sidebar button | On (the default): Personal Space has a button in the sidebar with its settings and a live status. Off: no button, for a tidy sidebar; every setting is still in the plugin's configuration. |
-| Troubleshooting | What Personal Space is doing right now, test mode, live checks and a **Copy report** button for bug reports. |
+| Troubleshooting | What Personal Space is doing right now, test mode, **Depth between players** (on; turn off only if you see glitches inside characters), live checks and a **Copy report** button for bug reports. |
 
 If crowds aren't spreading, open **Troubleshooting**: the status at the top says why (for example
 the GPU plugin is off, or you're in a PvP area) and what to do.
