@@ -24,63 +24,27 @@ turns out to be four friends hanging out.
 
 ## What it does
 
-- **Shows the players the game hides.** Stacked players are drawn again, spread out around their tile.
-- **Smart arrangement.** Crowds spread out around their tile, never into a bank booth, stall, anvil
-  or wall, and line up side by side at things people face. Small groups stay close together; big
-  crowds get more room.
-- **Players walk into place** with their own walk animation.
-- **Pose small groups.** Two or three players in the open can be angled towards each other like a
-  photo, or turned to face each other, for the perfect fashionscape screenshot. **Line** and **Arc**
-  draw any crowd up in a row or a curve wherever they're standing, for a group shot.
-- **At an anvil, range or fire**, players form a curve around it and all face it, so nobody ends
-  up hitting thin air. A crowd gathered round a fire stays close and faces the fire, never standing in it, whichever side of it they
-  end up on. Two players share the space in front of it evenly; extra players fill the
-  curve outwards, then stand in the gaps of a second row behind.
-- **At a bank counter or along a riverbank**, players line up side by side along the edge, close
-  together, like a busy bank rather than a queue, but a body's width apart, so seen from the side
-  nobody runs into the person beside them, whichever way people happen to be facing. A packed
-  counter closes up a little to fit everyone, and when a tile has more people than its limit,
-  those left waiting are the ones busy alching or skilling. Neighbouring tiles share one line: a busy
-  fishing spot fills the water's edge first, then stands in tidy rows just behind it, even when a couple of them are busy casting spells or trading. Around a fire they stay close too. Turn **Auto-space** off and the Spacing slider sets those distances instead, so you can push a group right out for a photo.
-- **Calm crowds.** Everyone keeps their own spot when people come and go. When someone steps away,
-  nobody standing still shuffles forward into their gap for a few seconds; someone arriving walks
-  straight into it, and a spot held for you stays yours.
-  When a crowd shrinks to one player, they step back to the middle of their tile.
-- **Groups side by side don't merge.** On a busy square, groups on neighbouring tiles each keep
-  to their own side of the ground between them, so nobody is drawn inside anybody else. A group
-  makes room by sliding over or closing up together, keeping its shape, and eases back out a few
-  seconds after its neighbours leave. Someone who only pauses for a moment on the way past isn't
-  made room for, and nobody makes room for players the game isn't showing.
-- **Drawn as they really stand.** The game draws its people as whole layers, one over another,
-  which goes wrong once they're drawn a tile from where they stand: someone behind you could be
-  drawn over you, and a shield, cape or hat beside you popped in front and behind as the camera
-  turned. Personal Space draws a crowd with depth, so each part of each body is hidden only where
-  someone really is in front of it, from every side, with the GPU plugin or 117 HD. Nobody moves out of your way: a crowd
-  huddles as it would wherever you stand, and nobody is ever drawn inside you. Turn on **Draw me
-  in front** to be drawn over everyone in your crowd instead, whichever way the camera faces.
-- **Names that follow.** Player Indicators puts a name over where someone really stands, which in
-  a spread crowd is the middle of the pile. Turn on **Names over players** and Personal Space
-  draws the names over the bodies instead, with your own Player Indicators settings: the same
-  people, colours and rank icons, just in the right place.
-- **On boats too.** A crew stacked on a deck is spread out like any other crowd. This is new
-  and I can't test it myself (no boat), so if it misbehaves, please report it.
-- **Hover to see who.** Clicking stays with the game (you click people where they really stand;
-  a plugin may not move a click zone), but hover a body drawn away from its tile and a tooltip
-  names them, with a small arrow to where they really stand.
-- **Hide the level-3s.** Optional: set a combat level and anyone below it isn't drawn, the way
-  Entity Hider hides people, and their chat goes too. Good for hiding the level-3 bots at the
-  Grand Exchange. It goes by combat level only: the game never tells you anyone else's total
-  level. Friends, friends chat and clan members always stay.
-- **Visual only.** Players are drawn shifted so you can see them, but nobody's real position
-  changes: you click, trade and follow them where they really stand, and names, chat and minimap
-  dots stay put.
-- **Safe by design.** Switches itself off in the Wilderness, in PvP areas, on PvP-type worlds, in
-  PvP minigames such as Castle Wars, Soul Wars and Last Man Standing, and (unless you turn it off)
-  while you're fighting.
-  It never shows players the game itself (or another plugin such as Entity Hider) keeps hidden,
-  and they never push anyone else aside.
+- **Shows the players the game hides.** Everyone stacked on a tile is drawn again, spread out around it.
+- **Smart layouts.** Rows along bank counters and riverbanks, curves round anvils and fires (never
+  standing in them), rings out in the open. Never into walls, booths or water.
+- **Drawn the way they really stand.** Each part of each body is hidden only where someone is
+  really in front of it, so nothing pops or flickers as you turn the camera.
+- **Calm crowds.** People walk into place, keep their spots as others come and go, and
+  neighbouring groups never merge into each other.
+- **You stay in sight.** Nobody is drawn inside you, and with **Move my character too** you get the
+  front spot at a counter or fishing spot. **Draw me in front** keeps you on top of your crowd.
+- **Names and hover.** **Names over players** puts names over the bodies, using your Player
+  Indicators settings. Hover anyone to see who they are, with an arrow to where they really stand.
+- **Hide the level-3 bots.** An optional combat-level filter, which hides their chat too. Friends,
+  friends chat and clan members always stay.
+- **Poses for screenshots.** Angle pairs and small groups towards each other, or draw any crowd up
+  in a **Line** or an **Arc**.
+- **Visual only, and safe.** Clicks, trades and names stay where people really stand. Off in the
+  Wilderness, PvP areas and worlds, PvP minigames and while you fight, and it never shows players
+  the game or another plugin hides.
+- **Boats too.** New and untested (I have no boat): please report anything odd.
 
-Needs the **GPU** plugin or **117 HD** turned on; if neither is, the sidebar has a **Turn on GPU** button. Works alongside **True Tile Movement Animations**.
+Needs the **GPU** plugin or **117 HD** (the sidebar has a **Turn on GPU** button). Works alongside **True Tile Movement Animations**.
 
 <br clear="right">
 
