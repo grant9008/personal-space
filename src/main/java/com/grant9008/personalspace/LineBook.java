@@ -228,6 +228,13 @@ final class LineBook
 
 	/** Your player id whether or not your character is moved or here now: a spot held for you is never given away. */
 	int yourId = -1;
+	/** The tile you're standing still on, or none. */
+	long yourTile = Long.MIN_VALUE;
+	/**
+	 * Tiles on the lines laid out this tick where someone is waiting in the middle without a spot:
+	 * nobody waiting there is drawn (see {@link CrowdPlanner.Plan#middleOutOfSight}).
+	 */
+	final Set<Long> middleHidden = new HashSet<>();
 
 	/**
 	 * Which way the camera is from you on the ground (east, north), or null when unknown. It never
@@ -450,6 +457,7 @@ final class LineBook
 		sawLocal = false;
 		this.tick = tick;
 		hiddenForYou.clear();
+		middleHidden.clear();
 		// Who is where this tick.
 		Map<Integer, Member> memberOf = new HashMap<>();
 		Map<Integer, Line> lineOf = new HashMap<>();
@@ -596,7 +604,13 @@ final class LineBook
 			for (int id : m.ids)
 			{
 				Spot spot = spotOf.get(id);
-				if (spot != null && kept < m.capacity && Boolean.TRUE.equals(usable.get(spot.row + "/" + spot.j))
+				// A spot past the line's ends is kept while it's still free to stand on: the ends move
+				// as the tiles beyond them fill and empty, and people standing there used to be sent
+				// back into the pile in the middle of their tile, with room to spare on the line.
+				String at = spot == null ? null : spot.row + "/" + spot.j;
+				boolean stillThere = spot != null && (Boolean.TRUE.equals(usable.get(at))
+					|| spot.line.equals(key) && !usable.containsKey(at) && standable(line, spot.row, line.along(spot.row, spot.j), terrain));
+				if (spot != null && kept < m.capacity && stillThere
 					&& Math.abs(line.along(spot.row, spot.j) - m.centre()) <= reach(line)
 					&& !blockedByMiddle(line, spot.row, line.along(spot.row, spot.j)) && taken.add(spot.point()))
 				{
@@ -973,20 +987,31 @@ final class LineBook
 			}
 		}
 
-		// Anyone left without a spot is drawn in the middle of their tile, and so is whoever stays put
-		// there: nobody at the edge is drawn on top of them. They keep their spot, so nothing
-		// reshuffles; they just aren't shown while it's taken.
+		// Someone waiting in the middle of their tile without a spot isn't drawn there: the game hides
+		// the rest of a stack anyway. Hiding the people at the edge near it instead, so as not to draw
+		// one on top of the other, sent everyone near a busy tile's middle out of sight whenever a
+		// newcomer arrived with no spot left, and each of them counted as waiting in turn. Only you,
+		// always drawn, have the edge give way when you're standing in the middle of your tile.
 		Set<Integer> hidden = new HashSet<>();
+		for (Member m : members)
+		{
+			boolean waiting = m.middleTaken;
+			for (int id : m.ids)
+			{
+				waiting |= !spotOf.containsKey(id);
+			}
+			if (waiting)
+			{
+				middleHidden.add(m.tile);
+			}
+		}
 		for (boolean changed = true; changed; )
 		{
 			changed = false;
 			for (Member m : members)
 			{
-				boolean inMiddle = m.middleTaken;
-				for (int id : m.ids)
-				{
-					inMiddle |= !spotOf.containsKey(id) || hidden.contains(id);
-				}
+				Spot yours = spotOf.get(yourId);
+				boolean inMiddle = m.tile == yourTile && (yours == null || !yours.line.equals(key) || hidden.contains(yourId));
 				if (!inMiddle)
 				{
 					continue;

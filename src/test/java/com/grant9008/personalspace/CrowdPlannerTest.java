@@ -841,6 +841,12 @@ public class CrowdPlannerTest
 		};
 		CrowdPlanner.Plan plan = new CrowdPlanner().plan(bank(new int[]{10, 10}, 1), x -> true, 128, 10, true, false, 1, shallow);
 		Assert.assertFalse("some fishers don't fit", plan.unplaced.isEmpty());
+		// Those left without a spot aren't drawn in the middle of their tile at all, so nobody at the
+		// edge is drawn on top of them, and nobody with a spot is hidden for their sake.
+		for (StackSpreader.Placement u : plan.unplaced)
+		{
+			Assert.assertTrue("whoever waits in the middle of " + u.tile + " isn't drawn", plan.middleOutOfSight.contains(u.tile));
+		}
 		for (StackSpreader.Placement u : plan.unplaced)
 		{
 			for (StackSpreader.Placement p : plan.placements)
@@ -848,7 +854,7 @@ public class CrowdPlannerTest
 				int ux = StackRegistry.sceneX(u.tile) * 128;
 				int px = StackRegistry.sceneX(p.tile) * 128 + p.dx;
 				Assert.assertTrue("player " + p.id + " is drawn on top of " + u.id + " in the middle of their tile",
-					p.dz != 0 || Math.abs(px - ux) >= PersonalSpaceConfig.COUNTER_SPACING);
+					p.dz != 0 || Math.abs(px - ux) >= PersonalSpaceConfig.COUNTER_SPACING || plan.middleOutOfSight.contains(u.tile));
 			}
 		}
 	}

@@ -1465,6 +1465,7 @@ final class CrowdPlanner
 		// Who you are even while you're walking about, so a spot held for you stays yours.
 		slots.yourId = knownYou;
 		lineBook.yourId = knownYou;
+		lineBook.yourTile = yourTileNow;
 		double[] view = viewFrom(still, tick);
 		// Nobody on a line steps out of your line of sight: a crowd huddles as it would, and
 		// seeing yourself is the draw order's job ("Draw me in front").
@@ -2076,6 +2077,8 @@ final class CrowdPlanner
 				return around.facesObstacle(tile, angle);
 			}
 		}, lineReports);
+		// Whoever waits in the middle of a tile on a line without a spot isn't drawn there.
+		plan.middleOutOfSight.addAll(lineBook.middleHidden);
 		Map<Long, Integer> placedOnTile = new HashMap<>();
 		for (StackSpreader.Placement p : onLines)
 		{

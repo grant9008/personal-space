@@ -197,7 +197,7 @@ final class StatusSummary
 			.append(", walk frames drawn: ").append(s.walkDraws)
 			.append(", drawn far to near: ").append(s.orderedDraws)
 			.append(", frames not ordered (should be 0): ").append(s.passMissedFrames)
-			.append(", hidden in your way: ").append(s.hiddenInYourWay)
+			.append(", waiting in the middle, not drawn: ").append(s.hiddenInYourWay)
 			.append(", crowd drops: ordered ").append(s.keptDips)
 			.append(" probe ").append(s.probeBlackouts)
 			.append(" thrown away ").append(s.droppedUndrawn)
