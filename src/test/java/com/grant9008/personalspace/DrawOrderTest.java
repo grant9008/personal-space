@@ -56,4 +56,12 @@ public class DrawOrderTest
 		SpreadingDrawCallbacks.settle(order, new double[]{1000, 990, 1005}, 3, SpreadingDrawCallbacks.SORT_TOLERANCE, fresh, null);
 		Assert.assertArrayEquals(new int[]{2, 0, 1}, order);
 	}
+
+	@Test
+	public void someoneWalkingOffTurnsGraduallyTheShortWayRound()
+	{
+		Assert.assertEquals(48, SpreadingDrawCallbacks.turnTowards(0, 512, 48));
+		Assert.assertEquals(2000, SpreadingDrawCallbacks.turnTowards(0, 1536, 48));
+		Assert.assertEquals(510, SpreadingDrawCallbacks.turnTowards(500, 510, 48));
+	}
 }

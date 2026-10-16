@@ -82,6 +82,12 @@ final class Snapshot
 	long walkSkippedBusy;
 	String busyAnimations = "";
 	long driftFrames;
+	long slideBusy;
+	long slideWalkingOff;
+	long slideOther;
+	long slideBusyArriving;
+	long slideBusyBetween;
+	long slideBusyToMiddle;
 	/** Moving players drawn without a walk animation because it couldn't be loaded; total. */
 	long walkSkippedNoAnimation;
 	int testOffset;

@@ -62,7 +62,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.78";
+	static final String VERSION = "1.8.82";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -127,6 +127,16 @@ public class PersonalSpacePlugin extends Plugin
 	 */
 	private final int[] busyTick = new int[OffsetTable.CAPACITY];
 	private static final int BUSY_TICKS = 10;
+	/**
+	 * Someone given a spot while in the middle of an action waits in the middle of their tile for
+	 * a break in it, then walks out: moved mid-action they could only glide there, with no walk to
+	 * show. An alcher pauses between casts within a second or two; anyone who never pauses moves
+	 * after this many ticks anyway.
+	 */
+	private static final int BUSY_WAIT_TICKS = 10;
+	/** ...and someone already in a spot, moved because the crowd round them changed, this many. */
+	private static final int BUSY_MOVE_WAIT_TICKS = 5;
+	private final int[] busyWaitSince = new int[OffsetTable.CAPACITY];
 	/** Tick on which each player was last found to be shown by the game. */
 	private final int[] shownTick = new int[OffsetTable.CAPACITY];
 
@@ -542,6 +552,7 @@ public class PersonalSpacePlugin extends Plugin
 			long tileKey = StackRegistry.key(StackRegistry.layer(world.getId(), wp.getPlane()), lp.getSceneX(), lp.getSceneY());
 			boolean centred = StillnessTracker.isCentred(lp.getX(), lp.getY());
 			boolean standingStill = stillness.observe(id, tileKey, centred, tick);
+			offsets.setWalkingOff(id, !centred);
 			if (!standingStill || p.isDead())
 			{
 				if (centred && offsets.isOffset(id))
@@ -589,6 +600,33 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		for (StackSpreader.Placement pl : plan.placements)
 		{
+			boolean valid = pl.id >= 0 && pl.id < OffsetTable.CAPACITY;
+			int nowX = valid ? offsets.dx(pl.id) : 0;
+			int nowZ = valid ? offsets.dz(pl.id) : 0;
+			boolean fromTheMiddle = valid && nowX == 0 && nowZ == 0 && (pl.dx != 0 || pl.dz != 0);
+			boolean aStep = valid && Math.hypot(pl.dx - nowX, pl.dz - nowZ) >= OffsetTable.MIN_WALK_DISTANCE;
+			if (valid && aStep && !offsets.isWalking(pl.id) && busyTick[pl.id] == tick)
+			{
+				// Mid-action: stay put, in the middle or in their spot, for a break in it, then walk.
+				if (busyWaitSince[pl.id] == 0)
+				{
+					busyWaitSince[pl.id] = tick;
+				}
+				if (tick - busyWaitSince[pl.id] < (fromTheMiddle ? BUSY_WAIT_TICKS : BUSY_MOVE_WAIT_TICKS))
+				{
+					if (!fromTheMiddle)
+					{
+						offsets.setTarget(pl.id, nowX, nowZ);
+					}
+					placedTile[pl.id] = pl.tile;
+					placedTick[pl.id] = tick;
+					continue;
+				}
+			}
+			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY)
+			{
+				busyWaitSince[pl.id] = 0;
+			}
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
 			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY)
 			{
@@ -1065,6 +1103,12 @@ public class PersonalSpacePlugin extends Plugin
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
+			s.slideBusy = w.slideBusy;
+			s.slideWalkingOff = w.slideWalkingOff;
+			s.slideOther = w.slideOther;
+			s.slideBusyArriving = w.slideBusyArriving;
+			s.slideBusyBetween = w.slideBusyBetween;
+			s.slideBusyToMiddle = w.slideBusyToMiddle;
 			StringBuilder top = new StringBuilder();
 			w.busyAnimations.entrySet().stream()
 				.sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))

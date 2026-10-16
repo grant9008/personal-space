@@ -39,6 +39,13 @@ final class OffsetTable
 	private final int[] outZ = new int[CAPACITY];
 
 	private final boolean[] walking = new boolean[CAPACITY];
+	/**
+	 * Set by the plugin for players the game has walking for real: their offset eases back at this
+	 * share of walking pace. At full pace their body moved half as fast again as their legs, or
+	 * sideways, as they walked out of a crowd: a slide. A gentle ease keeps body and legs together.
+	 */
+	static final float WALKING_OFF_PACE = 0.35f;
+	private final boolean[] gentle = new boolean[CAPACITY];
 	private final float[] walkTime = new float[CAPACITY];
 	private final int[] walkFacing = new int[CAPACITY];
 
@@ -125,6 +132,21 @@ final class OffsetTable
 		}
 	}
 
+	/** Whether this player is on their way back to the middle of their tile. */
+	boolean targetIsMiddle(int id)
+	{
+		return id >= 0 && id < CAPACITY && tgtX[id] == 0 && tgtZ[id] == 0;
+	}
+
+	/** Client thread. Whether this player is walking for real, so eases back gently (see {@link #WALKING_OFF_PACE}). */
+	void setWalkingOff(int id, boolean on)
+	{
+		if (id >= 0 && id < CAPACITY)
+		{
+			gentle[id] = on;
+		}
+	}
+
 	/** Client thread. */
 	void setTarget(int id, int dx, int dz)
 	{
@@ -199,7 +221,7 @@ final class OffsetTable
 		float ex = tgtX[id] - curX[id];
 		float ez = tgtZ[id] - curZ[id];
 		float dist = (float) Math.hypot(ex, ez);
-		float stride = WALK_SPEED * dt;
+		float stride = WALK_SPEED * dt * (gentle[id] ? WALKING_OFF_PACE : 1f);
 		// Out of the middle of the tile or back into it, rather than from one spot to another.
 		boolean stepInOrOut = (tgtX[id] == 0 && tgtZ[id] == 0) || (curX[id] == 0f && curZ[id] == 0f);
 		if (dist <= Math.max(stride, 0.5f))

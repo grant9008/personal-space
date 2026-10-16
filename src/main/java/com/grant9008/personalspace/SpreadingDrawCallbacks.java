@@ -885,9 +885,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			// towards the tile they had left, the way the offset was shrinking, while their body was
 			// carried the other way: moonwalking off until the offset had gone.
 			boolean reallyMoving = reallyMoving(drawn);
-			int drawOrientation = reallyMoving ? orientation : stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
+			int drawOrientation = reallyMoving ? headingOf(drawnId, x + dx, z + dz, orientation)
+				: stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
 			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
 			boolean walking = offsets.isWalking(drawnId) && !reallyMoving;
+			noteMotion(drawn, drawnId, dx, dz, walking && drawn.getAnimation() == -1, reallyMoving);
 			if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
 			{
 				keep(projection, scene, gameObject, drawn, drawOrientation, offsets.walkOrientation(drawnId), x + dx, drawY, z + dz, walking);
@@ -947,6 +949,128 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				revealErrors++;
 			}
 		}
+	}
+
+	/**
+	 * Someone walking off while their offset eases back faces the way their body is really moving on
+	 * screen: their own walk plus the easing. Facing the way the game walks them, their legs went one
+	 * way while their body drifted sideways back to their real path, and they seemed to slide out of
+	 * a crowd. Turned gradually, at most {@link #TURN_PER_FRAME} a frame, as the game turns people.
+	 */
+	private int headingOf(int id, int drawnX, int drawnZ, int gameOrientation)
+	{
+		if (id < 0 || id >= OffsetTable.CAPACITY)
+		{
+			return gameOrientation;
+		}
+		int frame = offsets.frame();
+		int heading = gameOrientation;
+		if (headingFrame[id] >= frame - 2 && headingFrame[id] < frame)
+		{
+			int east = drawnX - lastDrawnX[id];
+			int north = drawnZ - lastDrawnZ[id];
+			int want = east * east + north * north >= 4 ? OffsetTable.facing(east, north) : headingNow[id];
+			heading = turnTowards(headingNow[id], want, TURN_PER_FRAME);
+		}
+		else if (headingFrame[id] == frame)
+		{
+			return headingNow[id];
+		}
+		lastDrawnX[id] = drawnX;
+		lastDrawnZ[id] = drawnZ;
+		headingNow[id] = heading;
+		headingFrame[id] = frame;
+		return heading;
+	}
+
+	/** {@code from} turned towards {@code to} the short way round, by at most {@code step}. */
+	static int turnTowards(int from, int to, int step)
+	{
+		int diff = ((to - from) % 2048 + 3072) % 2048 - 1024;
+		if (Math.abs(diff) <= step)
+		{
+			return to & 2047;
+		}
+		return (from + Integer.signum(diff) * step) & 2047;
+	}
+
+	static final int TURN_PER_FRAME = 48;
+
+	/**
+	 * Diagnostics: frames someone was drawn moving across the ground with no walk to match, by why:
+	 * busy with an action, walking off for real while their spot eases back to where they are, or
+	 * anything else.
+	 */
+	long slideBusy;
+	long slideWalkingOff;
+	long slideOther;
+	/** Busy slides by kind: out of the middle to a spot, from one spot to another, back into the middle. */
+	long slideBusyArriving;
+	long slideBusyBetween;
+	long slideBusyToMiddle;
+	private final int[] motionOX = new int[OffsetTable.CAPACITY];
+	private final int[] motionOZ = new int[OffsetTable.CAPACITY];
+	private final int[] motionFrame = longAgo(OffsetTable.CAPACITY);
+
+	private void noteMotion(Player player, int id, int dx, int dz, boolean walkShown, boolean reallyMoving)
+	{
+		if (id < 0 || id >= OffsetTable.CAPACITY)
+		{
+			return;
+		}
+		int frame = offsets.frame();
+		if (motionFrame[id] == frame)
+		{
+			return;
+		}
+		if (motionFrame[id] == frame - 1)
+		{
+			int ex = dx - motionOX[id];
+			int ez = dz - motionOZ[id];
+			if (ex * ex + ez * ez >= 4 && !walkShown)
+			{
+				if (reallyMoving)
+				{
+					slideWalkingOff++;
+				}
+				else if (player.getAnimation() != -1)
+				{
+					slideBusy++;
+					int wasFromMiddle = motionOX[id] * motionOX[id] + motionOZ[id] * motionOZ[id];
+					int nowFromMiddle = dx * dx + dz * dz;
+					if (nowFromMiddle < wasFromMiddle && offsets.targetIsMiddle(id))
+					{
+						slideBusyToMiddle++;
+					}
+					else if (wasFromMiddle < 24 * 24 && nowFromMiddle > wasFromMiddle)
+					{
+						slideBusyArriving++;
+					}
+					else
+					{
+						slideBusyBetween++;
+					}
+				}
+				else
+				{
+					slideOther++;
+				}
+			}
+		}
+		motionOX[id] = dx;
+		motionOZ[id] = dz;
+		motionFrame[id] = frame;
+	}
+	private final int[] lastDrawnX = new int[OffsetTable.CAPACITY];
+	private final int[] lastDrawnZ = new int[OffsetTable.CAPACITY];
+	private final int[] headingNow = new int[OffsetTable.CAPACITY];
+	private final int[] headingFrame = longAgo(OffsetTable.CAPACITY);
+
+	private static int[] longAgo(int n)
+	{
+		int[] a = new int[n];
+		Arrays.fill(a, Integer.MIN_VALUE / 2);
+		return a;
 	}
 
 	/** Whether the game has this player walking or running for real, rather than standing. */
@@ -1166,6 +1290,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
 				boolean walking = offsets.isWalking(id);
+				noteMotion(mate, id, mdx, mdz, walking && mate.getAnimation() == -1, false);
 				if (mayKeep && withinKeep(wv, x + mdx, mateY, z + mdz))
 				{
 					keep(projection, scene, gameObject, mate, mateOrientation, offsets.walkOrientation(id), x + mdx, mateY, z + mdz, walking);
