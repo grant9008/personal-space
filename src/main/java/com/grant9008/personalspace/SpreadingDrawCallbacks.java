@@ -355,6 +355,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long skippedUnconfirmed;
 	long skippedOthersHid;
 	long skippedMoved;
+	long fireBlackouts;
+	long fireUnconfirmed;
 
 	private TileDraws tileDraws(long tileKey, int frame)
 	{
@@ -808,6 +810,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			if (!drawn)
 			{
 				probeBlackouts++;
+				if (stacks.fireAt(tile) != null)
+				{
+					fireBlackouts++;
+				}
 				probe.backOff(tile, frame);
 			}
 		}
@@ -918,6 +924,18 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			// Waiting in the middle of a tile that is between you and the camera: left undrawn, like
 			// the others the game hides there, rather than standing in front of you.
 			hiddenInYourWay++;
+			long key = StackRegistry.key(layer, x >> 7, z >> 7);
+			noteHidden(drawn, drawnId, stacks.isWaiting(drawnId) ? HideLog.WAITING_OUT_OF_SIGHT : HideLog.NO_SPOT_OUT_OF_SIGHT, -1, wv, key);
+		}
+		else if (StillnessTracker.isCentred(x, z) && stacks.isUnplaced(drawnId) && !isLocal(drawn)
+			&& otherInMiddle(StackRegistry.key(layer, x >> 7, z >> 7), wv, x, z, drawnId))
+		{
+			// Someone else waiting here is the one shown in the middle (see middleOf): drawn below,
+			// with the others on the tile.
+			middleKeptSteady++;
+			long key = StackRegistry.key(layer, x >> 7, z >> 7);
+			noteHidden(drawn, drawnId, stacks.isWaiting(drawnId) ? HideLog.WAITING_MIDDLE_TAKEN : HideLog.NO_SPOT_MIDDLE_TAKEN,
+				middleOf(key, wv, x, z), wv, key);
 		}
 		else if (mayKeep && withinKeep(wv, x, y, z))
 		{
@@ -1071,6 +1089,144 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int[] a = new int[n];
 		Arrays.fill(a, Integer.MIN_VALUE / 2);
 		return a;
+	}
+
+	/** Diagnostics: frames the game drew someone in the middle of a tile and someone else was shown there instead. */
+	long middleKeptSteady;
+
+	/** Diagnostics: who goes undrawn longest, and why. The plugin hands over its own, which outlives map loads. */
+	HideLog hides = new HideLog();
+
+	/** Client thread. This player is left undrawn this frame, for this reason. */
+	private void noteHidden(Player player, int id, int why, int givenTo, WorldView wv, long tileKey)
+	{
+		int frame = offsets.frame();
+		if (hides.notedThisFrame(id, frame))
+		{
+			return;
+		}
+		int cycle = client.getGameCycle();
+		if (hides.continues(id, frame, why))
+		{
+			hides.extend(id, frame, cycle);
+			if (givenTo != hides.toId(id))
+			{
+				hides.setTo(id, givenTo, holderName(givenTo, wv));
+			}
+			return;
+		}
+		hides.start(id, frame, cycle, why, nameOf(player), givenTo, holderName(givenTo, wv), stacks.fireAt(tileKey) != null);
+	}
+
+	/** Who the middle went to, for the report: "you", their name, or null if nobody. */
+	private String holderName(int id, WorldView wv)
+	{
+		if (id < 0)
+		{
+			return null;
+		}
+		Player local = client.getLocalPlayer();
+		if (local != null && local.getId() == id)
+		{
+			return "you";
+		}
+		Player p = wv.players().byIndex(id);
+		return p == null ? "someone" : nameOf(p);
+	}
+
+	private static String nameOf(Player player)
+	{
+		String name = player.getName();
+		return name == null ? "someone" : name.replace('\u00A0', ' ');
+	}
+
+	private final Map<Long, int[]> middleChoice = new HashMap<>();
+
+	/**
+	 * Who is shown in the middle of a tile where people wait without a spot: you, if you're standing
+	 * there, or someone whose spot is the middle itself, or else always the same one of them: whoever has stood there longest (then the lowest
+	 * id) among them that may be drawn. Going by id alone, a tender alone at a campfire vanished
+	 * whenever someone with a lower id came to wait beside him. The game draws one of a stack, and which one
+	 * changes from frame to frame (more so while the stack probe is at work), so two people
+	 * waiting there took turns, each flashing in and out. -1 if nobody is waiting there.
+	 */
+	private int middleOf(long tileKey, WorldView wv, int x, int z)
+	{
+		int frame = offsets.frame();
+		int[] cached = middleChoice.get(tileKey);
+		if (cached != null && cached[0] == frame)
+		{
+			return cached[1];
+		}
+		if (middleChoice.size() > 512)
+		{
+			middleChoice.values().removeIf(v -> v[0] < frame - 2);
+		}
+		int best = -1;
+		int bestArrived = Integer.MAX_VALUE;
+		int cycle = client.getGameCycle();
+		Player local = client.getLocalPlayer();
+		int localId = local == null ? -1 : local.getId();
+		LocalPoint you = local == null ? null : local.getLocalLocation();
+		if (you != null && you.getX() == x && you.getY() == z && localId >= 0 && localId < OffsetTable.CAPACITY
+			&& local.getWorldView() == wv && offsets.dx(localId) == 0 && offsets.dz(localId) == 0 && !offsets.isWalking(localId))
+		{
+			// You're standing in the middle of this tile, and you're always drawn: the middle is yours.
+			middleChoice.put(tileKey, new int[]{frame, localId});
+			return localId;
+		}
+		for (int id : stacks.membersAt(tileKey))
+		{
+			// Someone with a spot is always drawn, and the planner can give out the middle itself as
+			// a spot: then it's theirs, and nobody waiting is drawn inside them.
+			if (id < 0 || id >= OffsetTable.CAPACITY || id == localId || stacks.isUnplaced(id)
+				|| offsets.dx(id) != 0 || offsets.dz(id) != 0 || offsets.isWalking(id))
+			{
+				continue;
+			}
+			Player p = wv.players().byIndex(id);
+			LocalPoint lp = p == null ? null : p.getLocalLocation();
+			if (lp == null || lp.getX() != x || lp.getY() != z || !probe.mayDraw(id, p, cycle) || !probe.othersAllow(renderCallbacks, p))
+			{
+				continue;
+			}
+			middleChoice.put(tileKey, new int[]{frame, id});
+			return id;
+		}
+		for (int id : stacks.membersAt(tileKey))
+		{
+			if (id < 0 || id >= OffsetTable.CAPACITY || !stacks.isUnplaced(id)
+				|| offsets.dx(id) != 0 || offsets.dz(id) != 0 || offsets.isWalking(id))
+			{
+				continue;
+			}
+			int arrived = stacks.arrivedTick(id);
+			if (best >= 0 && (arrived > bestArrived || arrived == bestArrived && id >= best))
+			{
+				continue;
+			}
+			Player p = wv.players().byIndex(id);
+			if (p == null || p == local)
+			{
+				continue;
+			}
+			LocalPoint lp = p.getLocalLocation();
+			if (lp == null || lp.getX() != x || lp.getY() != z || !probe.mayDraw(id, p, cycle) || !probe.othersAllow(renderCallbacks, p))
+			{
+				continue;
+			}
+			best = id;
+			bestArrived = arrived;
+		}
+		middleChoice.put(tileKey, new int[]{frame, best});
+		return best;
+	}
+
+	/** Whether someone other than {@code id} is the one shown in the middle of this tile. */
+	private boolean otherInMiddle(long tileKey, WorldView wv, int x, int z, int id)
+	{
+		int chosen = middleOf(tileKey, wv, x, z);
+		return chosen >= 0 && chosen != id;
 	}
 
 	/** Whether the game has this player walking or running for real, rather than standing. */
@@ -1240,8 +1396,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// As in the game, only one player is drawn in the middle of a tile: anyone left without a spot
 		// (past the "players per tile" limit, or standing in the middle with you) stays hidden there.
 		// Players with a spot are always drawn, and so are you.
-		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0
+		// The middle is taken by whoever the game drew, unless they're waiting without a spot and
+		// someone else waiting is the one shown there (see middleOf).
+		boolean drawnStepsAside = stacks.isUnplaced(drawn.getId()) && !isLocal(drawn)
+			&& otherInMiddle(tileKey, wv, x, z, drawn.getId());
+		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0 && !drawnStepsAside
 			|| stacks.middleOutOfSight(tileKey);
+		int chosenMiddle = middleOf(tileKey, wv, x, z);
 		Player local = client.getLocalPlayer();
 		int localId = local == null ? -1 : local.getId();
 		int total = mates.length + heldCount;
@@ -1271,20 +1432,37 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				int mdx = offsets.dx(id);
 				int mdz = offsets.dz(id);
 				boolean inMiddle = mdx == 0 && mdz == 0 && !offsets.isWalking(id);
-				if (inMiddle && middleDrawn && id != localId && stacks.isUnplaced(id))
+				if (inMiddle && id != localId && stacks.isUnplaced(id) && (middleDrawn || chosenMiddle >= 0 && id != chosenMiddle))
 				{
+					boolean waiting = stacks.isWaiting(id);
+					if (stacks.middleOutOfSight(tileKey))
+					{
+						noteHidden(mate, id, waiting ? HideLog.WAITING_OUT_OF_SIGHT : HideLog.NO_SPOT_OUT_OF_SIGHT, -1, wv, tileKey);
+					}
+					else
+					{
+						boolean drawnHasIt = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0 && !drawnStepsAside;
+						noteHidden(mate, id, waiting ? HideLog.WAITING_MIDDLE_TAKEN : HideLog.NO_SPOT_MIDDLE_TAKEN,
+							drawnHasIt ? drawn.getId() : chosenMiddle, wv, tileKey);
+					}
 					continue;
 				}
 				if (!probe.mayDraw(id, mate, cycle))
 				{
 					td.unconfirmed++;
 					skippedUnconfirmed++;
+					if (stacks.fireAt(tileKey) != null)
+					{
+						fireUnconfirmed++;
+					}
+					noteHidden(mate, id, HideLog.UNCONFIRMED, -1, wv, tileKey);
 					continue; // the game hasn't shown this player recently, e.g. hidden by the server: never draw them
 				}
 				if (!probe.othersAllow(renderCallbacks, mate))
 				{
 					td.othersHid++;
 					skippedOthersHid++;
+					noteHidden(mate, id, HideLog.OTHER_PLUGIN, -1, wv, tileKey);
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
 				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);

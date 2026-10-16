@@ -74,6 +74,17 @@ final class Snapshot
 	long skippedUnconfirmed;
 	long skippedOthersHid;
 	long skippedMoved;
+	/** Of the probe's blackouts and the unconfirmed stackmates left undrawn, those at a fire; totals. */
+	long fireBlackouts;
+	long fireUnconfirmed;
+	/** Frames someone the game drew in the middle of a tile gave way to whoever is shown there; total. */
+	long middleKeptSteady;
+	/** Waits for a break in someone's action: ended in a break, ran out, or not started (never pauses); totals. */
+	long waitBreaks;
+	long waitTimeouts;
+	long waitSkipped;
+	/** Who went longest undrawn lately and why, or null. */
+	String longestHidden;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass; should stay 0. */
 	long passMissedFrames;
 	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */

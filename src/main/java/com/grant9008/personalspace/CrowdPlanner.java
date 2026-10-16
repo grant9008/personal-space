@@ -257,11 +257,16 @@ final class CrowdPlanner
 		int bestCount = 0;
 		for (int[] fire : fires)
 		{
-			double length = Math.hypot(fire[0], fire[1]);
-			if (length == 0)
+			if (fire[0] == 0 && fire[1] == 0)
 			{
-				continue;
+				// A fire on their own tile (a Forester's Campfire can be stood on): moved off it,
+				// they all face it, whichever way they happened to be facing.
+				return fire;
 			}
+		}
+		for (int[] fire : fires)
+		{
+			double length = Math.hypot(fire[0], fire[1]);
 			int count = 0;
 			for (StackSpreader.Entry e : group)
 			{
@@ -1626,7 +1631,10 @@ final class CrowdPlanner
 				// Gathered round a fire, in a row or not: stay close, whatever the slider says, and
 				// everyone faces the fire.
 				int[] fire = fireFaced(group, around.firesNear(tile));
-				if (fire != null || (row && around.facesFire(tile, rowAngle)))
+				// Standing on the fire, the crowd keeps its own spacing: drawn close in, they'd all be
+				// on the fire, where nobody is drawn.
+				boolean onTheFire = fire != null && fire[0] == 0 && fire[1] == 0;
+				if (fire != null && !onTheFire || (row && around.facesFire(tile, rowAngle)))
 				{
 					tileSpacing = smallGroupsClose
 						? Math.min(tileSpacing, group.size() <= PersonalSpaceConfig.SMALL_FIRE_GROUP

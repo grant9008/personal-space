@@ -213,6 +213,12 @@ final class StatusSummary
 			.append(", stackmates skipped: unconfirmed ").append(s.skippedUnconfirmed)
 			.append(" other plugins ").append(s.skippedOthersHid)
 			.append(" moved ").append(s.skippedMoved)
+			.append(" (at fires: blackouts ").append(s.fireBlackouts)
+			.append(" unconfirmed ").append(s.fireUnconfirmed).append(")")
+			.append(", gave the middle to who's shown there: ").append(s.middleKeptSteady)
+			.append(", waits for a break: paused ").append(s.waitBreaks)
+			.append(" ran out ").append(s.waitTimeouts)
+			.append(" not waited (never pauses) ").append(s.waitSkipped)
 			.append(", lost their spot: ").append(s.spotLosses)
 			.append(", kept from being drawn inside you: ").append(s.insideYouHidden)
 			.append(", visible swaps: camera moving ").append(s.swapsCameraMoving)
@@ -248,6 +254,7 @@ final class StatusSummary
 			.append(", stacked but not shown by the game: ").append(s.unseenStacked).append('\n');
 		b.append("Your tile: ").append(s.yourShape == null ? "not being spread" : s.yourShape).append('\n');
 		b.append("Nearest spread tile: ").append(s.nearestTile == null ? "none" : s.nearestTile).append('\n');
+		b.append("Hidden longest (seen in the last minute): ").append(s.longestHidden == null ? "nobody over a second" : s.longestHidden).append('\n');
 		return b.toString();
 	}
 

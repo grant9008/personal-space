@@ -30,6 +30,7 @@ import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptCallbackEvent;
+import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
@@ -54,7 +55,7 @@ import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
 	name = "Personal Space",
-	description = "See the whole community: the one player you see on a tile is often a whole group, and this shows everyone standing there. Cosmetic only, and off wherever players can fight.",
+	description = "See the whole community: the one player you see on a tile is often a whole group, and this shows everyone standing there. Visual only, and off wherever players can fight.",
 	tags = {"stacked", "stacking", "unstack", "overlapping", "clipping", "crowded", "fashionscape", "fashion show", "outfits",
 		"drip", "cosmetics", "gear", "other players", "show all players", "reveal", "grand exchange", "social", "hangout",
 		"lively", "roleplay", "house party", "drop party", "clan events", "group photo", "screenshots", "content creator",
@@ -62,7 +63,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.82";
+	static final String VERSION = "1.8.89";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -137,8 +138,81 @@ public class PersonalSpacePlugin extends Plugin
 	/** ...and someone already in a spot, moved because the crowd round them changed, this many. */
 	private static final int BUSY_MOVE_WAIT_TICKS = 5;
 	private final int[] busyWaitSince = new int[OffsetTable.CAPACITY];
+	/** The action each player was last seen busy with. */
+	private final int[] busyAnimation = new int[OffsetTable.CAPACITY];
+	/**
+	 * For each action waited on from the middle of a tile: how many waits ended in a break in it,
+	 * how many ran out, and how many times since it wasn't waited on. One that has run out twice
+	 * and more often than it paused isn't waited on any more (they'd only wait in the middle, out
+	 * of sight, then glide out all the same), but every eighth time it is again, in case it pauses
+	 * now: only where nobody else holds the middle, so they're seen waiting there rather than
+	 * hidden. An alcher pauses between casts and is still waited on.
+	 */
+	private final Map<Integer, int[]> waitOutcomes = new HashMap<>();
+	/** Who went undrawn longest lately, for the report. Here rather than in the shim, which a map load replaces. */
+	private final HideLog hideLog = new HideLog();
+	private static final int RETRY_WAIT_EVERY = 8;
+	/** Diagnostics: busy waits that ended in a break, ran out, or weren't started because the action never pauses. */
+	private long waitBreaks;
+	private long waitTimeouts;
+	private long waitSkipped;
 	/** Tick on which each player was last found to be shown by the game. */
 	private final int[] shownTick = new int[OffsetTable.CAPACITY];
+
+	/**
+	 * Tending a Forester's Campfire, with any kind of log: it never pauses, so it's never waited on.
+	 * A tender waited on was hidden in the middle of their tile for six seconds whenever someone
+	 * joined it.
+	 */
+	static boolean neverPauses(int animation)
+	{
+		return animation >= AnimationID.FORESTRY_CAMPFIRE_BURNING_GENERIC && animation <= AnimationID.FORESTRY_CAMPFIRE_BURNING_YEW_LOGS
+			|| animation >= AnimationID.FORESTRY_CAMPFIRE_BURNING_JATOBA_LOGS && animation <= AnimationID.FORESTRY_CAMPFIRE_BURNING_ROSEWOOD_LOGS
+			|| animation >= AnimationID.FORESTRY_CAMPFIRE_BURNING_GENERIC_NOLOOP && animation <= AnimationID.FORESTRY_CAMPFIRE_BURNING_ROSEWOOD_LOGS_NOLOOP;
+	}
+
+	/**
+	 * Whether to wait for a break in this action now. {@code mayRetry}: they'd wait in a middle
+	 * nobody else holds, so could be waited on again to see if it pauses now. Not side-effect free:
+	 * counts the retries due.
+	 */
+	private boolean worthWaiting(int animation, boolean mayRetry)
+	{
+		if (neverPauses(animation))
+		{
+			return false;
+		}
+		int[] outcomes = waitOutcomes.get(animation);
+		if (outcomes == null || outcomes[1] < 2 || outcomes[0] > outcomes[1])
+		{
+			return true;
+		}
+		return mayRetry && ++outcomes[2] % RETRY_WAIT_EVERY == 0;
+	}
+
+	private void noteWaitOutcome(int animation, boolean paused)
+	{
+		if (paused)
+		{
+			waitBreaks++;
+		}
+		else
+		{
+			waitTimeouts++;
+		}
+		if (waitOutcomes.size() > 256 && !waitOutcomes.containsKey(animation))
+		{
+			return;
+		}
+		int[] outcomes = waitOutcomes.computeIfAbsent(animation, a -> new int[3]);
+		outcomes[paused ? 0 : 1]++;
+		if (outcomes[0] + outcomes[1] >= 40)
+		{
+			// Recent waits count most: halve the old ones.
+			outcomes[0] /= 2;
+			outcomes[1] /= 2;
+		}
+	}
 
 	/** Our shim, while it is the client's installed draw callback. Null when nothing is hooked. Client thread. */
 	private SpreadingDrawCallbacks wrapper;
@@ -415,6 +489,7 @@ public class PersonalSpacePlugin extends Plugin
 			target = ((SpreadingDrawCallbacks) current).getDelegate();
 		}
 		wrapper = new SpreadingDrawCallbacks(client, offsets, stacks, probe, renderCallbackManager, target);
+		wrapper.hides = hideLog;
 		client.setDrawCallbacks(wrapper);
 		shimInstalls++;
 		log.debug("Hooked draw callbacks in front of {}", target.getClass().getName());
@@ -570,6 +645,7 @@ public class PersonalSpacePlugin extends Plugin
 			if (p.getAnimation() != -1)
 			{
 				busyTick[id] = tick;
+				busyAnimation[id] = p.getAnimation();
 			}
 			boolean busy = busyTick[id] != 0 && tick - busyTick[id] <= BUSY_TICKS;
 			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation(), busy));
@@ -598,6 +674,33 @@ public class PersonalSpacePlugin extends Plugin
 				spotLosses++;
 			}
 		}
+		// Busy people waiting in the middle of their tile for a break: drawn there like anyone else
+		// waiting in the middle, so only one of them at a time, and nobody inside you. Drawn as well,
+		// two people arriving together at a campfire stood inside each other until they moved.
+		Set<Integer> waitingInTheMiddle = new HashSet<>();
+		int localId = local.getId();
+		// Middles someone else holds, or that aren't drawn: anyone waiting there is hidden.
+		Set<Long> middleTaken = new HashSet<>(plan.middleOutOfSight);
+		for (StackSpreader.Placement pl : plan.unplaced)
+		{
+			middleTaken.add(pl.tile);
+		}
+		for (StackSpreader.Entry e : entries)
+		{
+			if (e.local)
+			{
+				middleTaken.add(e.tile);
+			}
+		}
+		for (StackSpreader.Placement pl : plan.placements)
+		{
+			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY && placedTick[pl.id] != tick - 1)
+			{
+				// Not placed last tick: whatever they were waiting for then is over. Left set, it ended
+				// their next wait at once, or counted a break that never happened.
+				busyWaitSince[pl.id] = 0;
+			}
+		}
 		for (StackSpreader.Placement pl : plan.placements)
 		{
 			boolean valid = pl.id >= 0 && pl.id < OffsetTable.CAPACITY;
@@ -605,7 +708,14 @@ public class PersonalSpacePlugin extends Plugin
 			int nowZ = valid ? offsets.dz(pl.id) : 0;
 			boolean fromTheMiddle = valid && nowX == 0 && nowZ == 0 && (pl.dx != 0 || pl.dz != 0);
 			boolean aStep = valid && Math.hypot(pl.dx - nowX, pl.dz - nowZ) >= OffsetTable.MIN_WALK_DISTANCE;
-			if (valid && aStep && !offsets.isWalking(pl.id) && busyTick[pl.id] == tick)
+			boolean busyStep = valid && aStep && !offsets.isWalking(pl.id) && busyTick[pl.id] == tick;
+			boolean waitHere = busyStep && (busyWaitSince[pl.id] != 0
+				|| worthWaiting(busyAnimation[pl.id], fromTheMiddle && !middleTaken.contains(pl.tile)));
+			if (busyStep && !waitHere)
+			{
+				waitSkipped++;
+			}
+			if (waitHere)
 			{
 				// Mid-action: stay put, in the middle or in their spot, for a break in it, then walk.
 				if (busyWaitSince[pl.id] == 0)
@@ -618,10 +728,28 @@ public class PersonalSpacePlugin extends Plugin
 					{
 						offsets.setTarget(pl.id, nowX, nowZ);
 					}
+					else
+					{
+						middleTaken.add(pl.tile);
+						if (pl.id != localId)
+						{
+							waitingInTheMiddle.add(pl.id);
+						}
+					}
 					placedTile[pl.id] = pl.tile;
 					placedTick[pl.id] = tick;
 					continue;
 				}
+				if (fromTheMiddle)
+				{
+					// Only waits in the middle teach what's worth waiting for: one in a spot runs out
+					// sooner, so it said too little about whether the action pauses.
+					noteWaitOutcome(busyAnimation[pl.id], false);
+				}
+			}
+			else if (valid && busyWaitSince[pl.id] != 0 && busyTick[pl.id] != tick && fromTheMiddle)
+			{
+				noteWaitOutcome(busyAnimation[pl.id], true);
 			}
 			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY)
 			{
@@ -644,10 +772,13 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			unplacedIds.add(pl.id);
 		}
+		unplacedIds.addAll(waitingInTheMiddle);
 		// Curved rows and counter rows alike: everyone turns towards what they are facing.
 		Set<Long> turnIn = new HashSet<>(plan.curvedRows);
 		turnIn.addAll(plan.facingIn);
 		stacks.rebuild(members, turnIn, unplacedIds, plan.fires, plan.poses, plan.middleOutOfSight);
+		stacks.setWaiting(waitingInTheMiddle);
+		stacks.setArrivals(stillness::arrivedTick);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
@@ -1072,6 +1203,10 @@ public class PersonalSpacePlugin extends Plugin
 		s.driftFrames = offsets.driftFrames;
 		s.insideYouHidden = planner.insideYouHidden;
 		s.spotLosses = spotLosses;
+		s.longestHidden = hideLog.longest(offsets.frame(), client.getGameCycle());
+		s.waitBreaks = waitBreaks;
+		s.waitTimeouts = waitTimeouts;
+		s.waitSkipped = waitSkipped;
 		s.planDips = planDips;
 		s.shimInstalls = shimInstalls;
 		if (w != null)
@@ -1093,6 +1228,9 @@ public class PersonalSpacePlugin extends Plugin
 			s.skippedUnconfirmed = w.skippedUnconfirmed;
 			s.skippedOthersHid = w.skippedOthersHid;
 			s.skippedMoved = w.skippedMoved;
+			s.fireBlackouts = w.fireBlackouts;
+			s.fireUnconfirmed = w.fireUnconfirmed;
+			s.middleKeptSteady = w.middleKeptSteady;
 			s.swapsCameraMoving = w.swapsCameraMoving;
 			s.swapsCameraStill = w.swapsCameraStill;
 			s.stillSwapsMoved = w.stillSwapsMoved;

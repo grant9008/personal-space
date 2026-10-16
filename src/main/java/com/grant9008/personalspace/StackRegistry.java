@@ -156,6 +156,33 @@ final class StackRegistry
 		return middleOutOfSight.contains(tileKey);
 	}
 
+	private volatile java.util.Set<Integer> waiting = Collections.emptySet();
+	private volatile java.util.function.IntUnaryOperator arrivals = id -> 0;
+
+	/** Players given a spot who wait in the middle of their tile for a break in what they're doing. */
+	void setWaiting(java.util.Set<Integer> ids)
+	{
+		waiting = ids == null ? Collections.emptySet() : new java.util.HashSet<>(ids);
+	}
+
+	/** True if this player waits in the middle of their tile for a break in what they're doing. */
+	boolean isWaiting(int id)
+	{
+		return waiting.contains(id);
+	}
+
+	/** Where to find the tick each player came to stand where they are. */
+	void setArrivals(java.util.function.IntUnaryOperator arrivedTick)
+	{
+		arrivals = arrivedTick == null ? id -> 0 : arrivedTick;
+	}
+
+	/** The tick this player came to stand where they are; 0 if unknown. */
+	int arrivedTick(int id)
+	{
+		return arrivals.applyAsInt(id);
+	}
+
 	/** True if this player is on a crowded tile but wasn't given a spot this tick. */
 	boolean isUnplaced(int id)
 	{
@@ -217,6 +244,7 @@ final class StackRegistry
 		byTile = Collections.emptyMap();
 		stackedTiles = new long[0];
 		middleOutOfSight = Collections.emptySet();
+		waiting = Collections.emptySet();
 	}
 
 	boolean isEmpty()

@@ -16,6 +16,8 @@ final class StillnessTracker
 	private final long[] tile = new long[OffsetTable.CAPACITY];
 	/** Tick on which the player was last seen centred on {@link #tile}; 0 means "not centred". */
 	private final int[] centredTick = new int[OffsetTable.CAPACITY];
+	/** Tick on which the player was first seen centred on {@link #tile}, this time round. */
+	private final int[] arrivedTick = new int[OffsetTable.CAPACITY];
 
 	/**
 	 * Record where a player is this tick.
@@ -38,14 +40,25 @@ final class StillnessTracker
 			return false;
 		}
 		boolean still = centredTick[id] != 0 && centredTick[id] == tick - 1 && tile[id] == tileKey;
+		if (!still)
+		{
+			arrivedTick[id] = tick;
+		}
 		tile[id] = tileKey;
 		centredTick[id] = tick;
 		return still;
 	}
 
+	/** The tick this player came to stand where they are now; 0 if unknown. */
+	int arrivedTick(int id)
+	{
+		return id >= 0 && id < OffsetTable.CAPACITY ? arrivedTick[id] : 0;
+	}
+
 	void clear()
 	{
 		Arrays.fill(centredTick, 0);
+		Arrays.fill(arrivedTick, 0);
 	}
 
 	/** Local coordinates of a size-1 actor standing in the middle of a tile end in exactly half a tile. */

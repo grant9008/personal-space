@@ -455,13 +455,6 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Pause while I'm fighting", combatSwitch,
 			"On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses."), c);
-
-		c.gridy++;
-		c.insets = new Insets(10, 0, 0, 0);
-		JLabel note = new JLabel(wrap("Visual only. Players are drawn shifted so you can see them, but you click them where they really stand."));
-		note.setFont(FontManager.getRunescapeSmallFont());
-		note.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-		card.add(note, c);
 		return wrapCard(card);
 	}
 

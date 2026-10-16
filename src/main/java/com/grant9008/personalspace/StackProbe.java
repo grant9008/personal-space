@@ -42,13 +42,15 @@ final class StackProbe implements RenderCallback
 	 */
 	static final int SHOWN_GRACE_CYCLES = 500;
 	/**
-	 * How long past its {@link #FRESH_CYCLES} a confirmation still lets a stackmate be drawn: 5
-	 * seconds. Everyone on a tile is confirmed again in the same frame, so their confirmations all
-	 * run out together, and the game lets only one of them through a frame to be confirmed again:
-	 * with 16 on a tile, most of the crowd vanished for a moment and came back one by one, every 10
-	 * seconds. Now they stay drawn while that happens.
+	 * How long past its {@link #FRESH_CYCLES} a confirmation still lets a stackmate be drawn: a
+	 * second longer than they count in a crowd. Everyone on a tile is confirmed again in the same
+	 * frame, so their confirmations all run out together, and the game lets only one of them
+	 * through a frame to be confirmed again: with 16 on a tile, most of the crowd vanished for a
+	 * moment and came back one by one, every 10 seconds. Shorter than {@link #SHOWN_GRACE_CYCLES},
+	 * people whose confirmation was late kept their spot in the crowd (hover found them there) but
+	 * weren't drawn in it, for up to 5 seconds: invisible people round a campfire.
 	 */
-	static final int DRAW_GRACE_CYCLES = 250;
+	static final int DRAW_GRACE_CYCLES = SHOWN_GRACE_CYCLES + 50;
 	/** How long to leave a player alone after they failed to show up: 60 seconds. */
 	static final int GIVE_UP_CYCLES = 3000;
 

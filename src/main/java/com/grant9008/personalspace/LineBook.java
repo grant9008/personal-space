@@ -1000,7 +1000,20 @@ final class LineBook
 			{
 				waiting |= !spotOf.containsKey(id);
 			}
-			if (waiting)
+			// Only when someone at the edge stands where the one waiting would be drawn: otherwise
+			// one of them shows in the middle, as the game shows one of a stack. Hidden regardless,
+			// a booth where nobody had a spot looked empty with fifteen people on it.
+			boolean edgeOnTheMiddle = false;
+			for (Member o : members)
+			{
+				for (int id : o.ids)
+				{
+					Spot spot = spotOf.get(id);
+					edgeOnTheMiddle |= spot != null && spot.line.equals(key) && spot.row == 0
+						&& Math.abs(line.along(0, spot.j) - m.centre()) < s;
+				}
+			}
+			if (waiting && edgeOnTheMiddle)
 			{
 				middleHidden.add(m.tile);
 			}
