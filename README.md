@@ -44,6 +44,17 @@ turns out to be four friends hanging out.
   the game or another plugin hides.
 - **Boats too.** New and untested (I have no boat): please report anything odd.
 
+### Great for
+
+- **Photos and fashionscape.** Every outfit in a crowd can be seen. Pose pairs and small groups,
+  or draw a crowd up in a Line or an Arc, and turn Auto-space off to spread people out for the shot.
+- **Shooting stars.** The team mining a star is a crowd again, not one body.
+- **Rock crabs and other shared training spots.** See everyone sharing the spot. Turn off
+  **Pause while I'm fighting** to keep the crowd spread out while you train.
+- **Banks and the Grand Exchange.** See how busy it really is, and hide the level-3 bots.
+- **Skilling with friends.** Fires, anvils, fishing spots and trees, everyone in view.
+- **Clan events, drop parties and streams.** A crowd looks as big as it really is.
+
 Needs the **GPU** plugin or **117 HD** (the sidebar has a **Turn on GPU** button). Works alongside **True Tile Movement Animations**.
 
 <br clear="right">
@@ -80,21 +91,20 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 
 | Setting | What it does |
 | --- | --- |
-| On/off switch | Spread out crowds, or show the game as normal. The lines under the title say what's happening right now, for example "Spreading 7 players on 3 tiles" and "You're in a row along the counter or wall". |
-| Players per tile | How many players on one tile get their own spot: 2 to 16, with 5 as the sweet spot. Raise it if a busy bank booth leaves a heap of people in the middle; the higher it goes, the further out the crowd reaches to make room. |
-| Hide players below | Off (the default), or a combat level: anyone below it isn't drawn or clickable, and neither is their overhead chat, health bar or hitsplats, as with Entity Hider. With **Hide their chat too** (on by default) their public chat is dropped from the chat box as well, and stays dropped for the session after they walk out of view. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight. |
-| Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. **Use recommended**, at the top of the Crowd card, puts the crowd settings back to the defaults. With **Auto-space** on, bank counters, walls and fires stay closer on their own; turn it off and the slider sets the distance everywhere. Changes show live. |
-| Arrangement | **Smart**: a line along whatever people are facing - a counter, a wall, an anvil, a fire - and a ring out in the open, where there's nothing to line up along. **Circle**: always a ring. **Line**: side by side anywhere, even in the open. **Arc**: a curve, like the crowd round an anvil. |
-| Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
-| Auto-space | On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn it off to unlock the slider: it then sets how far apart everyone stands, handy for photos, though a tight spot or a big crowd on one tile can still keep people closer. |
-| Names over players | Off by default. On: names follow the bodies. Who gets a name, the colours and the rank icons are your **Player Indicators** settings, so change them there; nothing changes but where the names sit. Player Indicators itself can't follow the bodies, so turn off its **Name position** (or the plugin) or you'll see two names per person. |
-| Hover shows who | On (the default): hover a body drawn away from its tile and a tooltip says who it is. What a click does is unchanged. |
-| Arrow to their tile | On (the default): hover a body drawn away from its tile and a small arrow points to where they really stand. Works with or without the tooltip. |
-| Draw me in front | Off (the default): whoever is between you and the camera covers you, as they really would. On: you're drawn over everyone in your crowd, whichever way the camera faces, so you can always see yourself. Either way nobody moves out of your way: crowds huddle as they would, and stand as they are when you walk up beside them. |
-| Move my character too | Off: you stay put and others step around you. On: you take a spot too, straight away when you stop rather than off to the side first. At a bank counter or a fishing spot you get a place at the front, even where the bank is so narrow only one or two fit. Nobody is drawn inside you; to always see yourself in a packed bank or anvil pile, turn on **Draw me in front**. Once you've settled you keep your place in your group as people come and go, though the group can widen, tighten or slide over a little to make room for people next to it. |
-| Pause while I'm fighting | On (the default): everyone is shown where they really stand while you fight, and for a few seconds after. Keep it on for raids and group bosses, where standing on the same tile matters. Turn it off to keep seeing the crowd during ordinary fights like training or slayer. |
-| Show sidebar button | On (the default): Personal Space has a button in the sidebar with its settings and a live status. Off: no button, for a tidy sidebar; every setting is still in the plugin's configuration. |
-| Troubleshooting | What Personal Space is doing right now, test mode, **Depth between players** (on; turn off only if you see glitches inside characters), live checks and a **Copy report** button for bug reports. |
+| On/off switch | Spread out crowds, or show the game as normal. The line under it says what's happening right now. |
+| Players per tile | How many on one tile get their own spot: 2 to 16, and 5 is the sweet spot. Higher fits more people, packed tighter. |
+| Hide players below | Off, or a combat level: anyone below it is hidden, like Entity Hider. **Hide their chat too** drops their chat as well. Friends, friends chat and clan always stay. |
+| Spacing | Close, Normal or Wide (the default), or drag the slider. **Use recommended** puts the crowd settings back to the defaults. |
+| Arrangement | **Smart** lines people up at counters, anvils and fires and makes a ring in the open. **Circle**, **Line** and **Arc** use that shape everywhere. |
+| Pose for 2 or 3 players | **Natural**, **Angled** (half turned towards each other) or **Facing** each other. |
+| Auto-space | On: sensible distances for small groups, counters and fires. Off: the Spacing slider sets every distance, handy for photos. |
+| Names over players | Names over the bodies instead of the pile, with your Player Indicators settings. Turn off Player Indicators' name position, or you'll see two. |
+| Hover shows who / Arrow to their tile | Hover someone drawn away from their tile to see their name and level, and an arrow to where they really stand. |
+| Draw me in front | Always draw yourself over the people in your crowd. |
+| Move my character too | You take a spot as well, at the front at a counter or fishing spot. |
+| Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |
+| Show sidebar button | Hide the sidebar button; every setting is still in the plugin's configuration. |
+| Troubleshooting | Live status and checks, **Depth between players**, and **Copy report** for bug reports. |
 
 If crowds aren't spreading, open **Troubleshooting**: the status at the top says why (for example
 the GPU plugin is off, or you're in a PvP area) and what to do.
