@@ -27,6 +27,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JOptionPane;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -56,6 +57,8 @@ final class PersonalSpacePanel extends PluginPanel
 {
 	static final String SUPPORT_URL = "https://github.com/grant9008/personal-space#support-the-developer";
 	static final String ISSUES_URL = "https://github.com/grant9008/personal-space/issues";
+	/** A new issue on the same page, its title started so ideas stand apart from problems. */
+	static final String IDEA_URL = "https://github.com/grant9008/personal-space/issues/new?title=Idea%3A%20";
 
 	private static final int TEXT_WIDTH_PX = 150;
 	/** Tooltips wrap at this width, rather than running in one line across the whole screen. */
@@ -327,7 +330,12 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private JPanel buildCrowdCard()
 	{
-		JPanel card = card("Crowd");
+		JLabel recommended = new JLabel("Use recommended");
+		recommended.setFont(FontManager.getRunescapeSmallFont());
+		recommended.setToolTipText(tip("Sets the crowd settings back to the ones that look best in most places: 5 players per tile, "
+			+ "Wide spacing, Smart arrangement, Auto-space on and a Natural pose. Your other switches stay as they are."));
+		link(recommended, ColorScheme.MEDIUM_GRAY_COLOR, this::useRecommended);
+		JPanel card = card("Crowd", recommended);
 		GridBagConstraints c = cardConstraints();
 
 		card.add(labelWithValue("Players per tile", perTileValue), c);
@@ -500,19 +508,27 @@ final class PersonalSpacePanel extends PluginPanel
 			new EmptyBorder(6, 10, 8, 10)));
 		GridBagConstraints c = column();
 
-		// Two quiet links side by side, then the version: nothing here needs to shout.
+		// Quiet links, then the version: nothing here needs to shout. Feedback on one line,
+		// support on the next, as three don't fit side by side in the sidebar.
 		JPanel links = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
 		links.setOpaque(false);
 		JLabel report = new JLabel("Report a problem");
 		report.setToolTipText(tip("Something wrong? Press Copy report under Troubleshooting and paste it into a new issue, with a screenshot."));
 		link(report, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
 		links.add(report);
+		JLabel idea = new JLabel("Suggest an idea");
+		idea.setToolTipText(tip("Something you'd like Personal Space to do? Tell me in a new issue on the same page."));
+		link(idea, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(IDEA_URL));
+		links.add(idea);
+		p.add(links, c);
+
+		c.gridy++;
+		c.insets = new Insets(3, 0, 0, 0);
 		JLabel support = new JLabel("Support the dev", new HeartIcon(ColorScheme.MEDIUM_GRAY_COLOR), SwingConstants.CENTER);
 		support.setIconTextGap(4);
 		support.setToolTipText(tip("Personal Space is free. If you enjoy it, you can chip in here."));
 		link(support, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(SUPPORT_URL));
-		links.add(support);
-		p.add(links, c);
+		p.add(support, c);
 
 		c.gridy++;
 		c.insets = new Insets(3, 0, 0, 0);
@@ -618,6 +634,29 @@ final class PersonalSpacePanel extends PluginPanel
 		});
 	}
 
+	/**
+	 * The Use recommended link: after asking, the crowd settings go back to their defaults. Packed
+	 * tighter than that, people's gear overlaps and swaps in front and behind as the camera turns.
+	 */
+	private void useRecommended()
+	{
+		int answer = JOptionPane.showConfirmDialog(this,
+			"Set the crowd settings back to the recommended ones?\n\n"
+				+ "5 players per tile, Wide spacing, Smart arrangement, Auto-space on, Natural pose.\n"
+				+ "Your other switches stay as they are.",
+			"Personal Space", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (answer != JOptionPane.YES_OPTION)
+		{
+			return;
+		}
+		write(PersonalSpaceConfig.KEY_MAX_STACK, PersonalSpaceConfig.DEFAULT_STACK);
+		write(PersonalSpaceConfig.KEY_SPACING, PersonalSpaceConfig.SPACING_WIDE);
+		write(PersonalSpaceConfig.KEY_ARRANGEMENT, PersonalSpaceConfig.Arrangement.AUTO);
+		write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, true);
+		write(PersonalSpaceConfig.KEY_POSE, PersonalSpaceConfig.Pose.NATURAL);
+		refreshControls();
+	}
+
 	private <T> void write(String key, T value)
 	{
 		if (configManager != null)
@@ -688,6 +727,12 @@ final class PersonalSpacePanel extends PluginPanel
 	/** A card with a title row; content goes from grid row 1. */
 	private static JPanel card(String title)
 	{
+		return card(title, null);
+	}
+
+	/** A card with a heading, and something small on the right of it, if given. */
+	private static JPanel card(String title, JComponent right)
+	{
 		JPanel card = new JPanel(new GridBagLayout());
 		card.setBackground(CARD);
 		card.setBorder(new EmptyBorder(8, 9, 9, 9));
@@ -696,7 +741,16 @@ final class PersonalSpacePanel extends PluginPanel
 		heading.setForeground(ColorScheme.BRAND_ORANGE);
 		GridBagConstraints c = column();
 		c.insets = new Insets(0, 0, 6, 0);
-		card.add(heading, c);
+		if (right == null)
+		{
+			card.add(heading, c);
+			return card;
+		}
+		JPanel row = new JPanel(new BorderLayout());
+		row.setOpaque(false);
+		row.add(heading, BorderLayout.WEST);
+		row.add(right, BorderLayout.EAST);
+		card.add(row, c);
 		return card;
 	}
 

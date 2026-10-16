@@ -49,7 +49,6 @@ final class Snapshot
 	long walkDraws;
 	/** Players and NPCs drawn farthest from the camera first, so whoever is nearer is in front; total. */
 	long orderedDraws;
-	long leanedDraws;
 	long keptDips;
 	long probeBlackouts;
 	long droppedUndrawn;
@@ -62,6 +61,17 @@ final class Snapshot
 	long blinkMoved;
 	long blinkOther;
 	long keptWithoutModel;
+	long spotLosses;
+	long swapsCameraMoving;
+	long swapsCameraStill;
+	long stillSwapsMoved;
+	long stillSwapsOther;
+	long stillSwapsWalking;
+	long stillSwapsStanding;
+	long swapsBack;
+	long skippedUnconfirmed;
+	long skippedOthersHid;
+	long skippedMoved;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass; should stay 0. */
 	long passMissedFrames;
 	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */
@@ -97,6 +107,7 @@ final class Snapshot
 	long probeHeld;
 	/** Players never confirmed by the game (e.g. hidden by the server), so never drawn; total. */
 	long probeGaveUp;
+	long probeBackOffs;
 	/** Times a tile switched between a row and a crowd, or a row turned; total. */
 	long shapeChanges;
 	/** Times a player with a spot was moved to a different spot to fill a gap; total. */

@@ -2103,7 +2103,8 @@ public class CrowdPlannerTest
 		Map<Integer, double[]> justLeft = drawnAt(planner.plan(five, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, 11, OPEN), five);
 		Assert.assertFalse("the five eased straight back out", java.util.Arrays.equals(alone.get(1), justLeft.get(1)));
 		Map<Integer, double[]> later = null;
-		for (int t = 12; t <= 11 + CrowdPlanner.RELAX_TICKS + 1; t++)
+		// Their shares are remembered RELAX_TICKS, then the room has to last WIDEN_TICKS before it opens out.
+		for (int t = 12; t <= 11 + CrowdPlanner.RELAX_TICKS + CrowdPlanner.WIDEN_TICKS + 1; t++)
 		{
 			later = drawnAt(planner.plan(five, q -> true, PersonalSpaceConfig.SPACING_WIDE, 5, true, false, t, OPEN), five);
 		}
@@ -2812,6 +2813,101 @@ public class CrowdPlannerTest
 			}
 			Assert.assertTrue("spacing " + spacing + ": nobody at the counter", atCounter > 0);
 		}
+	}
+
+	@Test
+	public void aCampfireCrowdWithBusyNeighboursDoesntKeepRearranging()
+	{
+		// Eight people tending a fire, people coming and going on every tile round them. The crowd
+		// flipped between a row and a ring, and opened out and closed up, every few ticks, and the
+		// whole crowd slid about each time.
+		CrowdPlanner.Surroundings fireToTheEast = new CrowdPlanner.Surroundings()
+		{
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + dx;
+				int z = StackRegistry.sceneY(t) * 128 + dz;
+				return !(x > 51 * 128 - 84 && x < 51 * 128 + 84 && z > 50 * 128 - 84 && z < 50 * 128 + 84);
+			}
+			public boolean facesObstacle(long t, double a) { return false; }
+			public boolean isCounter(long t, double a) { return false; }
+			public boolean facesFire(long t, double a)
+			{
+				return t == StackRegistry.key(0, 50, 50) && Math.abs(Math.sin(a) + 1) < 0.2;
+			}
+			public List<int[]> firesNear(long t)
+			{
+				List<int[]> out = new ArrayList<>();
+				int dx = 51 - StackRegistry.sceneX(t);
+				int dz = 50 - StackRegistry.sceneY(t);
+				if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1 && (dx != 0 || dz != 0))
+				{
+					out.add(new int[]{dx, dz});
+				}
+				return out;
+			}
+		};
+		long[] around = {
+			StackRegistry.key(0, 49, 49), StackRegistry.key(0, 49, 50), StackRegistry.key(0, 49, 51),
+			StackRegistry.key(0, 50, 49), StackRegistry.key(0, 50, 51), StackRegistry.key(0, 51, 49),
+			StackRegistry.key(0, 51, 51), StackRegistry.key(0, 52, 49), StackRegistry.key(0, 52, 51)};
+		java.util.Random rnd = new java.util.Random(1);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Long, List<Integer>> there = new HashMap<>();
+		for (long tile : around)
+		{
+			there.put(tile, new ArrayList<>());
+		}
+		int nextId = 100;
+		int wholeCrowdMoves = 0;
+		Map<Integer, int[]> last = null;
+		for (int t = 1; t <= 220; t++)
+		{
+			for (long tile : around)
+			{
+				List<Integer> list = there.get(tile);
+				if (rnd.nextInt(100) < 30)
+				{
+					if (!list.isEmpty() && (list.size() >= 4 || rnd.nextBoolean()))
+					{
+						list.remove(rnd.nextInt(list.size()));
+					}
+					else
+					{
+						list.add(nextId++);
+					}
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int i = 1; i <= 8; i++)
+			{
+				still.add(new StackSpreader.Entry(i, StackRegistry.key(0, 50, 50), false, 1536, true));
+			}
+			for (long tile : around)
+			{
+				for (int id : there.get(tile))
+				{
+					still.add(new StackSpreader.Entry(id, tile, false, rnd.nextInt(4) * 512, false));
+				}
+			}
+			Map<Integer, int[]> now = spots(planner.plan(still, q -> true, 79, 16, true, false, t, fireToTheEast));
+			if (t > 20 && last != null)
+			{
+				int moved = 0;
+				for (int i = 1; i <= 8; i++)
+				{
+					int[] a = last.get(i);
+					int[] b = now.get(i);
+					if (a != null && b != null && Math.hypot(a[0] - b[0], a[1] - b[1]) > 4)
+					{
+						moved++;
+					}
+				}
+				wholeCrowdMoves += moved >= 7 ? 1 : 0;
+			}
+			last = now;
+		}
+		Assert.assertTrue("the whole crowd moved " + wholeCrowdMoves + " times in 200 ticks", wholeCrowdMoves <= 8);
 	}
 
 	/** A bank so narrow the water is only in front of one spot: rows behind have room, the edge doesn't. */

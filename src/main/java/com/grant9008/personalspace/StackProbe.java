@@ -53,6 +53,12 @@ final class StackProbe implements RenderCallback
 	static final int GIVE_UP_CYCLES = 3000;
 
 	private static final int MAX_HIDDEN_PER_FRAME = 256;
+	/**
+	 * Frames a tile is left alone after a probe that ended with nobody in its middle drawn: about
+	 * two seconds, well inside {@link #DRAW_GRACE_CYCLES}, so nobody already confirmed stops being
+	 * drawn meanwhile.
+	 */
+	static final int BACK_OFF_FRAMES = 100;
 
 	private static final class TileState
 	{
@@ -60,6 +66,7 @@ final class StackProbe implements RenderCallback
 		boolean probing;
 		int signature;
 		int framesUsed;
+		int backOffUntil = Integer.MIN_VALUE;
 	}
 
 	private final Client client;
@@ -86,6 +93,8 @@ final class StackProbe implements RenderCallback
 	long heldTotal;
 	/** Diagnostics: players given up on because they never showed up. */
 	long gaveUpTotal;
+	/** Diagnostics: tiles left alone after a probe that drew nobody in their middle. */
+	long backOffs;
 
 	StackProbe(Client client, OffsetTable offsets, StackRegistry stacks)
 	{
@@ -213,6 +222,22 @@ final class StackProbe implements RenderCallback
 		return java.util.Arrays.copyOf(out, n);
 	}
 
+	/**
+	 * The draw shim found that this tile's people were held back this frame and the game then drew
+	 * nobody in its middle, so none of them were drawn: the whole crowd blinked out. Leave the tile
+	 * alone for a while. Client thread.
+	 */
+	void backOff(long tileKey, int frame)
+	{
+		TileState t = tiles.computeIfAbsent(tileKey, k -> new TileState());
+		t.backOffUntil = frame + BACK_OFF_FRAMES;
+		t.probing = false;
+		// The probe's count is left as it was: the blackout is one of the tries it gets. Reset, it
+		// never got to give up on someone the game won't draw (a hidden moderator, or someone
+		// Entity Hider hides), and the tile blinked out every couple of seconds for good.
+		backOffs++;
+	}
+
 	/** Forget everything, e.g. on logout or world hop. */
 	void reset()
 	{
@@ -242,6 +267,11 @@ final class StackProbe implements RenderCallback
 			return t.probing;
 		}
 		t.frame = frame;
+		if (frame < t.backOffUntil)
+		{
+			t.probing = false;
+			return false;
+		}
 
 		int signature = 17;
 		boolean waiting = false;
@@ -252,8 +282,12 @@ final class StackProbe implements RenderCallback
 				continue;
 			}
 			Player mate = wv.players().byIndex(id);
-			if (mate == null || isConfirmed(id, mate, cycle))
+			if (mate == null || isConfirmed(id, mate, cycle) || !inMiddleOf(mate, key))
 			{
+				// Only someone standing in the middle of this tile can be let through by holding the
+				// others back. Someone who has started walking off is drawn by the game wherever they
+				// are; waiting for them held everyone else back with nobody left in the middle to draw
+				// them with, and the whole crowd blinked out.
 				continue;
 			}
 			waiting = true;
@@ -295,6 +329,14 @@ final class StackProbe implements RenderCallback
 		t.framesUsed++;
 		t.probing = true;
 		return true;
+	}
+
+	/** Whether this player is standing exactly in the middle of this tile right now. */
+	private static boolean inMiddleOf(Player player, long key)
+	{
+		LocalPoint lp = player.getLocalLocation();
+		return lp != null && StillnessTracker.isCentred(lp.getX(), lp.getY())
+			&& lp.getSceneX() == StackRegistry.sceneX(key) && lp.getSceneY() == StackRegistry.sceneY(key);
 	}
 
 	private void hold(int id, long key, int frame)

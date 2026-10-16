@@ -482,6 +482,34 @@ final class CrowdPlanner
 
 	private Map<Long, Room> rooms = new HashMap<>();
 	private Map<Long, Room> roomsNow = new HashMap<>();
+
+	/**
+	 * A tile's spacing only changes by more than this. With people coming and going round a crowd
+	 * its share of the ground changed by a hair every few ticks, and every change of spacing, even
+	 * by one, moved everyone in it a little: at a busy campfire the whole crowd slid about.
+	 */
+	static final int SPACING_DEADBAND = 3;
+	private Map<Long, Integer> spacingWas = new HashMap<>();
+	private Map<Long, Integer> spacingNow = new HashMap<>();
+
+	/**
+	 * A row that had to squeeze into a ring stays a ring until it has had room as a row for this
+	 * long: about fifteen seconds. Beside a busy neighbour a campfire crowd flipped between a row
+	 * and a ring every few ticks, and the whole crowd was laid out afresh each time.
+	 */
+	static final int UNSQUEEZE_TICKS = 25;
+	private final Map<Long, Integer> lastSqueezed = new HashMap<>();
+
+	/**
+	 * A crowd closes up at once when it has to, or people would stand inside each other, but only
+	 * opens out again once the room has been there this long: about six seconds. Beside busy
+	 * neighbours the room came and went every few ticks, and the whole crowd opened out and closed
+	 * up with it.
+	 */
+	static final int WIDEN_TICKS = 10;
+	private Map<Long, Integer> usedWas = new HashMap<>();
+	private Map<Long, Integer> usedNow = new HashMap<>();
+	private final Map<Long, Integer> widerSince = new HashMap<>();
 	/** The plane you stand on. */
 	private static int yourPlane(List<StackSpreader.Entry> still)
 	{
@@ -590,7 +618,7 @@ final class CrowdPlanner
 		{
 			if (was.fits && fitsAt(shares, middle, guard, was, people))
 			{
-				chosen = best.spacing > was.spacing || !best.moved() ? best : was;
+				chosen = best.spacing > was.spacing + SPACING_DEADBAND || !best.moved() ? best : was;
 			}
 			else
 			{
@@ -1658,6 +1686,12 @@ final class CrowdPlanner
 				int onCircle = StackSpreader.arcRadius(tileSpacing, openOut);
 				tileSpacing = Math.min(tileSpacing, Math.max(MIN_SHARED_SPACING, (int) Math.floor(onCircle * tightest)));
 			}
+			Integer hadSpacing = spacingWas.get(tile);
+			if (hadSpacing != null && Math.abs(tileSpacing - hadSpacing) <= SPACING_DEADBAND)
+			{
+				tileSpacing = hadSpacing;
+			}
+			spacingNow.put(tile, tileSpacing);
 			final int arcRadius = StackSpreader.arcRadius(tileSpacing, openOut);
 			final double margin = row && !straight ? StackSpreader.curvedTurn(tileSpacing, arcRadius) / 2 : 0;
 			final double focusX = -Math.sin(angle) * StackSpreader.LOOK_AHEAD;
@@ -1804,6 +1838,55 @@ final class CrowdPlanner
 					rowShares.addAll(kept);
 				}
 			}
+			if (row && squeezed[0])
+			{
+				lastSqueezed.put(tile, tick);
+			}
+			else if (row && tick - lastSqueezed.getOrDefault(tile, Integer.MIN_VALUE / 2) < UNSQUEEZE_TICKS)
+			{
+				// Room for a row again, but only just now: stay a ring a while yet, as long as the ring
+				// still has a spot for everyone the row does. Where the row was let lean into the
+				// neighbours (above), this ring may lean a little too: holding it to its share there
+				// instead made a campfire crowd flip between the two every few ticks, which looked worse.
+				boolean[] ring = {false};
+				int[] ringUsed = {tileSpacing};
+				int[] ringBlocked = {0};
+				List<int[]> asRing = spotsWithRoom(false, false, angle, middleNow, tileSpacing, spotsFor(tile, capacity),
+					Math.min(capacity, movable.size()), laidOut, ringBlocked, ring, arcRadius, false, StackSpreader.WRAP_ARC, ringUsed);
+				if (asRing.size() >= spots.size())
+				{
+					spots = asRing;
+					squeezed[0] = true;
+					used[0] = ringUsed[0];
+					blocked[0] = ringBlocked[0];
+				}
+			}
+			Integer hadUsed = usedWas.get(tile);
+			if (hadUsed != null && used[0] > hadUsed && (room == null || room.fits))
+			{
+				int since = widerSince.computeIfAbsent(tile, k -> tick);
+				if (tick - since < WIDEN_TICKS || used[0] - hadUsed <= SPACING_DEADBAND)
+				{
+					// Not yet: stay as close as before, as long as that still has a spot for everyone.
+					boolean[] stillSqueezed = {false};
+					int[] stillUsed = {hadUsed};
+					int[] stillBlocked = {0};
+					List<int[]> asBefore = spotsWithRoom(row && !squeezed[0], false, angle, middleNow, hadUsed, spotsFor(tile, capacity),
+						Math.min(capacity, movable.size()), laidOut, stillBlocked, stillSqueezed, arcRadius, false, StackSpreader.WRAP_ARC, stillUsed);
+					if (asBefore.size() >= spots.size() && stillUsed[0] == hadUsed)
+					{
+						spots = asBefore;
+						used[0] = hadUsed;
+						blocked[0] = stillBlocked[0];
+						squeezed[0] |= stillSqueezed[0];
+					}
+				}
+			}
+			else
+			{
+				widerSince.remove(tile);
+			}
+			usedNow.put(tile, used[0]);
 			if (squeezed[0])
 			{
 				kind += ", squeezed into a ring";
@@ -1827,6 +1910,12 @@ final class CrowdPlanner
 
 		rooms = roomsNow;
 		roomsNow = new HashMap<>();
+		spacingWas = spacingNow;
+		spacingNow = new HashMap<>();
+		usedWas = usedNow;
+		usedNow = new HashMap<>();
+		widerSince.keySet().retainAll(usedWas.keySet());
+		lastSqueezed.values().removeIf(t -> tick - t >= UNSQUEEZE_TICKS);
 		List<LineBook.Line> shared = layOutStraightRows(pendingStraight, byTile, capacity, movableByTile, spotsByTile, shapeByTile,
 			spacingByTile, blockedByTile, shownByTile, around, shown, includeLocal, tick);
 
@@ -2133,6 +2222,12 @@ final class CrowdPlanner
 		previousLineTiles.clear();
 		currentLineTiles.clear();
 		rooms.clear();
+		spacingWas.clear();
+		spacingNow.clear();
+		usedWas.clear();
+		usedNow.clear();
+		widerSince.clear();
+		lastSqueezed.clear();
 		roomsNow.clear();
 		presence.clear();
 		waited.clear();

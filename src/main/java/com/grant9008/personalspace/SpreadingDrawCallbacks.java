@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import net.runelite.api.Actor;
 import net.runelite.api.Animation;
 import net.runelite.api.Client;
 import net.runelite.api.GameObject;
@@ -139,28 +140,178 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int z;
 		boolean walk;
 		double distance;
+		/** Who this is, to carry last frame's order over: a player's id, or past those, an NPC's index. */
+		int who;
 	}
 
 	/**
-	 * Someone busy is sorted by where their body is, not their feet: kneeling to cook at a fire
-	 * or reaching over an anvil, it's well in front of the spot they stand on, and sorted by that
-	 * spot, the person standing just in front of it was drawn over them. The shift is the middle
-	 * of their body on the ground (see {@link #middle}), averaged over what they're doing (see
-	 * {@link Leans}), at most this far.
+	 * Two people only swap which of them is drawn in front once one is this much nearer the camera
+	 * than the other: about a body's width. (Half that still let a packed crowd swap pair after pair
+	 * as the camera was rocked across it.) Each frame starts from the order of the last.
+	 * Sorted by distance alone, two people side by side swapped every time the camera swung across
+	 * the angle at which they're equally far away, and a kite shield, cape or shoulder pad that
+	 * reaches across into the other popped in front of them and behind, over and over, with nobody
+	 * moving but the camera. People really in front of or behind one another are further apart than
+	 * this, so they're still drawn the right way round.
 	 */
-	static final int MAX_LEAN = 96;
-	/** A shift smaller than this is just how their gear hangs, and is ignored. */
-	static final int LEAN_DEAD_ZONE = 16;
+	static final int SORT_TOLERANCE = 32;
+
+	/** Who wasn't in last frame's order: they're put where they belong at once. */
+	private boolean[] fresh = new boolean[128];
 	/**
-	 * The share of a model's points left out at each end when finding its middle, along each
-	 * way: a rod, a staff or a cape is a few points far out, and moved the middle of an upright
-	 * fisher a long way towards the water.
+	 * Where each one is on screen this frame, roughly: a box round their body and gear, as
+	 * (left, right, top, bottom, valid) in the camera's view, 5 to a person. Swapping two people who
+	 * don't overlap on screen can't be seen, so they're sorted freely; only two who overlap keep
+	 * their order until one is clearly in front ({@link #SORT_TOLERANCE}). Sorted with that
+	 * tolerance for everyone, a crowd flickered as the camera turned; held still while it turned,
+	 * people were drawn the wrong way round. This way swaps mostly happen while people are apart.
 	 */
-	static final double LEAN_TRIM = 0.2;
-	/** Half the width of the ground the middle is looked for in; points past it count at its edge. */
-	private static final int LEAN_REACH = 512;
-	/** Diagnostics: people drawn by where their body leans, rather than where they stand. */
-	long leanedDraws;
+	private double[] boxes = new double[128 * 5];
+	private final float[] projected = new float[3];
+	private final int[] lastX = new int[WHO_SLOTS];
+	private final int[] lastZ = new int[WHO_SLOTS];
+	private final int[] stateFrame = new int[WHO_SLOTS];
+	private boolean[] movedNow = new boolean[128];
+	private boolean[] walkingNow = new boolean[128];
+	/** When each pair of people who overlap last swapped, to catch them swapping straight back: flicker. */
+	private final Map<Long, Integer> lastSwap = new HashMap<>();
+	/** Diagnostics: visible swaps with the camera still caused by someone walking, by someone standing whose drawn spot shifted; and swaps straight back within half a second. */
+	long stillSwapsWalking;
+	long stillSwapsStanding;
+	long swapsBack;
+	static final int SWAP_BACK_FRAMES = 25;
+	/** Diagnostics: visible swaps with the camera still, by why: someone moved, or not. */
+	long stillSwapsMoved;
+	long stillSwapsOther;
+
+	/** How far out from someone's feet their box reaches, and how tall it is, in local units. */
+	static final int BOX_REACH = 48;
+	static final int BOX_HEIGHT = 230;
+
+	/** Diagnostics: two people who overlap on screen swapping which is in front, with the camera moving or still. */
+	long swapsCameraMoving;
+	long swapsCameraStill;
+	private int lastCamX;
+	private int lastCamY;
+	private int lastCamZ;
+	private int lastCamYaw;
+	private int lastCamPitch;
+	private static final int WHO_SLOTS = OffsetTable.CAPACITY + 65536;
+	private final int[] rankOf = new int[WHO_SLOTS];
+	private final int[] rankFrame = new int[WHO_SLOTS];
+	private int[] order = new int[128];
+	private int[] prior = new int[128];
+	private double[] far = new double[128];
+	private Kept[] sorted = new Kept[128];
+
+	{
+		Arrays.fill(rankFrame, Integer.MIN_VALUE / 2);
+		Arrays.fill(stateFrame, Integer.MIN_VALUE / 2);
+	}
+
+	/**
+	 * Indices {@code order[0..n)}, given in last frame's order, sorted farthest first, where one only
+	 * moves ahead of another that it's farther from the camera than by more than {@code tolerance}.
+	 * In place, allocating nothing.
+	 */
+	static void settle(int[] order, double[] distance, int n, double tolerance)
+	{
+		settle(order, distance, n, tolerance, null, null);
+	}
+
+	/**
+	 * As above, with the tolerance only between two who overlap on screen ({@code box}: 5 to a
+	 * person, see {@link #boxes}; null means everyone overlaps), and none for anyone marked
+	 * {@code fresh} (new this frame).
+	 */
+	static void settle(int[] order, double[] distance, int n, double tolerance, boolean[] fresh, double[] box)
+	{
+		for (int i = 1; i < n; i++)
+		{
+			int k = order[i];
+			double t0 = fresh != null && fresh[k] ? 0 : tolerance;
+			int to = i;
+			for (int j = i - 1; j >= 0; j--)
+			{
+				int o = order[j];
+				boolean over = overlaps(box, k, o);
+				// Past those it's farther than, one after another, as before; and past a near-tie
+				// too, in front of anyone it overlaps and is clearly farther than. Stopping at the
+				// first near-tie, a tightly packed row never re-sorted and, after a slow swing of
+				// the camera, was drawn back to front.
+				if (distance[k] > distance[o] + (over ? t0 : 0) && (over || to == j + 1))
+				{
+					to = j;
+				}
+			}
+			System.arraycopy(order, to, order, to + 1, i - to);
+			order[to] = k;
+		}
+	}
+
+	/** Whether two people's boxes overlap on screen; with no boxes, yes. */
+	static boolean overlaps(double[] box, int a, int b)
+	{
+		if (box == null)
+		{
+			return true;
+		}
+		int i = a * 5;
+		int j = b * 5;
+		if (box[i + 4] == 0 || box[j + 4] == 0)
+		{
+			return false;
+		}
+		return box[i] <= box[j + 1] && box[j] <= box[i + 1] && box[i + 2] <= box[j + 3] && box[j + 2] <= box[i + 3];
+	}
+
+	/** Fill in someone's box (see {@link #boxes}) from where they're drawn this frame. */
+	private void boxFor(Kept k, int index)
+	{
+		int at = index * 5;
+		boxes[at + 4] = 0;
+		if (k.projection == null)
+		{
+			return;
+		}
+		double left = Double.MAX_VALUE;
+		double right = -Double.MAX_VALUE;
+		double top = Double.MAX_VALUE;
+		double bottom = -Double.MAX_VALUE;
+		try
+		{
+			for (int dx = -BOX_REACH; dx <= BOX_REACH; dx += 2 * BOX_REACH)
+			{
+				for (int dz = -BOX_REACH; dz <= BOX_REACH; dz += 2 * BOX_REACH)
+				{
+					for (int dy = 0; dy >= -BOX_HEIGHT; dy -= BOX_HEIGHT)
+					{
+						k.projection.project(k.x + dx, k.y + dy, k.z + dz, projected);
+						if (projected[2] < 50)
+						{
+							return; // by or behind the camera: treated as overlapping nobody
+						}
+						double sx = projected[0] / projected[2];
+						double sy = projected[1] / projected[2];
+						left = Math.min(left, sx);
+						right = Math.max(right, sx);
+						top = Math.min(top, sy);
+						bottom = Math.max(bottom, sy);
+					}
+				}
+			}
+		}
+		catch (RuntimeException e)
+		{
+			return;
+		}
+		boxes[at] = left;
+		boxes[at + 1] = right;
+		boxes[at + 2] = top;
+		boxes[at + 3] = bottom;
+		boxes[at + 4] = 1;
+	}
+
 	/**
 	 * Diagnostics, for a crowd that vanishes for a moment: frames where under half as many people
 	 * were held back to be drawn in order as the frame before; frames where the stack probe held
@@ -197,6 +348,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long blinkOther;
 	/** Held back, then no model to draw them with. */
 	long keptWithoutModel;
+	/** Diagnostics: stackmates left undrawn, by why, one count per person per frame. */
+	long skippedUnconfirmed;
+	long skippedOthersHid;
+	long skippedMoved;
 
 	private TileDraws tileDraws(long tileKey, int frame)
 	{
@@ -256,10 +411,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private final long[] tilesDrawnThisFrame = new long[256];
 	private int tilesDrawnCount;
 	private int tilesDrawnFrame = -1;
-
-	private final Leans leans = new Leans();
-	private final int[] leanCountsX = new int[2 * LEAN_REACH];
-	private final int[] leanCountsZ = new int[2 * LEAN_REACH];
 
 	private Kept[] kept = new Kept[128];
 	private int keptCount;
@@ -390,33 +541,38 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		double cameraX = client.getCameraX();
 		double cameraZ = client.getCameraY();
 		Player local = client.getLocalPlayer();
+		int frame = offsets.frame();
+		int cycle = client.getGameCycle();
+		if (movedNow.length < keptCount)
+		{
+			movedNow = new boolean[kept.length];
+			walkingNow = new boolean[kept.length];
+		}
 		Kept you = null;
 		for (int i = 0; i < keptCount; i++)
 		{
 			Kept k = kept[i];
 			double east = k.x - cameraX;
 			double north = k.z - cameraZ;
-			int animation = k.actor instanceof Player ? ((Player) k.actor).getAnimation() : -1;
-			if (!k.walk && animation != -1)
+			k.who = k.actor instanceof Player ? ((Player) k.actor).getId()
+				: k.actor instanceof NPC ? OffsetTable.CAPACITY + ((NPC) k.actor).getIndex()
+				: -1;
+			// Sorted by where they stand, never by how their body leans: someone who bent to tend a
+			// fire or cast a spell swapped with the person beside them the moment they started, and
+			// again when they stopped. Whether they moved, for the report.
+			movedNow[i] = false;
+			walkingNow[i] = k.walk || k.actor instanceof Actor
+				&& ((Actor) k.actor).getPoseAnimation() != ((Actor) k.actor).getIdlePoseAnimation();
+			int w = k.who;
+			if (w >= 0 && w < WHO_SLOTS)
 			{
-				// Their lean so far: measured from the models drawn in earlier frames (below), so no
-				// model is built just to be measured.
-				try
+				if (stateFrame[w] >= frame - 2 && stateFrame[w] < frame)
 				{
-					Player player = (Player) k.actor;
-					double[] settled = leans.average(player.getId(), animation);
-					int[] lean = settled == null ? null : turn(settled[0], settled[1], k.orientation);
-					if (lean != null)
-					{
-						east += lean[0];
-						north += lean[1];
-						leanedDraws++;
-					}
+					movedNow[i] = Math.abs(k.x - lastX[w]) + Math.abs(k.z - lastZ[w]) > 1;
 				}
-				catch (RuntimeException e)
-				{
-					revealErrors++;
-				}
+				lastX[w] = k.x;
+				lastZ[w] = k.z;
+				stateFrame[w] = frame;
 			}
 			k.distance = Math.sqrt(east * east + north * north) - (k.actor == local ? YOU_FIRST_ON_TIES : 0);
 			if (k.actor == local)
@@ -432,22 +588,118 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				Kept k = kept[i];
 				if (k != you && Math.abs(k.x - you.x) <= NEAR_YOU && Math.abs(k.z - you.z) <= NEAR_YOU)
 				{
-					you.distance = Math.min(you.distance, k.distance - 1);
+					you.distance = Math.min(you.distance, k.distance - 1 - 2 * SORT_TOLERANCE);
 				}
 			}
 		}
-		// The game hands actors over roughly back to front already, so a plain insertion sort is
-		// quick here and, unlike Arrays.sort, allocates nothing.
-		for (int i = 1; i < keptCount; i++)
+		// Last frame's order first, anyone new after them; then farthest first, but nobody passes
+		// anyone they're not clearly farther from the camera than (see SORT_TOLERANCE). Insertion
+		// sorts: quick on an order that's nearly right already, and they allocate nothing.
+		if (order.length < keptCount)
+		{
+			order = new int[kept.length];
+			prior = new int[kept.length];
+			far = new double[kept.length];
+			sorted = new Kept[kept.length];
+			fresh = new boolean[kept.length];
+			boxes = new double[kept.length * 5];
+		}
+		for (int i = 0; i < keptCount; i++)
 		{
 			Kept k = kept[i];
+			order[i] = i;
+			far[i] = k.distance;
+			boolean seen = k.who >= 0 && k.who < WHO_SLOTS && rankFrame[k.who] >= frame - 2 && rankFrame[k.who] <= frame;
+			prior[i] = seen ? rankOf[k.who] : Integer.MAX_VALUE;
+			fresh[i] = !seen;
+			boxFor(k, i);
+		}
+		for (int i = 1; i < keptCount; i++)
+		{
+			int k = order[i];
 			int j = i - 1;
-			while (j >= 0 && kept[j].distance < k.distance)
+			while (j >= 0 && prior[order[j]] > prior[k])
 			{
-				kept[j + 1] = kept[j];
+				order[j + 1] = order[j];
 				j--;
 			}
-			kept[j + 1] = k;
+			order[j + 1] = k;
+		}
+		int camX = client.getCameraX();
+		int camY = client.getCameraY();
+		int camZ = client.getCameraZ();
+		int camYaw = client.getCameraYaw();
+		int camPitch = client.getCameraPitch();
+		boolean cameraStill = camX == lastCamX && camY == lastCamY && camZ == lastCamZ && camYaw == lastCamYaw && camPitch == lastCamPitch;
+		settle(order, far, keptCount, SORT_TOLERANCE, fresh, boxes);
+		lastCamX = camX;
+		lastCamY = camY;
+		lastCamZ = camZ;
+		lastCamYaw = camYaw;
+		lastCamPitch = camPitch;
+		for (int i = 1; i < keptCount; i++)
+		{
+			int a = prior[order[i - 1]];
+			int b = prior[order[i]];
+			// Only swaps that can be seen: two who overlap on screen.
+			if (a != Integer.MAX_VALUE && b != Integer.MAX_VALUE && a > b && overlaps(boxes, order[i - 1], order[i]))
+			{
+				int wa = kept[order[i - 1]].who;
+				int wb = kept[order[i]].who;
+				if (wa >= 0 && wb >= 0)
+				{
+					long pair = (long) Math.min(wa, wb) * WHO_SLOTS + Math.max(wa, wb);
+					Integer when = lastSwap.put(pair, frame);
+					if (when != null && frame - when <= SWAP_BACK_FRAMES)
+					{
+						swapsBack++;
+					}
+					if (lastSwap.size() > 4096)
+					{
+						lastSwap.values().removeIf(f -> frame - f > SWAP_BACK_FRAMES);
+					}
+				}
+				if (cameraStill)
+				{
+					swapsCameraStill++;
+					int x = order[i - 1];
+					int y = order[i];
+					if (movedNow[x] || movedNow[y])
+					{
+						stillSwapsMoved++;
+						if (movedNow[x] && walkingNow[x] || movedNow[y] && walkingNow[y])
+						{
+							stillSwapsWalking++;
+						}
+						else
+						{
+							stillSwapsStanding++;
+						}
+					}
+					else
+					{
+						stillSwapsOther++;
+					}
+				}
+				else
+				{
+					swapsCameraMoving++;
+				}
+			}
+		}
+		for (int i = 0; i < keptCount; i++)
+		{
+			sorted[i] = kept[order[i]];
+		}
+		for (int i = 0; i < keptCount; i++)
+		{
+			kept[i] = sorted[i];
+			sorted[i] = null;
+			if (kept[i].who >= 0 && kept[i].who < WHO_SLOTS)
+			{
+				rankOf[kept[i].who] = i;
+				rankFrame[kept[i].who] = frame;
+			}
 		}
 		for (int i = 0; i < keptCount; i++)
 		{
@@ -469,7 +721,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				if (model == null)
 				{
 					model = k.actor.getModel();
-					sampleLean(k, model);
 				}
 				if (model != null)
 				{
@@ -491,117 +742,6 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			k.actor = null;
 		}
 		keptCount = 0;
-	}
-
-	/** Add this frame's model to a busy player's lean average, for the frames after. */
-	private void sampleLean(Kept k, Model model)
-	{
-		if (model == null || k.walk || !(k.actor instanceof Player))
-		{
-			return;
-		}
-		Player player = (Player) k.actor;
-		int animation = player.getAnimation();
-		if (animation == -1)
-		{
-			return;
-		}
-		double[] middle = middle(model.getVerticesX(), model.getVerticesZ(), model.getVerticesCount(), leanCountsX, leanCountsZ);
-		if (middle != null)
-		{
-			leans.settle(player.getId(), animation, middle[0], middle[1]);
-		}
-	}
-
-	/**
-	 * The middle of a model's body on the ground, (x, z) in the model's own frame: along each way,
-	 * the average of its points once the farthest {@link #LEAN_TRIM} at each end are left out, so a
-	 * rod or a cape hardly counts. Null for an empty model. The count arrays are scratch space,
-	 * {@code 2 * LEAN_REACH} long.
-	 */
-	static double[] middle(float[] xs, float[] zs, int count, int[] countsX, int[] countsZ)
-	{
-		if (xs == null || zs == null)
-		{
-			return null;
-		}
-		int n = Math.min(count, Math.min(xs.length, zs.length));
-		if (n <= 0)
-		{
-			return null;
-		}
-		Arrays.fill(countsX, 0);
-		Arrays.fill(countsZ, 0);
-		for (int i = 0; i < n; i++)
-		{
-			countsX[bucket(xs[i])]++;
-			countsZ[bucket(zs[i])]++;
-		}
-		return new double[]{trimmedAverage(countsX, n), trimmedAverage(countsZ, n)};
-	}
-
-	private static int bucket(float v)
-	{
-		int b = Math.round(v) + LEAN_REACH;
-		return b < 0 ? 0 : b >= 2 * LEAN_REACH ? 2 * LEAN_REACH - 1 : b;
-	}
-
-	/** The average of the points counted, leaving out {@link #LEAN_TRIM} of them at each end. */
-	private static double trimmedAverage(int[] counts, int n)
-	{
-		int skip = (int) (n * LEAN_TRIM);
-		int take = n - 2 * skip;
-		if (take <= 0)
-		{
-			skip = 0;
-			take = n;
-		}
-		double sum = 0;
-		int seen = 0;
-		int taken = 0;
-		for (int b = 0; b < counts.length && taken < take; b++)
-		{
-			int c = counts[b];
-			if (c == 0)
-			{
-				continue;
-			}
-			// Of this bucket's points, those past the ones skipped and within the ones taken.
-			int from = Math.max(seen, skip);
-			int to = Math.min(seen + c, skip + take);
-			if (to > from)
-			{
-				sum += (double) (to - from) * (b - LEAN_REACH);
-				taken += to - from;
-			}
-			seen += c;
-		}
-		return taken == 0 ? 0 : sum / taken;
-	}
-
-	/**
-	 * A middle (x, z) in the model's frame, turned the way the model is drawn (as the renderer
-	 * turns it): the lean on the ground, east and north. Null if it's within
-	 * {@link #LEAN_DEAD_ZONE}; no farther than {@link #MAX_LEAN}.
-	 */
-	static int[] turn(double mx, double mz, int orientation)
-	{
-		int o = orientation & 2047;
-		double sin = Perspective.SINE[o] / 65536.0;
-		double cos = Perspective.COSINE[o] / 65536.0;
-		double east = mx * cos + mz * sin;
-		double north = mz * cos - mx * sin;
-		double length = Math.hypot(east, north);
-		if (length < LEAN_DEAD_ZONE)
-		{
-			return null;
-		}
-		if (length > MAX_LEAN)
-		{
-			east = east * MAX_LEAN / length;
-			north = north * MAX_LEAN / length;
-		}
-		return new int[]{(int) Math.round(east), (int) Math.round(north)};
 	}
 
 	/** Forget everyone kept back, drawing nobody: the frame they belonged to is over. */
@@ -653,6 +793,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			if (!drawn)
 			{
 				probeBlackouts++;
+				probe.backOff(tile, frame);
 			}
 		}
 	}
@@ -981,6 +1122,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				if (lp == null || lp.getX() != x || lp.getY() != z)
 				{
 					td.moved++;
+					skippedMoved++;
 					continue;
 				}
 				int mdx = offsets.dx(id);
@@ -993,11 +1135,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				if (!probe.mayDraw(id, mate, cycle))
 				{
 					td.unconfirmed++;
+					skippedUnconfirmed++;
 					continue; // the game hasn't shown this player recently, e.g. hidden by the server: never draw them
 				}
 				if (!probe.othersAllow(renderCallbacks, mate))
 				{
 					td.othersHid++;
+					skippedOthersHid++;
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
 				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);

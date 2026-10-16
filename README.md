@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1855.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1870.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -33,7 +33,7 @@ turns out to be four friends hanging out.
   photo, or turned to face each other, for the perfect fashionscape screenshot. **Line** and **Arc**
   draw any crowd up in a row or a curve wherever they're standing, for a group shot.
 - **At an anvil, range or fire**, players form a curve around it and all face it, so nobody ends
-  up hitting thin air. A crowd gathered round a fire stays close and faces the fire, whichever side of it they
+  up hitting thin air. A crowd gathered round a fire stays close and faces the fire, never standing in it, whichever side of it they
   end up on. Two players share the space in front of it evenly; extra players fill the
   curve outwards, then stand in the gaps of a second row behind.
 - **At a bank counter or along a riverbank**, players line up side by side along the edge, close
@@ -55,8 +55,8 @@ turns out to be four friends hanging out.
   they're drawn a tile from where they stand: someone behind you could be drawn over you, and an
   alcher's staff or a shield beside you poked through you. Personal Space draws a crowd back to
   front instead, nearest the camera last, so whoever is between you and the camera covers you and
-  whoever is behind you doesn't, the way it really looks, on a slope too. Someone kneeling to cook
-  or leaning into a cast is placed by where their body is, not their feet. Nobody moves out of your way: a crowd
+  whoever is behind you doesn't, the way it really looks, on a slope too. Turning the camera doesn't make
+  people flicker in front of and behind each other. Nobody moves out of your way: a crowd
   huddles as it would wherever you stand, and nobody is ever drawn inside you. Turn on **Draw me
   in front** to be drawn over everyone in your crowd instead, whichever way the camera faces.
 - **Names that follow.** Player Indicators puts a name over where someone really stands, which in
@@ -120,7 +120,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | On/off switch | Spread out crowds, or show the game as normal. The lines under the title say what's happening right now, for example "Spreading 7 players on 3 tiles" and "You're in a row along the counter or wall". |
 | Players per tile | How many players on one tile get their own spot: 2 to 16, with 5 as the sweet spot. Raise it if a busy bank booth leaves a heap of people in the middle; the higher it goes, the further out the crowd reaches to make room. |
 | Hide players below | Off (the default), or a combat level: anyone below it isn't drawn or clickable, and neither is their overhead chat, health bar or hitsplats, as with Entity Hider. With **Hide their chat too** (on by default) their public chat is dropped from the chat box as well, and stays dropped for the session after they walk out of view. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight. |
-| Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. With **Auto-space** on, bank counters, walls and fires stay closer on their own; turn it off and the slider sets the distance everywhere. Changes show live. |
+| Spacing | Close, Normal (a tile apart) or Wide (two tiles apart, the default), or drag the slider. **Use recommended**, at the top of the Crowd card, puts the crowd settings back to the defaults. With **Auto-space** on, bank counters, walls and fires stay closer on their own; turn it off and the slider sets the distance everywhere. Changes show live. |
 | Arrangement | **Smart**: a line along whatever people are facing - a counter, a wall, an anvil, a fire - and a ring out in the open, where there's nothing to line up along. **Circle**: always a ring. **Line**: side by side anywhere, even in the open. **Arc**: a curve, like the crowd round an anvil. |
 | Pose for 2 or 3 players | **Natural**: the way they really face. **Angled**: turned halfway towards each other. **Facing**: towards each other. Players at an anvil, booth or fire keep facing it. |
 | Auto-space | On: the plugin picks sensible distances whatever the Spacing slider says, so groups of 2 or 3 stay close together and people at a bank counter, a wall or a fire stand shoulder to shoulder. Turn it off to unlock the slider: it then sets how far apart everyone stands, handy for photos, though a tight spot or a big crowd on one tile can still keep people closer. |
@@ -144,7 +144,7 @@ help it keep improving:
 - **[Tip the developer](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)** through Stripe. Any amount helps.
 - **Star this repository** on GitHub so more players find it.
 - **Share screenshots** of a busy world with Personal Space on.
-- **Report a problem** or suggest an idea in [Issues](https://github.com/grant9008/personal-space/issues).
+- **Report a problem** or **suggest an idea** in [Issues](https://github.com/grant9008/personal-space/issues), or with the links at the bottom of the sidebar.
   Pressing **Copy report** under Troubleshooting and pasting it in helps a lot.
 
 ## How it works

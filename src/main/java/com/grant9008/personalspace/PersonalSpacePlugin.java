@@ -62,7 +62,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.55";
+	static final String VERSION = "1.8.70";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -169,6 +169,13 @@ public class PersonalSpacePlugin extends Plugin
 	private long resets;
 	private long planDips;
 	private long shimInstalls;
+	/**
+	 * Diagnostics: people who had a spot last tick and, still on the same crowded tile, have none
+	 * now, so they went back to being hidden in its middle.
+	 */
+	private long spotLosses;
+	private final long[] placedTile = new long[OffsetTable.CAPACITY];
+	private final int[] placedTick = new int[OffsetTable.CAPACITY];
 	private int nothingMovedStreak;
 
 	@Provides
@@ -567,9 +574,21 @@ public class PersonalSpacePlugin extends Plugin
 		CrowdPlanner.Plan plan = planner.plan(entries, id -> shownTick[id] == tick, config.spacing(), config.maxStack(),
 			config.arrangement() != PersonalSpaceConfig.Arrangement.CIRCLE, config.includeLocalPlayer(), tick, surroundings(wv));
 		offsets.clearTargets();
+		for (StackSpreader.Placement pl : plan.unplaced)
+		{
+			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY && placedTick[pl.id] == tick - 1 && placedTile[pl.id] == pl.tile)
+			{
+				spotLosses++;
+			}
+		}
 		for (StackSpreader.Placement pl : plan.placements)
 		{
 			offsets.setTarget(pl.id, pl.dx, pl.dz);
+			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY)
+			{
+				placedTile[pl.id] = pl.tile;
+				placedTick[pl.id] = tick;
+			}
 		}
 		// Everyone on a crowded tile goes in the table, not just those given a spot: the probe needs
 		// them there to find out whether the game is willing to show them.
@@ -697,6 +716,9 @@ public class PersonalSpacePlugin extends Plugin
 	 * Client thread. The world around crowded tiles: the main world's, or a boat's for tiles on
 	 * its deck. A collision map is only read if a tile on it needs it.
 	 */
+	/** How far clear of a fire's tile anyone is drawn, in local units. */
+	static final int FIRE_CLEARANCE = 20;
+
 	private CrowdPlanner.Surroundings surroundings(WorldView wv)
 	{
 		return new CrowdPlanner.Surroundings()
@@ -718,12 +740,47 @@ public class PersonalSpacePlugin extends Plugin
 				});
 			}
 
+			/** Which tiles have a fire on them, looked up once a tick. */
+			private final Map<Long, Boolean> fireAt = new HashMap<>();
+
+			private boolean fireOn(WorldView world, int plane, int sceneX, int sceneY)
+			{
+				long key = ((long) world.getId() << 44) | ((long) (plane & 0xF) << 40) | ((long) (sceneX & 0xFFFFF) << 20) | (sceneY & 0xFFFFF);
+				return fireAt.computeIfAbsent(key, k -> hasFire(world, plane, sceneX, sceneY));
+			}
+
 			@Override
 			public boolean canStand(long tile, int dx, int dz)
 			{
 				int x = StackRegistry.sceneX(tile) * 128 + 64;
 				int z = StackRegistry.sceneY(tile) * 128 + 64;
-				return collision(tile).canStand(StackRegistry.planeOf(StackRegistry.plane(tile)), x, z, x + dx, z + dz);
+				int plane = StackRegistry.planeOf(StackRegistry.plane(tile));
+				if (!collision(tile).canStand(plane, x, z, x + dx, z + dz))
+				{
+					return false;
+				}
+				// Never drawn standing in a fire. Some campfires, like the Forester's Campfire at the
+				// Grand Exchange, can be walked over, and a crowd round one was spread right on top
+				// of it, hiding the very fire they were gathered at. A little to spare all round, as
+				// a body is wider than its feet.
+				WorldView world = world(tile);
+				if (world == null)
+				{
+					return true;
+				}
+				int px = x + dx;
+				int pz = z + dz;
+				for (int cx : new int[]{px - FIRE_CLEARANCE, px + FIRE_CLEARANCE})
+				{
+					for (int cz : new int[]{pz - FIRE_CLEARANCE, pz + FIRE_CLEARANCE})
+					{
+						if (cx >= 0 && cz >= 0 && fireOn(world, plane, cx >> 7, cz >> 7))
+						{
+							return false;
+						}
+					}
+				}
+				return true;
 			}
 
 			@Override
@@ -967,6 +1024,7 @@ public class PersonalSpacePlugin extends Plugin
 			s.sceneMismatchesPerSec = perSecond(w.sceneMismatches - lastSceneMismatches, seconds);
 		}
 		s.resets = resets;
+		s.spotLosses = spotLosses;
 		s.planDips = planDips;
 		s.shimInstalls = shimInstalls;
 		if (w != null)
@@ -976,7 +1034,6 @@ public class PersonalSpacePlugin extends Plugin
 			s.revealErrors = w.revealErrors;
 			s.walkDraws = w.walkDraws;
 			s.orderedDraws = w.orderedDraws;
-			s.leanedDraws = w.leanedDraws;
 			s.keptDips = w.keptDips;
 			s.probeBlackouts = w.probeBlackouts;
 			s.droppedUndrawn = w.droppedUndrawn;
@@ -986,6 +1043,16 @@ public class PersonalSpacePlugin extends Plugin
 			s.blinkMoved = w.blinkMoved;
 			s.blinkOther = w.blinkOther;
 			s.keptWithoutModel = w.keptWithoutModel;
+			s.skippedUnconfirmed = w.skippedUnconfirmed;
+			s.skippedOthersHid = w.skippedOthersHid;
+			s.skippedMoved = w.skippedMoved;
+			s.swapsCameraMoving = w.swapsCameraMoving;
+			s.swapsCameraStill = w.swapsCameraStill;
+			s.stillSwapsMoved = w.stillSwapsMoved;
+			s.stillSwapsOther = w.stillSwapsOther;
+			s.stillSwapsWalking = w.stillSwapsWalking;
+			s.stillSwapsStanding = w.stillSwapsStanding;
+			s.swapsBack = w.swapsBack;
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
@@ -1006,6 +1073,7 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			s.probeHeld = pr.heldTotal;
 			s.probeGaveUp = pr.gaveUpTotal;
+			s.probeBackOffs = pr.backOffs;
 		}
 		s.shapeChanges = planner.shapeChanges();
 		s.spotMoves = planner.spotMoves();
