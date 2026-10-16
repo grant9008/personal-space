@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1874.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1877.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -97,10 +97,11 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Names over players | Names over the bodies instead of the pile, with your Player Indicators settings. Turn off Player Indicators' name position, or you'll see two. |
 | Hover shows who / Arrow to their tile | Hover someone drawn away from their tile to see their name and level, and an arrow to where they really stand. |
 | Draw me in front | Always draw yourself over the people in your crowd. |
+| Depth between players | On: each part of each body is hidden only where someone is really in front of it, so nothing pops as the camera turns. Off: each person is drawn whole, as the game does, which some prefer for photos. |
 | Move my character too | You take a spot as well, at the front at a counter or fishing spot. |
 | Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |
 | Show sidebar button | Hide the sidebar button; every setting is still in the plugin's configuration. |
-| Troubleshooting | Live status and checks, **Depth between players**, and **Copy report** for bug reports. |
+| Troubleshooting | Live status and checks, and **Copy report** for bug reports. |
 
 If crowds aren't spreading, open **Troubleshooting**: the status at the top says why (for example
 the GPU plugin is off, or you're in a PvP area) and what to do.

@@ -80,6 +80,8 @@ final class Snapshot
 	long hiddenInYourWay;
 	/** Moving players drawn without a walk animation because they were busy with an emote or action; total. */
 	long walkSkippedBusy;
+	String busyAnimations = "";
+	long driftFrames;
 	/** Moving players drawn without a walk animation because it couldn't be loaded; total. */
 	long walkSkippedNoAnimation;
 	int testOffset;

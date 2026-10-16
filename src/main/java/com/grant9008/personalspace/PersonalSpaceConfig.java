@@ -324,7 +324,8 @@ public interface PersonalSpaceConfig extends Config
 		name = "Mode",
 		description = "Leave on 'Spread stacked players'. The test mode moves just your own character, to check the plugin works.",
 		position = 11,
-		section = TROUBLESHOOTING
+		section = TROUBLESHOOTING,
+		hidden = true
 	)
 	default Mode mode()
 	{
@@ -337,7 +338,8 @@ public interface PersonalSpaceConfig extends Config
 		name = "Test offset (units)",
 		description = "Test mode only. How far east to draw your own character. 128 is one tile.",
 		position = 12,
-		section = TROUBLESHOOTING
+		section = TROUBLESHOOTING,
+		hidden = true
 	)
 	default int testOffset()
 	{
@@ -347,9 +349,8 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_DEPTH,
 		name = "Depth between players",
-		description = "On (the default): crowds are drawn so each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front of and behind people as the camera turns. Turn off only if you see glitches inside characters.",
-		position = 13,
-		section = TROUBLESHOOTING
+		description = "On (the default): crowds are drawn so each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front of and behind people as the camera turns. Off: each person is drawn whole, one over another, as the game does it.",
+		position = 5
 	)
 	default boolean depthBetweenPlayers()
 	{

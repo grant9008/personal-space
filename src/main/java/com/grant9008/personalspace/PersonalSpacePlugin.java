@@ -62,7 +62,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.75";
+	static final String VERSION = "1.8.77";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -187,6 +187,11 @@ public class PersonalSpacePlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		if (config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME)
+		{
+			// Test mode has no switch any more: nobody is left stuck in it.
+			configManager.setConfiguration(PersonalSpaceConfig.GROUP, PersonalSpaceConfig.KEY_MODE, PersonalSpaceConfig.Mode.SPREAD);
+		}
 		probe = new StackProbe(client, offsets, stacks);
 		renderCallbackManager.register(probe);
 		levelFilter = new LevelFilter(client);
@@ -1026,6 +1031,7 @@ public class PersonalSpacePlugin extends Plugin
 			s.sceneMismatchesPerSec = perSecond(w.sceneMismatches - lastSceneMismatches, seconds);
 		}
 		s.resets = resets;
+		s.driftFrames = offsets.driftFrames;
 		s.insideYouHidden = planner.insideYouHidden;
 		s.spotLosses = spotLosses;
 		s.planDips = planDips;
@@ -1059,6 +1065,12 @@ public class PersonalSpacePlugin extends Plugin
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
+			StringBuilder top = new StringBuilder();
+			w.busyAnimations.entrySet().stream()
+				.sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+				.limit(4)
+				.forEach(e -> top.append(top.length() == 0 ? "" : ", ").append(e.getKey()).append(" x").append(e.getValue()));
+			s.busyAnimations = top.toString();
 			s.walkSkippedNoAnimation = w.walkSkippedNoAnimation;
 		}
 		countedWrapper = w;

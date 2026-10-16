@@ -223,6 +223,8 @@ final class StatusSummary
 			.append(", neither ").append(s.stillSwapsOther).append(')')
 			.append(", swapped straight back: ").append(s.swapsBack)
 			.append(", no walk (busy): ").append(s.walkSkippedBusy)
+			.append(s.busyAnimations.isEmpty() ? "" : " (animations " + s.busyAnimations + ")")
+			.append(", short moves drifting: ").append(s.driftFrames)
 			.append(", no walk (animation not loaded): ").append(s.walkSkippedNoAnimation)
 			.append(", held for confirmation: ").append(s.probeHeld)
 			.append(", never confirmed: ").append(s.probeGaveUp)

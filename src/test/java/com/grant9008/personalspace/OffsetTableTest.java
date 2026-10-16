@@ -56,14 +56,18 @@ public class OffsetTableTest
 	}
 
 	@Test
-	public void aShortCorrectionBetweenTwoSpotsStillDrifts()
+	public void aTinyShiftLeavesThemWhereTheyStandAndABiggerOneWalks()
 	{
 		OffsetTable t = new OffsetTable();
 		t.setTarget(5, 48, 0);
 		t.advance(0.5f);
 		Assert.assertEquals(48, t.dx(5));
-		t.setTarget(5, 68, 0);
+		t.setTarget(5, 58, 0);
+		t.advance(0.1f);
+		Assert.assertEquals("a 10-unit shift: no slide, they stay put", 48, t.dx(5));
+		Assert.assertFalse(t.isWalking(5));
+		t.setTarget(5, 70, 0);
 		t.advance(0.016f);
-		Assert.assertFalse("a 20-unit correction drifts", t.isWalking(5));
+		Assert.assertTrue("a 22-unit shift is a step", t.isWalking(5));
 	}
 }

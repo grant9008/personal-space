@@ -104,10 +104,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
-	private final ToggleSwitch testModeSwitch = new ToggleSwitch();
 	private final ToggleSwitch depthTestSwitch = new ToggleSwitch();
-	private final JSlider testOffsetSlider = new JSlider(PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET, 32);
-	private final JLabel testOffsetValue = new JLabel();
 	private final JPanel checksPanel = new JPanel(new GridBagLayout());
 	private final List<JLabel[]> checkRows = new ArrayList<>();
 	private final JButton copyButton = new JButton("Copy report");
@@ -220,10 +217,7 @@ final class PersonalSpacePanel extends PluginPanel
 		inFrontSwitch.setOn(config.drawMeInFront());
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		combatSwitch.setOn(config.pauseInCombat());
-		testModeSwitch.setOn(config.mode() == PersonalSpaceConfig.Mode.TEST_SHIFT_ME);
 		depthTestSwitch.setOn(config.depthBetweenPlayers());
-		setSliderQuietly(testOffsetSlider, clamp(config.testOffset(), PersonalSpaceConfig.MIN_TEST_OFFSET, PersonalSpaceConfig.MAX_TEST_OFFSET));
-		testOffsetValue.setText(testOffsetSlider.getValue() + " units");
 		setEverydayEnabled(config.active());
 	}
 
@@ -439,6 +433,11 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Depth between players", depthTestSwitch,
+			"On (the default): each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front and behind as you turn the camera. Off: each person is drawn whole, one over another, as the game does it. GPU plugin and 117 HD."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Names over players", namesSwitch,
 			"On: names follow the bodies. Who gets a name, the colours and the rank icons are Player Indicators' settings, so change them there. Turn off Player Indicators' name position (or the plugin) so names aren't doubled."), c);
 
@@ -492,23 +491,6 @@ final class PersonalSpacePanel extends PluginPanel
 		GridBagConstraints b = column();
 		b.insets = new Insets(4, 0, 6, 0);
 		troubleshootingBody.add(buildStatus(), b);
-
-		b.gridy++;
-		b.insets = new Insets(4, 0, 0, 0);
-		troubleshootingBody.add(switchRow("Test: shift only me", testModeSwitch,
-			"Moves just your own character a little east, to check the plugin is working."), b);
-
-		b.gridy++;
-		troubleshootingBody.add(labelWithValue("Test distance", testOffsetValue), b);
-		b.gridy++;
-		b.insets = new Insets(0, 0, 0, 0);
-		testOffsetSlider.setToolTipText(tip("How far test mode moves you. 128 is one tile."));
-		troubleshootingBody.add(slider(testOffsetSlider), b);
-
-		b.gridy++;
-		b.insets = new Insets(8, 0, 0, 0);
-		troubleshootingBody.add(switchRow("Depth between players", depthTestSwitch,
-			"On: each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front and behind as you turn the camera. Turn off only if you see glitches inside characters."), b);
 
 		b.gridy++;
 		b.insets = new Insets(8, 0, 0, 0);
@@ -652,16 +634,6 @@ final class PersonalSpacePanel extends PluginPanel
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
 		depthTestSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DEPTH, on));
-		testModeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_MODE,
-			on ? PersonalSpaceConfig.Mode.TEST_SHIFT_ME : PersonalSpaceConfig.Mode.SPREAD));
-		testOffsetSlider.addChangeListener(e ->
-		{
-			testOffsetValue.setText(testOffsetSlider.getValue() + " units");
-			if (!testOffsetSlider.getValueIsAdjusting() && testOffsetSlider.getValue() != config.testOffset())
-			{
-				write(PersonalSpaceConfig.KEY_TEST_OFFSET, testOffsetSlider.getValue());
-			}
-		});
 	}
 
 	/**
@@ -707,6 +679,7 @@ final class PersonalSpacePanel extends PluginPanel
 		posePills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
 		inFrontSwitch.setEnabled(enabled);
+		depthTestSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);
 		combatSwitch.setEnabled(enabled);
 	}

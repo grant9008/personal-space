@@ -18,8 +18,12 @@ final class OffsetTable
 
 	/** Walking pace: the game's own, one tile (128 units) every 0.6 seconds. */
 	static final float WALK_SPEED = 128f / 0.6f;
-	/** Moves between two spots shorter than this just drift into place, with no walk animation, so small corrections don't look like shuffling. */
-	static final float MIN_WALK_DISTANCE = 28f;
+	/**
+	 * Moves between two spots shorter than this just drift into place, with no walk animation, so
+	 * small corrections don't look like shuffling. At 28, a quarter of a tile, someone moving back
+	 * a spot in a packed ring slid there instead of walking.
+	 */
+	static final float MIN_WALK_DISTANCE = 16f;
 	/**
 	 * Stepping out of the middle of a tile, or back into it, walks from this far. That is a real
 	 * step even when it's short: two at a bank stand half a body's width either side of the middle,
@@ -43,6 +47,9 @@ final class OffsetTable
 	private final boolean[] isActive = new boolean[CAPACITY];
 	private int activeCount;
 	private int frame;
+	/** Diagnostics: frames someone was moving without walking because the move was short. */
+	long driftFrames;
+
 	/** The farthest anyone is drawn from their real spot right now, in local units. */
 	private float maxOffset;
 
@@ -125,6 +132,15 @@ final class OffsetTable
 		{
 			return;
 		}
+		// Someone standing in their spot stays exactly there when it only shifts a little, as a crowd
+		// tightens or loosens round them: they used to glide the few units over, and in a busy place
+		// people slid about all the time. Once it has shifted far enough to be worth a step, they walk.
+		boolean resting = !walking[id] && (curX[id] != 0f || curZ[id] != 0f) && (dx != 0 || dz != 0);
+		if (resting && Math.hypot(dx - curX[id], dz - curZ[id]) < MIN_WALK_DISTANCE)
+		{
+			dx = Math.round(curX[id]);
+			dz = Math.round(curZ[id]);
+		}
 		tgtX[id] = dx;
 		tgtZ[id] = dz;
 		if (!isActive[id] && (dx != 0 || dz != 0))
@@ -200,6 +216,7 @@ final class OffsetTable
 		{
 			if (dist < (stepInOrOut ? MIN_STEP_DISTANCE : MIN_WALK_DISTANCE))
 			{
+				driftFrames++;
 				return; // a small correction: drift, don't start a walk
 			}
 			walking[id] = true;

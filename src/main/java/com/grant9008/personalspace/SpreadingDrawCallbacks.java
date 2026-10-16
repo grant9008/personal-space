@@ -96,6 +96,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long passMissedFrames;
 	/** Moving players drawn without walk frames because they were busy with an emote or action. */
 	long walkSkippedBusy;
+	/** Diagnostics: which animations kept people from walking (animation id to frames), for the report. */
+	final Map<Integer, Long> busyAnimations = new HashMap<>();
 	/** Moving players drawn without walk frames because the animation couldn't be loaded (yet). */
 	long walkSkippedNoAnimation;
 
@@ -967,6 +969,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		if (player.getAnimation() != -1)
 		{
 			walkSkippedBusy++;
+			if (busyAnimations.size() < 64 || busyAnimations.containsKey(player.getAnimation()))
+			{
+				busyAnimations.merge(player.getAnimation(), 1L, Long::sum);
+			}
 			return null;
 		}
 		int walk = player.getWalkAnimation();
