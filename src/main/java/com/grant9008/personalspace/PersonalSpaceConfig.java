@@ -35,6 +35,8 @@ public interface PersonalSpaceConfig extends Config
 	int MAX_HIDE_BELOW = 126;
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_DEPTH = "depthBetweenPlayers";
+	String KEY_WALK_WHILE_BUSY = "walkWhileBusy";
+	String KEY_CLICK_PAST = "clickPastMoved";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
 	int MIN_STACK = 2;
@@ -353,6 +355,28 @@ public interface PersonalSpaceConfig extends Config
 		position = 5
 	)
 	default boolean depthBetweenPlayers()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = KEY_WALK_WHILE_BUSY,
+		name = "Walk while busy",
+		description = "On (the default): anyone doing something as they walk, alching on the run say, is drawn walking. Off: as the game draws them, gliding along in the pose of what they're doing.",
+		position = 5
+	)
+	default boolean walkWhileBusy()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = KEY_CLICK_PAST,
+		name = "Click past moved players",
+		description = "On (the default): using an item or spell on what you see (a fire, a booth, the ground), someone drawn away from where they really stand, or hidden in a crowd, doesn't take the left-click. Right-click still lists them.",
+		position = 5
+	)
+	default boolean clickPastMoved()
 	{
 		return true;
 	}

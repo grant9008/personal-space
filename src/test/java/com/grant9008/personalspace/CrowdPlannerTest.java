@@ -3138,6 +3138,72 @@ public class CrowdPlannerTest
 	}
 
 	@Test
+	public void beSideAFireTheSpotNearestItIsYours()
+	{
+		// Tending a fire with someone on your tile who was just standing about with their back to
+		// it, you were drawn further off than them. Wherever the fire and the camera are, and
+		// however many are with you, your spot is the one nearest the fire.
+		int[][] fires = {{0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}, {-1, 0}, {-1, 1}};
+		int[][] cameras = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+		int checked = 0;
+		for (int[] at : fires)
+		{
+			CrowdPlanner.Surroundings fire = new CrowdPlanner.Surroundings()
+			{
+				public boolean canStand(long tile, int dx, int dz) { return true; }
+				public boolean facesObstacle(long tile, double angle) { return false; }
+				public boolean isCounter(long tile, double angle) { return false; }
+				public boolean facesFire(long tile, double angle) { return false; }
+				public List<int[]> firesNear(long tile)
+				{
+					List<int[]> out = new ArrayList<>();
+					out.add(at);
+					return out;
+				}
+			};
+			int toFire = OffsetTable.facing(at[0], at[1]);
+			for (int others = 1; others <= 3; others++)
+			{
+				for (int[] camera : cameras)
+				{
+					CrowdPlanner planner = new CrowdPlanner();
+					cameraAt(planner, camera[0], camera[1]);
+					List<StackSpreader.Entry> here = new ArrayList<>();
+					for (int i = 1; i <= others; i++)
+					{
+						here.add(new StackSpreader.Entry(i, TILE, false, i % 2 == 1 ? (toFire + 1024) % 2048 : toFire));
+					}
+					for (int t = 1; t <= 5; t++)
+					{
+						planner.plan(here, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, fire);
+					}
+					here.add(new StackSpreader.Entry(99, TILE, true, toFire));
+					for (int t = 6; t <= 20; t++)
+					{
+						CrowdPlanner.Plan plan = planner.plan(here, q -> true, PersonalSpaceConfig.SPACING_NORMAL, 16, true, true, t, fire);
+						int[] faced = plan.fires.get(TILE);
+						if (t < 12 || faced == null)
+						{
+							continue;
+						}
+						Map<Integer, int[]> now = spots(plan);
+						double yours = Math.hypot(now.get(99)[0] - faced[0], now.get(99)[1] - faced[1]);
+						for (Map.Entry<Integer, int[]> o : now.entrySet())
+						{
+							double theirs = Math.hypot(o.getValue()[0] - faced[0], o.getValue()[1] - faced[1]);
+							Assert.assertTrue("fire " + at[0] + "," + at[1] + ", camera " + camera[0] + "," + camera[1] + ", " + others
+								+ " with you, tick " + t + ": you're " + (int) yours + " from the fire, player " + o.getKey() + " " + (int) theirs,
+								yours <= theirs + CrowdPlanner.NEARER_THE_FIRE);
+						}
+						checked++;
+					}
+				}
+			}
+		}
+		Assert.assertTrue("never laid out round the fire", checked > 0);
+	}
+
+	@Test
 	public void aPairAtAFireBesideYouKeepsItsShapeUnlessYouAskToBeDrawnFirst()
 	{
 		// A pair at a fire; you stand on the tile diagonally beside theirs, the camera off to one
@@ -3420,6 +3486,110 @@ public class CrowdPlannerTest
 			last = now;
 		}
 		Assert.assertTrue("the people on the fire moved " + moves + " times", moves <= 3);
+	}
+
+	@Test
+	public void nobodyIsLeftStandingInACampfireWhileThereIsRoomBesideIt()
+	{
+		// A busy campfire's crowd comes and goes. Everyone kept their spot round it while it stayed
+		// clear, and the gaps left between them could be too small for anyone new, who waited in the
+		// middle, drawn standing in the flames, though turning the plugin off and on found room for
+		// them all. Nobody waits where there's room, and whoever does wait isn't drawn in the fire.
+		CrowdPlanner.Surroundings campfire = campfireUnderfoot(new boolean[]{true});
+		java.util.Random rnd = new java.util.Random(11);
+		CrowdPlanner planner = new CrowdPlanner();
+		List<Integer> onIt = new ArrayList<>();
+		int nextId = 1;
+		int waited = 0;
+		for (int t = 1; t <= 600; t++)
+		{
+			if (onIt.size() < 3 || onIt.size() < 14 && rnd.nextInt(100) < 30)
+			{
+				onIt.add(nextId++);
+			}
+			if (onIt.size() > 3 && rnd.nextInt(100) < 25)
+			{
+				onIt.remove(rnd.nextInt(onIt.size()));
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int id : onIt)
+			{
+				still.add(new StackSpreader.Entry(id, TILE, false, (id * 300) % 2048, true));
+			}
+			CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.DEFAULT_STACK,
+				true, false, t, campfire);
+			CrowdPlanner.Plan afresh = new CrowdPlanner().plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE,
+				PersonalSpaceConfig.DEFAULT_STACK, true, false, t, campfire);
+			int placed = spots(plan).size();
+			int placedAfresh = spots(afresh).size();
+			Assert.assertTrue("tick " + t + ": " + placed + " of " + onIt.size() + " given a spot, " + placedAfresh + " laid out afresh",
+				placed >= placedAfresh);
+			if (placed < onIt.size())
+			{
+				waited++;
+				Assert.assertTrue("tick " + t + ": someone waiting is drawn standing in the fire", plan.middleOutOfSight.contains(TILE));
+			}
+		}
+		Assert.assertTrue("the crowd never outgrew the spots round the fire: " + waited, waited > 0);
+	}
+
+	@Test
+	public void nobodyBesideACampfireIsDrawnOnTopOfSomeoneStandingNextToIt()
+	{
+		// Drawn at the middle of a side of the fire, 43 from someone standing in the middle of the
+		// tile beyond it, the two took turns showing through each other.
+		CrowdPlanner.Surroundings campfire = campfireUnderfoot(new boolean[]{true});
+		for (boolean everySideTaken : new boolean[]{false, true})
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			still.add(new StackSpreader.Entry(1, TILE, false, 1536, true));
+			int[] before = null;
+			for (int t = 1; t <= 30; t++)
+			{
+				if (t == 10)
+				{
+					// Someone comes to stand next to the fire, by the side they're drawn at.
+					Assert.assertNotNull("alone on the fire, they stand beside it", before);
+					int nx = before[0] > 0 ? 51 : before[0] < 0 ? 49 : 50;
+					int nz = before[1] > 0 ? 51 : before[1] < 0 ? 49 : 50;
+					still.add(new StackSpreader.Entry(2, StackRegistry.key(0, nx, nz), false, 0, false));
+					if (everySideTaken)
+					{
+						int id = 3;
+						for (int[] side : new int[][]{{51, 50}, {49, 50}, {50, 51}, {50, 49}})
+						{
+							if (side[0] != nx || side[1] != nz)
+							{
+								still.add(new StackSpreader.Entry(id++, StackRegistry.key(0, side[0], side[1]), false, 0, false));
+							}
+						}
+					}
+				}
+				CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE,
+					PersonalSpaceConfig.DEFAULT_STACK, true, false, t, campfire);
+				int[] spot = spots(plan).get(1);
+				if (spot != null)
+				{
+					for (StackSpreader.Entry other : still)
+					{
+						if (other.id == 1)
+						{
+							continue;
+						}
+						double gap = Math.hypot(50 * 128 + spot[0] - StackRegistry.sceneX(other.tile) * 128,
+							50 * 128 + spot[1] - StackRegistry.sceneY(other.tile) * 128);
+						Assert.assertTrue("tick " + t + ": drawn " + Math.round(gap) + " from someone standing by the fire",
+							gap >= 48);
+					}
+				}
+				if (t >= 12 && !everySideTaken)
+				{
+					Assert.assertNotNull("tick " + t + ": with room on the other sides, they stand there", spot);
+				}
+				before = spot;
+			}
+		}
 	}
 
 	@Test

@@ -64,4 +64,41 @@ public class DrawOrderTest
 		Assert.assertEquals(2000, SpreadingDrawCallbacks.turnTowards(0, 1536, 48));
 		Assert.assertEquals(510, SpreadingDrawCallbacks.turnTowards(500, 510, 48));
 	}
+
+	@Test
+	public void aMovingPlayerIsFiledUnderTheTileTheyAreSteppingOnto()
+	{
+		// Tile (10, 10)'s middle is (1344, 1344).
+		Assert.assertArrayEquals(new int[]{10, 10, 10, 11}, SpreadingDrawCallbacks.movingSpan(1344, 1344, 1024)); // north
+		Assert.assertArrayEquals(new int[]{10, 9, 10, 10}, SpreadingDrawCallbacks.movingSpan(1344, 1344, 0)); // south
+		Assert.assertArrayEquals(new int[]{9, 10, 10, 10}, SpreadingDrawCallbacks.movingSpan(1344, 1344, 512)); // west
+		// Half-way east across the edge of tile 10 into 11, stepping on into 12.
+		Assert.assertArrayEquals(new int[]{10, 10, 12, 10}, SpreadingDrawCallbacks.movingSpan(1408, 1344, 1536));
+		// North-east: both ways.
+		Assert.assertArrayEquals(new int[]{10, 10, 11, 11}, SpreadingDrawCallbacks.movingSpan(1344, 1344, 1280));
+	}
+
+	@Test
+	public void someoneDealingWithAClerkFacesHimFromWhereTheyreDrawn()
+	{
+		// The game's orientations: 0 faces south, 512 west, 1024 north, 1536 east.
+		Assert.assertEquals("clerk due south", 0, SpreadingDrawCallbacks.facingToward(0, 0, 0, -256, -1));
+		Assert.assertEquals("clerk due west", 512, SpreadingDrawCallbacks.facingToward(0, 0, -256, 0, -1));
+		Assert.assertEquals("clerk due north", 1024, SpreadingDrawCallbacks.facingToward(0, 0, 0, 256, -1));
+		Assert.assertEquals("clerk due east", 1536, SpreadingDrawCallbacks.facingToward(0, 0, 256, 0, -1));
+		// Drawn a third of a tile east of where they stand, they turn a little west, towards him.
+		int turned = SpreadingDrawCallbacks.facingToward(42, 0, 0, 256, -1);
+		Assert.assertTrue("turned towards the clerk: " + turned, turned < 1024 && turned > 1024 - 128);
+		Assert.assertEquals("on top of them: their own rule", -1, SpreadingDrawCallbacks.facingToward(5, 5, 5, 5, -1));
+		Assert.assertEquals("too far: their own rule", -1, SpreadingDrawCallbacks.facingToward(0, 0, 0, 20 * 128, -1));
+	}
+
+	@Test
+	public void onlySomeoneDrawnAwayFromWhereTheyStandStepsAsideForTheClick()
+	{
+		Assert.assertTrue("drawn beside the fire", PersonalSpacePlugin.movedAway(7, 85, 0));
+		Assert.assertTrue(PersonalSpacePlugin.movedAway(7, 0, -40));
+		Assert.assertFalse("standing where they are", PersonalSpacePlugin.movedAway(7, 0, 0));
+		Assert.assertFalse("no such player", PersonalSpacePlugin.movedAway(-1, 85, 0));
+	}
 }

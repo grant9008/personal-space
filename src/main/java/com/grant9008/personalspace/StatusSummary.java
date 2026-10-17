@@ -174,6 +174,8 @@ final class StatusSummary
 			.append(", move me ").append(yesNo(s.includeLocal))
 			.append(", draw me in front ").append(yesNo(s.drawMeInFront))
 			.append(", depth between players ").append(yesNo(s.depthTest))
+			.append(", walk while busy ").append(yesNo(s.walkWhileBusy))
+			.append(", click past moved ").append(yesNo(s.clickPast))
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 			.append(", pose ").append(s.pose)
 			.append(", names over players ").append(yesNo(s.names))
@@ -216,6 +218,8 @@ final class StatusSummary
 			.append(" (at fires: blackouts ").append(s.fireBlackouts)
 			.append(" unconfirmed ").append(s.fireUnconfirmed).append(")")
 			.append(", gave the middle to who's shown there: ").append(s.middleKeptSteady)
+			.append(", drawn though the game had no room on their tile: ").append(s.refusedDrawn)
+			.append(" (alone there ").append(s.aloneRefusedDrawn).append(", walking across ").append(s.movingRefusedDrawn).append(')')
 			.append(", waits for a break: paused ").append(s.waitBreaks)
 			.append(" ran out ").append(s.waitTimeouts)
 			.append(" not waited (never pauses) ").append(s.waitSkipped)
@@ -228,6 +232,12 @@ final class StatusSummary
 			.append(", standing ").append(s.stillSwapsStanding)
 			.append(", neither ").append(s.stillSwapsOther).append(')')
 			.append(", swapped straight back: ").append(s.swapsBack)
+			.append(", walks drawn with legs still: ").append(s.walksLegsStill)
+			.append(" (to a spot ").append(s.legsStillBy[0])
+			.append(", to a spot busy ").append(s.legsStillBy[1])
+			.append(", walking off ").append(s.legsStillBy[2])
+			.append(", walking off busy ").append(s.legsStillBy[3])
+			.append(s.legsStillAnims.isEmpty() ? "" : "; walk animations " + s.legsStillAnims).append(')')
 			.append(", walked while busy: ").append(s.walkBusy)
 			.append(s.busyAnimations.isEmpty() ? "" : " (animations " + s.busyAnimations + ")")
 			.append(", no walk (busy): ").append(s.walkSkippedBusy)
@@ -238,6 +248,8 @@ final class StatusSummary
 			.append(", between spots ").append(s.slideBusyBetween)
 			.append(", into the middle ").append(s.slideBusyToMiddle).append(')')
 			.append(" walking off ").append(s.slideWalkingOff)
+			.append(" (legs kept pace ").append(s.legsMatched)
+			.append(", walked while busy on the move ").append(s.movingBusyWalks).append(')')
 			.append(" other ").append(s.slideOther)
 			.append(", no walk (animation not loaded): ").append(s.walkSkippedNoAnimation)
 			.append(", held for confirmation: ").append(s.probeHeld)
@@ -256,6 +268,8 @@ final class StatusSummary
 			.append(", stacked but not shown by the game: ").append(s.unseenStacked).append('\n');
 		b.append("Your tile: ").append(s.yourShape == null ? "not being spread" : s.yourShape).append('\n');
 		b.append("Nearest spread tile: ").append(s.nearestTile == null ? "none" : s.nearestTile).append('\n');
+		b.append("Sliding most (seen in the last minute): ").append(s.sliding == null ? "nobody" : s.sliding).append('\n');
+		b.append("Flickering most (seen in the last minute): ").append(s.flickering == null ? "nobody" : s.flickering).append('\n');
 		b.append("Hidden longest (seen in the last minute): ").append(s.longestHidden == null ? "nobody over a second" : s.longestHidden).append('\n');
 		return b.toString();
 	}

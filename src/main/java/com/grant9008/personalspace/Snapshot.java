@@ -36,6 +36,8 @@ final class Snapshot
 	boolean includeLocal;
 	boolean drawMeInFront;
 	boolean depthTest;
+	boolean walkWhileBusy;
+	boolean clickPast;
 	boolean names;
 	boolean hover;
 	boolean hoverArrow;
@@ -85,6 +87,25 @@ final class Snapshot
 	long waitSkipped;
 	/** Who went longest undrawn lately and why, or null. */
 	String longestHidden;
+	/** Who flickered most lately (undrawn for under a second, again and again) and why, or null. */
+	String flickering;
+	/** Players drawn at their spot although the game had no room for them on their tile; frames, total. */
+	long refusedDrawn;
+	/** ...of which alone on their tile, not moved at all. */
+	long aloneRefusedDrawn;
+	/** ...and walking across a full tile (a campfire's). */
+	long movingRefusedDrawn;
+	/** Walks drawn whose body kept the same shape too long to be walking: all, and of busy people. */
+	long walksLegsStill;
+	long walksLegsStillBusy;
+	long[] legsStillBy = new long[4];
+	String legsStillAnims = "";
+	/** Who slid most lately (drawn moving with no walk to match), how and how far, or null. */
+	String sliding;
+	/** Frames someone walking off a spot was drawn with legs keeping pace with their body; total. */
+	long legsMatched;
+	/** Frames someone walking for real while busy was drawn walking (Walk while busy); total. */
+	long movingBusyWalks;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass; should stay 0. */
 	long passMissedFrames;
 	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */

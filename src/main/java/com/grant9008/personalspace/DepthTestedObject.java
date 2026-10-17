@@ -27,19 +27,49 @@ final class DepthTestedObject implements GameObject
 {
 	private GameObject inner;
 	private final DepthTestedRenderable renderable = new DepthTestedRenderable();
+	/** Lent (see {@link #lend}): where the one it's lent for is drawn, and whether with depth. */
+	private boolean lent;
+	private int lentX;
+	private int lentY;
+	private int lentPlane;
+	private boolean depth = true;
 
 	/** This object, standing in for {@code object} until the next call. */
 	DepthTestedObject wrap(GameObject object)
 	{
 		inner = object;
 		renderable.inner = object.getRenderable();
+		lent = false;
+		depth = true;
+		return this;
+	}
+
+	/**
+	 * This object, standing in until the next call for {@code object}, another player's, lent to draw
+	 * {@code who} at (x, y) on {@code plane}: the renderer files a body by the object it's handed,
+	 * and filed by the lender's, its see-through parts were sorted as if it stood where they do.
+	 * With depth, as {@link #wrap}; without, {@code who} as they are.
+	 */
+	DepthTestedObject lend(GameObject object, Renderable who, int x, int y, int plane, boolean withDepth)
+	{
+		inner = object;
+		renderable.inner = who;
+		lent = true;
+		lentX = x;
+		lentY = y;
+		lentPlane = plane;
+		depth = withDepth;
 		return this;
 	}
 
 	@Override
 	public Renderable getRenderable()
 	{
-		return renderable.inner == null ? null : renderable;
+		if (renderable.inner == null)
+		{
+			return null;
+		}
+		return depth ? renderable : renderable.inner;
 	}
 
 	@Override
@@ -99,13 +129,13 @@ final class DepthTestedObject implements GameObject
 	@Override
 	public int getX()
 	{
-		return inner.getX();
+		return lent ? lentX : inner.getX();
 	}
 
 	@Override
 	public int getY()
 	{
-		return inner.getY();
+		return lent ? lentY : inner.getY();
 	}
 
 	@Override
@@ -117,7 +147,7 @@ final class DepthTestedObject implements GameObject
 	@Override
 	public int getPlane()
 	{
-		return inner.getPlane();
+		return lent ? lentPlane : inner.getPlane();
 	}
 
 	@Override

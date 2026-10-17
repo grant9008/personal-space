@@ -91,6 +91,37 @@ public class HideLogTest
 	}
 
 	@Test
+	public void someoneUndrawnForAFrameAgainAndAgainIsReportedAsFlickering()
+	{
+		HideLog log = new HideLog();
+		for (int i = 0; i < 12; i++)
+		{
+			// Out for two frames, drawn for ten.
+			hide(log, 7, "NoCombatKing", HideLog.NOT_HANDED_OVER, -1, null, 1 + 12 * i, 2);
+		}
+		hide(log, 8, "Once", HideLog.UNCONFIRMED, -1, null, 500, 2);
+		String report = log.flickering(600, 600);
+		Assert.assertTrue(report, report.startsWith("NoCombatKing 12 times (the game didn't draw them)"));
+		Assert.assertTrue(report, report.contains("Once 1 time (not shown by the game lately)"));
+		Assert.assertNull("nothing to report a minute later", log.flickering(5000, 5000));
+	}
+
+	@Test
+	public void whoeverSlidFurthestIsNamedWithHowTheySlid()
+	{
+		HideLog log = new HideLog();
+		for (int i = 0; i < 30; i++)
+		{
+			log.noteSlide("Dr Ang31", HideLog.SLIDE_WALKING_OFF, 100 + i, 6.4, false);
+		}
+		log.noteSlide("Fastgood2482", HideLog.SLIDE_BUSY, 200, 3, true);
+		String report = log.sliding(300);
+		Assert.assertTrue(report, report.startsWith("Dr Ang31 1.5 tiles over 30 frames (walking off a spot)"));
+		Assert.assertTrue(report, report.contains("Fastgood2482 0.0 tiles over 1 frames (busy, at a fire)"));
+		Assert.assertNull("nothing a minute later", log.sliding(5000));
+	}
+
+	@Test
 	public void everyForestersCampfireActionIsNeverWaitedOn() throws IllegalAccessException
 	{
 		int checked = 0;

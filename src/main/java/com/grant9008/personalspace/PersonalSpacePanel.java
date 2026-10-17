@@ -105,6 +105,8 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
 	private final ToggleSwitch depthTestSwitch = new ToggleSwitch();
+	private final ToggleSwitch walkBusySwitch = new ToggleSwitch();
+	private final ToggleSwitch clickPastSwitch = new ToggleSwitch();
 	private final JPanel checksPanel = new JPanel(new GridBagLayout());
 	private final List<JLabel[]> checkRows = new ArrayList<>();
 	private final JButton copyButton = new JButton("Copy report");
@@ -218,6 +220,8 @@ final class PersonalSpacePanel extends PluginPanel
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		combatSwitch.setOn(config.pauseInCombat());
 		depthTestSwitch.setOn(config.depthBetweenPlayers());
+		walkBusySwitch.setOn(config.walkWhileBusy());
+		clickPastSwitch.setOn(config.clickPastMoved());
 		setEverydayEnabled(config.active());
 	}
 
@@ -438,6 +442,11 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Walk while busy", walkBusySwitch,
+			"On (the default): anyone doing something as they walk, alching on the run say, is drawn walking. Off: as the game draws them, gliding along in the pose of what they're doing."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Names over players", namesSwitch,
 			"On: names follow the bodies. Who gets a name, the colours and the rank icons are Player Indicators' settings, so change them there. Turn off Player Indicators' name position (or the plugin) so names aren't doubled."), c);
 
@@ -445,6 +454,11 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Hover shows who", hoverSwitch,
 			"On: hover a body drawn away from its tile and a tooltip says who it is. You still click people where they really stand."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Click past moved players", clickPastSwitch,
+			"On (the default): using an item or spell on what you see (a fire, a booth, the ground), someone drawn away from where they really stand, or hidden in a crowd, doesn't take the left-click. Right-click still lists them."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -627,6 +641,8 @@ final class PersonalSpacePanel extends PluginPanel
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
 		depthTestSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DEPTH, on));
+		walkBusySwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_WALK_WHILE_BUSY, on));
+		clickPastSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_CLICK_PAST, on));
 	}
 
 	/**
@@ -673,6 +689,8 @@ final class PersonalSpacePanel extends PluginPanel
 		includeMeSwitch.setEnabled(enabled);
 		inFrontSwitch.setEnabled(enabled);
 		depthTestSwitch.setEnabled(enabled);
+		walkBusySwitch.setEnabled(enabled);
+		clickPastSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);
 		combatSwitch.setEnabled(enabled);
 	}

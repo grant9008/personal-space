@@ -23,6 +23,12 @@ final class HideLog
 	static final int WAITING_MIDDLE_TAKEN = 4;
 	static final int UNCONFIRMED = 5;
 	static final int OTHER_PLUGIN = 6;
+	/** Drawn away from their tile, but the game didn't hand them over to be drawn this frame. */
+	static final int NOT_HANDED_OVER = 7;
+	/** Handed over by the game, then left undrawn on a path none of the others name. */
+	static final int SKIPPED_OTHER = 8;
+	/** Not handed over, their real tile off screen though they're drawn on it: drawn anyway, so only counted if that fails. */
+	static final int TILE_OFF_SCREEN = 9;
 	private static final String[] REASONS = {
 		"",
 		"no spot, middle not drawn there",
@@ -31,7 +37,12 @@ final class HideLog
 		"waiting for a break, middle shown to",
 		"not shown by the game lately",
 		"hidden by another plugin",
+		"the game didn't draw them",
+		"left undrawn, reason unknown",
+		"the game didn't draw them, their real tile off screen",
 	};
+	/** How many short streaks (flickers) are kept for the report; the oldest go first. */
+	static final int MAX_FLICKERS = 512;
 	/** A streak shorter than this (a second, in game cycles of 20 ms) isn't worth reporting. */
 	static final int REPORT_CYCLES = 50;
 	/** How far back finished streaks are reported: a minute, in game cycles. */
@@ -74,6 +85,86 @@ final class HideLog
 	private final String[] to = new String[OffsetTable.CAPACITY];
 	private final boolean[] atFire = new boolean[OffsetTable.CAPACITY];
 	private final ArrayDeque<Streak> history = new ArrayDeque<>();
+	/** Streaks shorter than {@link #REPORT_CYCLES}: someone flickering, out for a frame or a few. */
+	private final ArrayDeque<Streak> flickers = new ArrayDeque<>();
+
+	static final int SLIDE_WALKING_OFF = 0;
+	static final int SLIDE_BUSY = 1;
+	static final int SLIDE_OTHER = 2;
+	/** Drawn walking, but their body didn't change shape: the walk didn't show. */
+	static final int SLIDE_LEGS_STILL = 3;
+	private static final String[] SLIDE_KINDS = {"walking off a spot", "busy", "no walk to show", "drawn walking but legs still"};
+	private static final int MAX_SLIDES = 2048;
+
+	private static final class Slide
+	{
+		final String name;
+		final int kind;
+		final int cycle;
+		final double distance;
+		final boolean atFire;
+
+		Slide(String name, int kind, int cycle, double distance, boolean atFire)
+		{
+			this.name = name;
+			this.kind = kind;
+			this.cycle = cycle;
+			this.distance = distance;
+			this.atFire = atFire;
+		}
+	}
+
+	/** Frames someone was drawn moving across the ground with no walk to match: who, how, how far. */
+	private final ArrayDeque<Slide> slides = new ArrayDeque<>();
+
+	/** Someone was drawn moving this far this frame with no walk to match. */
+	void noteSlide(String who, int kind, int cycle, double distance, boolean atFire)
+	{
+		while (!slides.isEmpty() && (slides.size() >= MAX_SLIDES || cycle - slides.peekFirst().cycle > WINDOW_CYCLES))
+		{
+			slides.removeFirst();
+		}
+		slides.addLast(new Slide(who == null ? "someone" : who, kind, cycle, distance, atFire));
+	}
+
+	/** Who slid most in the last minute, mostly how, and how far in all: the three who did most. Null if nobody. */
+	String sliding(int cycle)
+	{
+		Map<String, double[]> by = new HashMap<>();
+		for (Slide s : slides)
+		{
+			if (cycle - s.cycle > WINDOW_CYCLES)
+			{
+				continue;
+			}
+			// frames, distance, then frames of each kind, then 1 if any at a fire
+			double[] d = by.computeIfAbsent(s.name, n -> new double[3 + SLIDE_KINDS.length]);
+			d[0]++;
+			d[1] += s.distance;
+			d[2 + s.kind]++;
+			d[2 + SLIDE_KINDS.length] = s.atFire ? 1 : d[2 + SLIDE_KINDS.length];
+		}
+		if (by.isEmpty())
+		{
+			return null;
+		}
+		List<Map.Entry<String, double[]>> top = new ArrayList<>(by.entrySet());
+		top.sort((a, b) -> Double.compare(b.getValue()[1], a.getValue()[1]));
+		StringBuilder out = new StringBuilder();
+		for (int i = 0; i < Math.min(3, top.size()); i++)
+		{
+			double[] d = top.get(i).getValue();
+			int most = 0;
+			for (int k = 1; k < SLIDE_KINDS.length; k++)
+			{
+				most = d[2 + k] > d[2 + most] ? k : most;
+			}
+			out.append(i == 0 ? "" : ", ").append(top.get(i).getKey()).append(' ')
+				.append(String.format("%.1f", d[1] / 128.0)).append(" tiles over ").append((int) d[0]).append(" frames (")
+				.append(SLIDE_KINDS[most]).append(d[2 + SLIDE_KINDS.length] > 0 ? ", at a fire" : "").append(')');
+		}
+		return out.toString();
+	}
 
 	HideLog()
 	{
@@ -84,6 +175,12 @@ final class HideLog
 	boolean notedThisFrame(int id, int frameNow)
 	{
 		return id < 0 || id >= OffsetTable.CAPACITY || frame[id] == frameNow;
+	}
+
+	/** True if this player was left undrawn this frame or the one before. */
+	boolean notedLately(int id, int frameNow)
+	{
+		return id >= 0 && id < OffsetTable.CAPACITY && frame[id] <= frameNow && frame[id] >= frameNow - 1;
 	}
 
 	/** True if this player was left undrawn last frame for the same reason: the same streak goes on. */
@@ -124,9 +221,75 @@ final class HideLog
 		atFire[id] = fire;
 	}
 
+	/** Close the streaks of everyone drawn again since. */
+	private void finishEnded(int frameNow, int cycle)
+	{
+		for (int id = 0; id < OffsetTable.CAPACITY; id++)
+		{
+			if (name[id] != null && frame[id] < frameNow - 1)
+			{
+				finish(id, cycle);
+			}
+		}
+	}
+
+	/**
+	 * Who flickered most in the last minute (undrawn for under a second, again and again), and mostly
+	 * why: the three who did it most often. Null if nobody did.
+	 */
+	String flickering(int frameNow, int cycle)
+	{
+		finishEnded(frameNow, cycle);
+		Map<String, int[]> counts = new HashMap<>();
+		Map<String, Boolean> fire = new HashMap<>();
+		for (Streak s : flickers)
+		{
+			if (cycle - s.end > WINDOW_CYCLES)
+			{
+				continue;
+			}
+			int[] c = counts.computeIfAbsent(s.name, n -> new int[REASONS.length]);
+			c[0]++;
+			if (s.why > 0 && s.why < REASONS.length)
+			{
+				c[s.why]++;
+			}
+			fire.merge(s.name, s.atFire, Boolean::logicalOr);
+		}
+		if (counts.isEmpty())
+		{
+			return null;
+		}
+		List<Map.Entry<String, int[]>> top = new ArrayList<>(counts.entrySet());
+		top.sort((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]));
+		StringBuilder out = new StringBuilder();
+		for (int i = 0; i < Math.min(3, top.size()); i++)
+		{
+			int[] c = top.get(i).getValue();
+			int most = 1;
+			for (int w = 2; w < REASONS.length; w++)
+			{
+				most = c[w] > c[most] ? w : most;
+			}
+			out.append(i == 0 ? "" : ", ").append(top.get(i).getKey()).append(' ').append(c[0])
+				.append(c[0] == 1 ? " time (" : " times (").append(REASONS[most])
+				.append(most == NO_SPOT_MIDDLE_TAKEN || most == WAITING_MIDDLE_TAKEN ? " someone else" : "")
+				.append(Boolean.TRUE.equals(fire.get(top.get(i).getKey())) ? ", at a fire" : "").append(')');
+		}
+		return out.toString();
+	}
+
 	/** Close this player's streak, keeping it if it was long enough to report. */
 	private void finish(int id, int cycle)
 	{
+		if (name[id] != null && end[id] - start[id] < REPORT_CYCLES)
+		{
+			while (!flickers.isEmpty() && (flickers.size() >= MAX_FLICKERS || cycle - flickers.peekFirst().end > WINDOW_CYCLES))
+			{
+				flickers.removeFirst();
+			}
+			flickers.addLast(new Streak(name[id], why[id], to[id], start[id], end[id], atFire[id], false));
+		}
 		if (name[id] != null && end[id] - start[id] >= REPORT_CYCLES)
 		{
 			// Old ones first, then the shortest: the long vanish this exists to catch must stay.
@@ -155,13 +318,7 @@ final class HideLog
 	 */
 	String longest(int frameNow, int cycle)
 	{
-		for (int id = 0; id < OffsetTable.CAPACITY; id++)
-		{
-			if (name[id] != null && frame[id] < frameNow - 1)
-			{
-				finish(id, cycle); // drawn again since
-			}
-		}
+		finishEnded(frameNow, cycle);
 		List<Streak> streaks = new ArrayList<>();
 		for (Streak s : history)
 		{

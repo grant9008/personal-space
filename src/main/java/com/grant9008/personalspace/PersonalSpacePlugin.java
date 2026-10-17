@@ -30,6 +30,7 @@ import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.VarbitID;
@@ -64,7 +65,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.92";
+	static final String VERSION = "1.9.7";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -133,11 +134,12 @@ public class PersonalSpacePlugin extends Plugin
 	 * Someone given a spot while in the middle of an action waits in the middle of their tile for
 	 * a break in it, then walks out: moved mid-action, the action is cut off for the step (they
 	 * stand, walk, and drop straight back into it). An alcher pauses between casts within a second
-	 * or two; anyone who never pauses moves after this many ticks anyway.
+	 * or two; anyone who never pauses moves after this many ticks anyway: 3 seconds. (Six, from
+	 * before busy people could be shown walking, kept them waiting in the middle far too long.)
 	 */
-	private static final int BUSY_WAIT_TICKS = 10;
+	private static final int BUSY_WAIT_TICKS = 5;
 	/** ...and someone already in a spot, moved because the crowd round them changed, this many. */
-	private static final int BUSY_MOVE_WAIT_TICKS = 5;
+	private static final int BUSY_MOVE_WAIT_TICKS = 3;
 	private final int[] busyWaitSince = new int[OffsetTable.CAPACITY];
 	/** The action each player was last seen busy with. */
 	private final int[] busyAnimation = new int[OffsetTable.CAPACITY];
@@ -444,6 +446,7 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			wrapper.drawMeInFront = config.drawMeInFront();
 			wrapper.depthBetweenPlayers = config.depthBetweenPlayers();
+			wrapper.walkWhileBusy = config.walkWhileBusy();
 		}
 
 		long now = System.nanoTime();
@@ -515,9 +518,9 @@ public class PersonalSpacePlugin extends Plugin
 	// ---- per game tick -----------------------------------------------------------------
 
 	/**
-	 * Busy players are shown walking by leaving their action out of the model for a moment, which the
-	 * client doesn't report to anyone. Should it ever, other plugins (an idle notifier, say) would hear
-	 * of animation changes that never happened: busy walks are switched off at once.
+	 * Players walking to a spot are drawn with their action swapped for the walk for a moment, which
+	 * the client doesn't report to anyone. Should it ever, other plugins (an idle notifier, say) would
+	 * hear of animation changes that never happened: action swaps are switched off at once.
 	 */
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
@@ -527,8 +530,65 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			busyWalksOff = true;
 			w.busyWalks = false;
-			log.warn("Animation change reported while showing a busy player walking; busy players glide again until restart");
+			log.warn("Animation change reported while showing a player walking; busy players glide again, and crowds may, until restart");
 		}
+	}
+
+	/**
+	 * Using an item or spell, someone drawn away from where they really stand takes the left-click
+	 * from what you see there instead: you used raw fish on the campfire, which looked empty, and
+	 * traded the people standing in it. Their option is put below the rest; right-click still has it.
+	 */
+	@Subscribe
+	public void onMenuEntryAdded(MenuEntryAdded event)
+	{
+		if (!config.clickPastMoved())
+		{
+			return;
+		}
+		net.runelite.api.MenuEntry entry = event.getMenuEntry();
+		net.runelite.api.MenuAction type = entry.getType();
+		if (type != net.runelite.api.MenuAction.WIDGET_TARGET_ON_PLAYER)
+		{
+			return;
+		}
+		// Nor does anyone left undrawn, hidden in the middle of a crowd: the fire looked empty.
+		Player player = entry.getPlayer();
+		if (player != null && (movedAway(player.getId(), offsets.dx(player.getId()), offsets.dz(player.getId()))
+			|| hideLog.notedLately(player.getId(), offsets.frame())))
+		{
+			entry.setDeprioritized(true);
+		}
+	}
+
+	/** The walk animations walks were drawn with legs still, most first, each marked if skeletal. */
+	private static String topAnimations(Map<Integer, Long> counts, Client client)
+	{
+		StringBuilder top = new StringBuilder();
+		counts.entrySet().stream()
+			.sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+			.limit(4)
+			.forEach(e ->
+			{
+				boolean skeletal = false;
+				try
+				{
+					net.runelite.api.Animation a = client.loadAnimation(e.getKey());
+					skeletal = a != null && a.isMayaAnim();
+				}
+				catch (RuntimeException ignored)
+				{
+					// left unmarked
+				}
+				top.append(top.length() == 0 ? "" : ", ").append(e.getKey()).append(skeletal ? " (skeletal)" : "").append(" x").append(e.getValue());
+			});
+		return top.toString();
+	}
+
+	/** Whether a player is drawn away from where they really stand. */
+	static boolean movedAway(int id, int dx, int dz)
+	{
+		return id >= 0 && id < OffsetTable.CAPACITY && (dx != 0 || dz != 0);
 	}
 
 	@Subscribe
@@ -1194,6 +1254,8 @@ public class PersonalSpacePlugin extends Plugin
 		s.includeLocal = config.includeLocalPlayer();
 		s.drawMeInFront = config.drawMeInFront();
 		s.depthTest = config.depthBetweenPlayers();
+		s.walkWhileBusy = config.walkWhileBusy();
+		s.clickPast = config.clickPastMoved();
 		s.names = config.namesFollowPlayers();
 		s.hover = config.hoverShowsWho();
 		s.hoverArrow = config.hoverArrow();
@@ -1228,6 +1290,8 @@ public class PersonalSpacePlugin extends Plugin
 		s.insideYouHidden = planner.insideYouHidden;
 		s.spotLosses = spotLosses;
 		s.longestHidden = hideLog.longest(offsets.frame(), client.getGameCycle());
+		s.flickering = hideLog.flickering(offsets.frame(), client.getGameCycle());
+		s.sliding = hideLog.sliding(client.getGameCycle());
 		s.waitBreaks = waitBreaks;
 		s.waitTimeouts = waitTimeouts;
 		s.waitSkipped = waitSkipped;
@@ -1255,6 +1319,15 @@ public class PersonalSpacePlugin extends Plugin
 			s.fireBlackouts = w.fireBlackouts;
 			s.fireUnconfirmed = w.fireUnconfirmed;
 			s.middleKeptSteady = w.middleKeptSteady;
+			s.refusedDrawn = w.refusedDrawn;
+			s.aloneRefusedDrawn = w.aloneRefusedDrawn;
+			s.movingRefusedDrawn = w.movingRefusedDrawn;
+			s.walksLegsStill = w.walksLegsStill;
+			s.walksLegsStillBusy = w.walksLegsStillBusy;
+			s.legsStillBy = w.legsStillBy.clone();
+			s.legsStillAnims = topAnimations(w.legsStillAnims, client);
+			s.legsMatched = w.legsMatched;
+			s.movingBusyWalks = w.movingBusyWalks;
 			s.swapsCameraMoving = w.swapsCameraMoving;
 			s.swapsCameraStill = w.swapsCameraStill;
 			s.stillSwapsMoved = w.stillSwapsMoved;

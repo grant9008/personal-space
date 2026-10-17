@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1889.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v197.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -96,8 +96,10 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Auto-space | On: sensible distances for small groups, counters and fires. Off: the Spacing slider sets every distance, handy for photos. |
 | Names over players | Names over the bodies instead of the pile, with your Player Indicators settings. Turn off Player Indicators' name position, or you'll see two. |
 | Hover shows who / Arrow to their tile | Hover someone drawn away from their tile to see their name and level, and an arrow to where they really stand. |
+| Click past moved players | Using an item or spell on what you see (a fire, a booth), people drawn away from their tile or hidden in a crowd don't take the left-click. Right-click still lists them. |
 | Draw me in front | Always draw yourself over the people in your crowd. |
 | Depth between players | On: each part of each body is hidden only where someone is really in front of it, so nothing pops as the camera turns. Off: each person is drawn whole, as the game does, which some prefer for photos. |
+| Walk while busy | Someone busy with something (alching, tending a fire) is shown taking the steps when they're moved to a spot, instead of gliding there. |
 | Move my character too | You take a spot as well, at the front at a counter or fishing spot. |
 | Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |
 | Show sidebar button | Hide the sidebar button; every setting is still in the plugin's configuration. |

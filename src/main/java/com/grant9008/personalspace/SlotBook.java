@@ -131,6 +131,12 @@ final class SlotBook
 	 * turning the camera afterwards doesn't swap you.
 	 */
 	Map<Long, Integer> pairSideForYou = new HashMap<>();
+
+	/**
+	 * For the tile you're on, beside a fire: the spot nearest it, which is yours whoever else is
+	 * there. Tending the fire, you were drawn further off than someone just standing about by it.
+	 */
+	Map<Long, Integer> fireSideForYou = new HashMap<>();
 	private long yourPickTile = Long.MIN_VALUE;
 	private int yourPick;
 
@@ -277,7 +283,8 @@ final class SlotBook
 			{
 				arriving.add(0, localId);
 			}
-			int yours = yourPickTile == e.getKey() ? yourPick : 0;
+			Integer atFire = fireSideForYou.get(e.getKey());
+			int yours = atFire != null && atFire < capacity ? atFire : yourPickTile == e.getKey() ? yourPick : 0;
 			Set<Integer> inFront = keepClear.getOrDefault(e.getKey(), Collections.emptySet());
 			for (int id : arriving)
 			{
@@ -287,7 +294,7 @@ final class SlotBook
 				}
 				if (id == localId && yourPickTile != e.getKey())
 				{
-					Integer side = pairSideForYou.get(e.getKey());
+					Integer side = atFire != null ? atFire : pairSideForYou.get(e.getKey());
 					yourPick = side != null && side < capacity ? side : 0;
 					yourPickTile = e.getKey();
 					yours = yourPick;

@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntPredicate;
 import net.runelite.api.Actor;
 import net.runelite.api.Animation;
 import net.runelite.api.Client;
@@ -101,14 +102,15 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	/** Diagnostics: which actions people were shown walking out of (animation id to frames), for the report. */
 	final Map<Integer, Long> busyAnimations = new HashMap<>();
 	/**
-	 * Whether busy players are shown walking ({@link #modelMidStep}). The plugin switches it off for
-	 * the session if the game ever reports an animation change from it.
+	 * Whether walk models may swap a player's action ({@link #modelStepping}, and busy walks in
+	 * {@link #modelMidStep}). The plugin switches it off for the session if the game ever reports an
+	 * animation change from it: busy players then glide, and the rest get the walk as their pose only.
 	 */
 	boolean busyWalks = true;
-	/** The busy player whose action is left out of their model right now, or null. */
+	/** The player whose action is swapped for a walk in their model right now, or null. */
 	private Actor busySwap;
 
-	/** Client thread. Whether an AnimationChanged for this actor came from leaving their action out of a walk. */
+	/** Client thread. Whether an AnimationChanged for this actor came from swapping their action for a walk. */
 	boolean fromBusySwap(Actor actor)
 	{
 		return actor != null && actor == busySwap;
@@ -122,6 +124,18 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	/** Frame each player id was last drawn by the game itself, and by us, so nobody is drawn twice in a frame. */
 	private final int[] nativeFrame = new int[OffsetTable.CAPACITY];
 	private final int[] revealedFrame = new int[OffsetTable.CAPACITY];
+	/** The frame each player was last really drawn (or kept back to be drawn) by this shim. */
+	private final int[] drawnFrame = longAgo(OffsetTable.CAPACITY);
+	/**
+	 * A player the game handed over this frame, in the main world, and what with: lent to anyone the
+	 * game had no room for (see {@link #drawRefused}), as people on a tile are lent the drawn one's.
+	 */
+	private int lentFrame = Integer.MIN_VALUE;
+	private Projection lentProjection;
+	private Scene lentScene;
+	private GameObject lentObject;
+	/** Diagnostics: players drawn at their spot although the game had no room for them on their tile; frames. */
+	long refusedDrawn;
 
 	/** Scratch list for the players held back on one tile this frame. */
 	private final int[] held = new int[64];
@@ -157,6 +171,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int y;
 		int z;
 		boolean walk;
+		/** For someone walking for real: the walk to draw them with and its frame (see {@link #movingLegs}); -1 for the game's own. */
+		int legAnim = -1;
+		int legFrame;
+		/** Drawn with another player's object lent (see {@link #drawRefused}), on this plane. */
+		boolean lent;
+		int plane;
 		double distance;
 		/** Who this is, to carry last frame's order over: a player's id, or past those, an NPC's index. */
 		int who;
@@ -555,7 +575,568 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		k.y = y;
 		k.z = z;
 		k.walk = walk;
+		k.legAnim = -1;
+		k.lent = false;
 		keptCount++;
+		markDrawn(actor);
+	}
+
+	/** As {@link #keep}, for someone walking for real who is to be drawn with these legs. */
+	private void keepWithLegs(Projection projection, Scene scene, GameObject gameObject, Player actor, int orientation, int x, int y, int z, int[] legs)
+	{
+		keep(projection, scene, gameObject, actor, orientation, orientation, x, y, z, false);
+		Kept k = kept[keptCount - 1];
+		k.legAnim = legs[0];
+		k.legFrame = legs[1];
+	}
+
+	/** Whether people doing something as they walk are drawn walking (Walk while busy). */
+	volatile boolean walkWhileBusy = true;
+	/** Diagnostics: frames drawn with legs keeping pace with the body, and busy people drawn walking on the move. */
+	long legsMatched;
+	long movingBusyWalks;
+	/** For each player walking off a spot: where they were drawn last frame, and how far along their walk their legs are. */
+	private final int[] legFrame = longAgo(OffsetTable.CAPACITY);
+	private final int[] legX = new int[OffsetTable.CAPACITY];
+	private final int[] legZ = new int[OffsetTable.CAPACITY];
+	private final float[] legSeconds = new float[OffsetTable.CAPACITY];
+
+	/**
+	 * The legs to draw someone walking for real with, as {walk animation, frame}, or null for the
+	 * game's own model.
+	 *
+	 * <p>Walking off a spot ({@code drawnAway}), their drawn spot eases back onto their real path as
+	 * they go, so their body crosses the ground faster or slower than their legs carry them: they
+	 * skated. Their walk is played instead at the pace their body really moves on screen.
+	 *
+	 * <p>Doing something as they walk (alching on the run), the game draws the action over the walk,
+	 * legs and all, and they glide along in its pose; with Walk while busy on, the action is left
+	 * out while they move (see {@link #modelMidStep}).
+	 */
+	private int[] movingLegs(Player player, int id, int drawnX, int drawnZ, boolean drawnAway)
+	{
+		boolean busy = player.getAnimation() != -1;
+		if (busy && !(walkWhileBusy && busyWalks) || id < 0 || id >= OffsetTable.CAPACITY)
+		{
+			return null;
+		}
+		int pose = player.getPoseAnimation();
+		boolean running = pose == player.getRunAnimation();
+		if (!drawnAway || !running && pose != player.getWalkAnimation())
+		{
+			// Busy, but where they really are, or turning on the spot: just the action left out.
+			return busy ? new int[]{pose, player.getPoseAnimationFrame()} : null;
+		}
+		int frame = offsets.frame();
+		if (legFrame[id] == frame - 1)
+		{
+			double moved = Math.hypot(drawnX - legX[id], drawnZ - legZ[id]);
+			legSeconds[id] += (float) (moved / (running ? 2 * OffsetTable.WALK_SPEED : OffsetTable.WALK_SPEED));
+		}
+		else if (legFrame[id] != frame)
+		{
+			legSeconds[id] = 0f;
+		}
+		legX[id] = drawnX;
+		legZ[id] = drawnZ;
+		legFrame[id] = frame;
+		int at = walkTiming(pose).frameAt(legSeconds[id]);
+		return at < 0 ? (busy ? new int[]{pose, player.getPoseAnimationFrame()} : null) : new int[]{pose, at};
+	}
+
+	/**
+	 * Diagnostics: walks that didn't show. Each walk drawn is checked against the last: a walk frame
+	 * lasts a few screen frames, but a body drawn walking that kept exactly the same shape for longer
+	 * than any walk frame lasts wasn't walking at all, whatever this code thought it drew.
+	 */
+	long walksLegsStill;
+	long walksLegsStillBusy;
+	/** ...by how they were moving: to a spot, to a spot while busy, walking off, walking off while busy. */
+	final long[] legsStillBy = new long[4];
+	/** ...by the walk animation they were drawn with, and whether it is a skeletal one. */
+	final Map<Integer, Long> legsStillAnims = new HashMap<>();
+	private final int[] walkShapeX = new int[OffsetTable.CAPACITY];
+	private final int[] walkShapeZ = new int[OffsetTable.CAPACITY];
+	private final int[] walkShape = new int[OffsetTable.CAPACITY];
+	private final int[] walkShapeFrame = longAgo(OffsetTable.CAPACITY);
+	private final int[] walkShapeSince = new int[OffsetTable.CAPACITY];
+	private final boolean[] walkShapeNoted = new boolean[OffsetTable.CAPACITY];
+	/** Longer than any walk frame lasts, in game cycles: 0.3 s. */
+	private static final int LEGS_STILL_CYCLES = 15;
+	private final int[] lastLegsX = new int[OffsetTable.CAPACITY];
+	private final int[] lastLegsZ = new int[OffsetTable.CAPACITY];
+
+	static final int WALK_TO_SPOT = 0;
+	static final int WALK_OFF = 2;
+
+	private void checkWalkShown(Player player, int id, Model model, boolean busy, int how, int animation)
+	{
+		LocalPoint here = player.getLocalLocation();
+		if (model == null || id < 0 || id >= OffsetTable.CAPACITY || here == null)
+		{
+			return;
+		}
+		int drawnX = here.getX() + offsets.dx(id);
+		int drawnZ = here.getY() + offsets.dz(id);
+		float[] xs = model.getVerticesX();
+		float[] ys = model.getVerticesY();
+		float[] zs = model.getVerticesZ();
+		int n = Math.min(model.getVerticesCount(), xs == null ? 0 : Math.min(xs.length, Math.min(ys.length, zs.length)));
+		if (n == 0)
+		{
+			return;
+		}
+		int shape = 17;
+		for (int i = 0, step = Math.max(1, n / 160); i < n; i += step)
+		{
+			shape = shape * 31 + Float.floatToIntBits(xs[i]) * 7 + Float.floatToIntBits(ys[i]) * 3 + Float.floatToIntBits(zs[i]);
+		}
+		int frame = offsets.frame();
+		int cycle = client.getGameCycle();
+		if (walkShapeFrame[id] < frame - 2 || walkShape[id] != shape)
+		{
+			walkShape[id] = shape;
+			walkShapeSince[id] = cycle;
+			walkShapeNoted[id] = false;
+			walkShapeX[id] = drawnX;
+			walkShapeZ[id] = drawnZ;
+		}
+		else if (!walkShapeNoted[id] && cycle - walkShapeSince[id] > LEGS_STILL_CYCLES
+			&& Math.hypot(drawnX - walkShapeX[id], drawnZ - walkShapeZ[id]) >= 24)
+		{
+			// Moved a fifth of a tile and more with the same shape: a slide, whatever was meant.
+			walkShapeNoted[id] = true;
+			walksLegsStill++;
+			if (busy)
+			{
+				walksLegsStillBusy++;
+			}
+			legsStillBy[how + (busy ? 1 : 0)]++;
+			if (legsStillAnims.size() < 32 || legsStillAnims.containsKey(animation))
+			{
+				legsStillAnims.merge(animation, 1L, Long::sum);
+			}
+		}
+		if (walkShapeNoted[id] && walkShapeFrame[id] != frame)
+		{
+			hides.noteSlide(nameOf(player), HideLog.SLIDE_LEGS_STILL, cycle,
+				Math.hypot(drawnX - lastLegsX[id], drawnZ - lastLegsZ[id]), false);
+		}
+		lastLegsX[id] = drawnX;
+		lastLegsZ[id] = drawnZ;
+		walkShapeFrame[id] = frame;
+	}
+
+	/** {@link #modelMidStep} with these legs, counted; null (draw them as the game did) if it fails. */
+	private Model modelWithLegs(Player player, int[] legs)
+	{
+		try
+		{
+			Model model = modelMidStep(player, legs[0], legs[1]);
+			checkWalkShown(player, player.getId(), model, player.getAnimation() != -1, WALK_OFF, legs[0]);
+			if (player.getAnimation() != -1)
+			{
+				movingBusyWalks++;
+			}
+			else
+			{
+				legsMatched++;
+			}
+			return model;
+		}
+		catch (RuntimeException e)
+		{
+			revealErrors++;
+			return null;
+		}
+	}
+
+	private void markDrawn(Renderable actor)
+	{
+		if (actor instanceof Player)
+		{
+			int id = ((Player) actor).getId();
+			if (id >= 0 && id < OffsetTable.CAPACITY)
+			{
+				drawnFrame[id] = offsets.frame();
+			}
+		}
+	}
+
+	/**
+	 * Once a frame, after the game has handed everyone over: anyone drawn away from their tile, on
+	 * screen, whom nothing has drawn yet. The game adds at most five things to a tile; a busy
+	 * Forester's Campfire is the fire, the flames of every log put on it and the people tending it,
+	 * so whenever another log went on, the one standing on it wasn't added, and nobody on it was
+	 * drawn: the whole group round the fire vanished for a moment, again and again. Those the game
+	 * had no room for are drawn here instead, at their spots, with a player object lent from this
+	 * frame. Anyone left undrawn for another reason goes in the hide log.
+	 */
+	private void drawRefused(int frame)
+	{
+		WorldView wv = client.getTopLevelWorldView();
+		// Someone alone on a full tile (a lone campfire tender) blinked whenever no stack was in view.
+		if (wv == null || stacks.isEmpty() && !probe.enabled)
+		{
+			return;
+		}
+		int left = client.getViewportXOffset();
+		int top = client.getViewportYOffset();
+		int right = left + client.getViewportWidth();
+		int bottom = top + client.getViewportHeight();
+		int cycle = client.getGameCycle();
+		drawRefusedMoving(wv, frame, cycle, left, top, right, bottom);
+		for (long tile : stacks.stackedTiles())
+		{
+			int layer = StackRegistry.plane(tile);
+			int plane = StackRegistry.planeOf(layer);
+			if (StackRegistry.layer(wv.getId(), plane) != layer)
+			{
+				continue;
+			}
+			int sceneX = StackRegistry.sceneX(tile);
+			int sceneY = StackRegistry.sceneY(tile);
+			// Only those the game had no room for, or the probe held back, are drawn here. Others the
+			// game left out on purpose: past your draw distance, say, or hidden by the server.
+			int heldCount = probe.heldOn(tile, frame, refusedHeld);
+			Boolean full = null;
+			boolean rescued = false;
+			for (int id : stacks.membersAt(tile))
+			{
+				if (id < 0 || id >= OffsetTable.CAPACITY || drawnFrame[id] == frame || hides.notedThisFrame(id, frame))
+				{
+					continue;
+				}
+				int dx = offsets.dx(id);
+				int dz = offsets.dz(id);
+				Player p = (dx != 0 || dz != 0) ? wv.players().byIndex(id) : null;
+				LocalPoint lp = p == null ? null : p.getLocalLocation();
+				if (lp == null || !onScreen(wv, lp.getX() + dx, lp.getY() + dz, plane, left, top, right, bottom))
+				{
+					continue;
+				}
+				if (nativeFrame[id] == frame)
+				{
+					// Handed over, then left out on a path none of the other reasons name.
+					noteHidden(p, id, HideLog.SKIPPED_OTHER, -1, wv, tile);
+					continue;
+				}
+				int x = lp.getX();
+				int z = lp.getY();
+				if (full == null)
+				{
+					full = tileFull(wv, plane, sceneX, sceneY);
+				}
+				// The game skips a tile it can't see, so someone drawn on screen from a tile just off
+				// it vanished whenever the camera put their real tile past the edge.
+				boolean tileOffScreen = !onScreen(wv, x, z, plane, left, top, right, bottom);
+				if (lentFrame != frame || lentObject == null || !(full || tileOffScreen || zoneDrawn(x, z, frame) || held(refusedHeld, heldCount, id))
+					|| !StillnessTracker.isCentred(x, z) || lp.getSceneX() != sceneX || lp.getSceneY() != sceneY
+					|| !probe.mayDraw(id, p, cycle) || !probe.othersAllow(renderCallbacks, p))
+				{
+					// Walking off, gone, left out on purpose, or someone who may not be drawn.
+					noteHidden(p, id, tileOffScreen ? HideLog.TILE_OFF_SCREEN : HideLog.NOT_HANDED_OVER, -1, wv, tile);
+					continue;
+				}
+				keepLent(p, id, tile, plane, x, z, dx, dz, wv);
+				rescued = true;
+			}
+			// Whoever is shown in the middle of a tile nobody on it was drawn on blinked with the rest.
+			int cx = sceneX * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_TILE_SIZE / 2;
+			int cz = sceneY * Perspective.LOCAL_TILE_SIZE + Perspective.LOCAL_TILE_SIZE / 2;
+			if (lentFrame == frame && lentObject != null && !tileDrawnThisFrame(tile, frame) && !stacks.middleOutOfSight(tile))
+			{
+				int chosen = middleOf(tile, wv, cx, cz);
+				Player p = chosen >= 0 && drawnFrame[chosen] != frame && nativeFrame[chosen] != frame ? wv.players().byIndex(chosen) : null;
+				if (p != null && onScreen(wv, cx, cz, plane, left, top, right, bottom))
+				{
+					if (full == null)
+					{
+						full = tileFull(wv, plane, sceneX, sceneY);
+					}
+					// middleOf gives you the middle without asking other plugins: Entity Hider may hide you.
+					if ((full || zoneDrawn(cx, cz, frame) || held(refusedHeld, heldCount, chosen)) && probe.othersAllow(renderCallbacks, p)
+						&& (p == client.getLocalPlayer() || probe.mayDraw(chosen, p, cycle)))
+					{
+						keepLent(p, chosen, tile, plane, cx, cz, offsets.dx(chosen), offsets.dz(chosen), wv);
+						rescued = true;
+					}
+				}
+			}
+			if (rescued)
+			{
+				noteTileDrawn(tile);
+			}
+		}
+		drawRefusedAlone(wv, frame, cycle, left, top, right, bottom);
+	}
+
+	/**
+	 * Someone alone on their tile, standing where they are, whom the game had no room for this
+	 * frame (a tile full of other things: a campfire's flames, say) while drawing the zone round
+	 * them: they flashed in and out though nothing here ever moved them. Drawn where they stand.
+	 */
+	private void drawRefusedAlone(WorldView wv, int frame, int cycle, int left, int top, int right, int bottom)
+	{
+		if (!probe.enabled || lentFrame != frame || lentObject == null)
+		{
+			return;
+		}
+		Player local = client.getLocalPlayer();
+		int yourPlane = local == null || local.getWorldLocation() == null ? -1 : local.getWorldLocation().getPlane();
+		for (Player p : wv.players())
+		{
+			int id = p == null ? -1 : p.getId();
+			if (id < 0 || id >= OffsetTable.CAPACITY || drawnFrame[id] == frame || nativeFrame[id] == frame
+				|| offsets.dx(id) != 0 || offsets.dz(id) != 0)
+			{
+				continue;
+			}
+			LocalPoint lp = p.getLocalLocation();
+			net.runelite.api.coords.WorldPoint wp = p.getWorldLocation();
+			if (lp == null || wp == null || wp.getPlane() != yourPlane || !StillnessTracker.isCentred(lp.getX(), lp.getY()))
+			{
+				continue;
+			}
+			int plane = wp.getPlane();
+			long tile = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY());
+			if (stacks.membersAt(tile).length > 0 || !zoneDrawn(lp.getX(), lp.getY(), frame)
+				|| !onScreen(wv, lp.getX(), lp.getY(), plane, left, top, right, bottom)
+				|| !probe.mayDraw(id, p, cycle) || !probe.othersAllow(renderCallbacks, p))
+			{
+				continue;
+			}
+			keepLent(p, id, tile, plane, lp.getX(), lp.getY(), 0, 0, wv);
+			aloneRefusedDrawn++;
+		}
+	}
+
+	/** Diagnostics: frames someone alone on their tile was drawn though the game had no room for them. */
+	long aloneRefusedDrawn;
+
+	/**
+	 * Someone walking or running across a tile the game has no room on (a campfire's, crowded with
+	 * flames and the people standing in it). The game won't add a moving player to the scene at all
+	 * if any tile they're crossing, or the one they're stepping onto, is full: they vanished as they
+	 * walked over the fire, from a step before it until they were off it. Drawn where they are, as
+	 * the game would have drawn them. So is someone walking through the middle of a crowd, whom the
+	 * game left out there because it draws one player in the middle of a tile.
+	 */
+	private void drawRefusedMoving(WorldView wv, int frame, int cycle, int left, int top, int right, int bottom)
+	{
+		if (!probe.enabled || lentFrame != frame || lentObject == null)
+		{
+			return;
+		}
+		int plane = wv.getPlane();
+		for (Player p : wv.players())
+		{
+			int id = p == null ? -1 : p.getId();
+			if (id < 0 || id >= OffsetTable.CAPACITY || drawnFrame[id] == frame || nativeFrame[id] == frame
+				|| hides.notedThisFrame(id, frame))
+			{
+				continue;
+			}
+			LocalPoint lp = p.getLocalLocation();
+			if (lp == null)
+			{
+				continue;
+			}
+			int x = lp.getX();
+			int z = lp.getY();
+			boolean centred = StillnessTracker.isCentred(x, z);
+			long tile = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY());
+			// Standing on a tile: see drawRefused and drawRefusedAlone.
+			if (centred && (!reallyMoving(p) || memberOf(tile, id)))
+			{
+				continue;
+			}
+			int dx = offsets.dx(id);
+			int dz = offsets.dz(id);
+			if (!zoneDrawn(x, z, frame) || !onScreen(wv, x + dx, z + dz, plane, left, top, right, bottom)
+				|| !(crossingFullTile(wv, plane, x, z, p.getCurrentOrientation()) || centred && tileDrawnThisFrame(tile, frame))
+				|| !probe.mayDraw(id, p, cycle) || !probe.othersAllow(renderCallbacks, p))
+			{
+				continue;
+			}
+			int y = Perspective.getTileHeight(client, new LocalPoint(x, z, wv), plane) - p.getAnimationHeightOffset()
+				+ groundDelta(wv, plane, x, z, x + dx, z + dz);
+			int facing = p.getCurrentOrientation();
+			keep(lentProjection, lentScene, lentObject, p, facing, facing, x + dx, y, z + dz, false);
+			Kept k = kept[keptCount - 1];
+			k.lent = true;
+			k.plane = plane;
+			movingRefusedDrawn++;
+		}
+	}
+
+	/** Diagnostics: frames someone walking was drawn though the game had no room for them on their way. */
+	long movingRefusedDrawn;
+
+	/** How far a player reaches each way when the game adds them to the scene. */
+	private static final int PLAYER_REACH = 60;
+
+	/**
+	 * The tiles the game files a moving player under, as {first x, first y, last x, last y}: as far
+	 * as they reach each way, and a tile further the way they face (orientation 0 is south, 512 west,
+	 * 1024 north, 1536 east). If any of them is full, the game leaves the player out.
+	 */
+	static int[] movingSpan(int x, int z, int orientation)
+	{
+		int minX = x - PLAYER_REACH;
+		int minZ = z - PLAYER_REACH;
+		int maxX = x + PLAYER_REACH;
+		int maxZ = z + PLAYER_REACH;
+		if (orientation > 640 && orientation < 1408)
+		{
+			maxZ += Perspective.LOCAL_TILE_SIZE;
+		}
+		if (orientation > 1152 && orientation < 1920)
+		{
+			maxX += Perspective.LOCAL_TILE_SIZE;
+		}
+		if (orientation > 1664 || orientation < 384)
+		{
+			minZ -= Perspective.LOCAL_TILE_SIZE;
+		}
+		if (orientation > 128 && orientation < 896)
+		{
+			minX -= Perspective.LOCAL_TILE_SIZE;
+		}
+		return new int[]{minX >> 7, minZ >> 7, maxX >> 7, maxZ >> 7};
+	}
+
+	private static boolean crossingFullTile(WorldView wv, int plane, int x, int z, int orientation)
+	{
+		int[] span = movingSpan(x, z, orientation);
+		for (int sx = span[0]; sx <= span[2]; sx++)
+		{
+			for (int sz = span[1]; sz <= span[3]; sz++)
+			{
+				if (tileFull(wv, plane, sx, sz))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private final int[] refusedHeld = new int[256];
+
+	/**
+	 * The 8-by-8-tile zones the game handed anyone over in this frame: it draws a zone or not, so
+	 * someone it skipped in one it drew had no room on their tile, rather than being past your draw
+	 * distance. (Counting a tile's objects missed some of those.)
+	 */
+	private final java.util.Set<Integer> zonesDrawn = new java.util.HashSet<>();
+	private int zonesFrame = Integer.MIN_VALUE;
+
+	private void noteZoneDrawn(int x, int z)
+	{
+		noteZone(x >> 10, z >> 10);
+	}
+
+	/** {@link #zonesDrawn}, also as the game draws each zone's ground: a zone nobody in was handed over. */
+	private void noteZone(int zoneX, int zoneZ)
+	{
+		int frame = offsets.frame();
+		if (zonesFrame != frame)
+		{
+			zonesFrame = frame;
+			zonesDrawn.clear();
+		}
+		zonesDrawn.add((zoneX << 16) | (zoneZ & 0xFFFF));
+	}
+
+	/** How far the main scene's zone numbers run ahead of its tiles' (40 tiles of extended scene). */
+	private static final int MAIN_ZONE_OFFSET = 5;
+
+	private boolean zoneDrawn(int x, int z, int frame)
+	{
+		if (zonesFrame == frame && zonesDrawn.contains(((x >> 10) << 16) | ((z >> 10) & 0xFFFF)))
+		{
+			return true;
+		}
+		// Your own zone is always within your draw distance.
+		Player local = client.getLocalPlayer();
+		WorldView yours = local == null ? null : local.getWorldView();
+		LocalPoint you = yours == null || yours.getId() != WorldView.TOPLEVEL ? null : local.getLocalLocation();
+		return you != null && (you.getX() >> 10) == (x >> 10) && (you.getY() >> 10) == (z >> 10);
+	}
+
+	private static boolean held(int[] ids, int count, int id)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			if (ids[i] == id)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Draw this player, whom the game had no room for, at their spot with an object lent from this frame. */
+	private void keepLent(Player p, int id, long tile, int plane, int x, int z, int dx, int dz, WorldView wv)
+	{
+		int y = Perspective.getTileHeight(client, new LocalPoint(x, z, wv), plane) - p.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + dx, z + dz);
+		int facing = drawnFacing(p, tile, p.getCurrentOrientation(), dx, dz, x, z, wv);
+		keep(lentProjection, lentScene, lentObject, p, facing, offsets.walkOrientation(id), x + dx, y, z + dz, offsets.isWalking(id) && !reallyMoving(p));
+		Kept k = kept[keptCount - 1];
+		k.lent = true;
+		k.plane = plane;
+		refusedDrawn++;
+		// Each one drawn counts towards the tile's blink check, as stackmates drawn there do.
+		tileDraws(tile, offsets.frame()).count++;
+	}
+
+	private boolean onScreen(WorldView wv, int x, int z, int plane, int left, int top, int right, int bottom)
+	{
+		net.runelite.api.Point at = Perspective.localToCanvas(client, new LocalPoint(x, z, wv), plane);
+		return at != null && at.getX() >= left && at.getX() <= right && at.getY() >= top && at.getY() <= bottom;
+	}
+
+	/** Whether a player standing in the middle of this tile was handed over and drawn this frame. */
+	private boolean tileDrawnThisFrame(long tile, int frame)
+	{
+		for (int i = 0; tilesDrawnFrame == frame && i < tilesDrawnCount; i++)
+		{
+			if (tilesDrawnThisFrame[i] == tile)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether the game has no room left on this tile: it adds at most five things to one, and
+	 * refuses anything more. Its own plane and the one below (a bridge's).
+	 */
+	private static boolean tileFull(WorldView wv, int plane, int sceneX, int sceneY)
+	{
+		Scene scene = wv.getScene();
+		net.runelite.api.Tile[][][] tiles = scene == null ? null : scene.getTiles();
+		for (int z = Math.max(0, plane - 1); tiles != null && z <= plane && z < tiles.length; z++)
+		{
+			if (sceneX < 0 || sceneY < 0 || sceneX >= tiles[z].length || sceneY >= tiles[z][sceneX].length)
+			{
+				continue;
+			}
+			net.runelite.api.Tile t = tiles[z][sceneX][sceneY];
+			GameObject[] objects = t == null ? null : t.getGameObjects();
+			int n = 0;
+			for (int i = 0; objects != null && i < objects.length; i++)
+			{
+				n += objects[i] != null ? 1 : 0;
+			}
+			if (n >= 5)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -739,7 +1320,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			{
 				int orientation = k.orientation;
 				Model model = null;
-				if (k.walk && k.actor instanceof Player)
+				if (k.legAnim >= 0 && k.actor instanceof Player)
+				{
+					model = modelWithLegs((Player) k.actor, new int[]{k.legAnim, k.legFrame});
+				}
+				else if (k.walk && k.actor instanceof Player)
 				{
 					Player player = (Player) k.actor;
 					model = walkModel(player, player.getId());
@@ -755,7 +1340,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				}
 				if (model != null)
 				{
-					GameObject object = depthBetweenPlayers && depthKnown ? depthTested.wrap(k.gameObject) : k.gameObject;
+					GameObject object = k.lent ? depthTested.lend(k.gameObject, k.actor, k.x, k.z, k.plane, depthBetweenPlayers && depthKnown)
+						: depthBetweenPlayers && depthKnown ? depthTested.wrap(k.gameObject) : k.gameObject;
 					delegate.drawTemp(k.projection, k.scene, object, model, orientation, k.x, k.y, k.z);
 					orderedDraws++;
 				}
@@ -774,6 +1360,9 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			k.actor = null;
 		}
 		keptCount = 0;
+		lentProjection = null;
+		lentScene = null;
+		lentObject = null;
 	}
 
 	/** Forget everyone kept back, drawing nobody: the frame they belonged to is over. */
@@ -885,6 +1474,14 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 
 		Player drawn = (Player) renderable;
 		int drawnId = drawn.getId();
+		if (wv.getId() == WorldView.TOPLEVEL)
+		{
+			lentFrame = offsets.frame();
+			lentProjection = projection;
+			lentScene = scene;
+			lentObject = gameObject;
+			noteZoneDrawn(x, z);
+		}
 		if (drawnId >= 0 && drawnId < OffsetTable.CAPACITY)
 		{
 			nativeFrame[drawnId] = offsets.frame();
@@ -907,18 +1504,29 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			// carried the other way: moonwalking off until the offset had gone.
 			boolean reallyMoving = reallyMoving(drawn);
 			int drawOrientation = reallyMoving ? headingOf(drawnId, x + dx, z + dz, orientation)
-				: stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
+				: drawnFacing(drawn, StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz, x, z, wv);
 			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
 			boolean walking = offsets.isWalking(drawnId) && !reallyMoving;
-			noteMotion(drawn, drawnId, dx, dz, walking && (busyWalks || drawn.getAnimation() == -1), reallyMoving);
-			if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
+			int[] legs = reallyMoving ? movingLegs(drawn, drawnId, x + dx, z + dz, true) : null;
+			noteMotion(drawn, drawnId, dx, dz, walking && (busyWalks || drawn.getAnimation() == -1) || legs != null, reallyMoving);
+			if (legs != null && mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
+			{
+				keepWithLegs(projection, scene, gameObject, drawn, drawOrientation, x + dx, drawY, z + dz, legs);
+			}
+			else if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
 			{
 				keep(projection, scene, gameObject, drawn, drawOrientation, offsets.walkOrientation(drawnId), x + dx, drawY, z + dz, walking);
 			}
 			else
 			{
 				Model drawModel = model;
-				if (walking)
+				if (legs != null)
+				{
+					Model withLegs = modelWithLegs(drawn, legs);
+					touchedSharedModel = true;
+					drawModel = withLegs != null ? withLegs : model;
+				}
+				else if (walking)
 				{
 					Model walk = walkModel(drawn, drawnId);
 					touchedSharedModel = true;
@@ -930,6 +1538,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					}
 				}
 				delegate.drawTemp(projection, scene, gameObject, drawModel, drawOrientation, x + dx, drawY, z + dz);
+				markDrawn(drawn);
 			}
 			nudgedDraws++;
 		}
@@ -942,23 +1551,47 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			long key = StackRegistry.key(layer, x >> 7, z >> 7);
 			noteHidden(drawn, drawnId, stacks.isWaiting(drawnId) ? HideLog.WAITING_OUT_OF_SIGHT : HideLog.NO_SPOT_OUT_OF_SIGHT, -1, wv, key);
 		}
-		else if (StillnessTracker.isCentred(x, z) && stacks.isUnplaced(drawnId) && !isLocal(drawn)
+		else if (StillnessTracker.isCentred(x, z) && !isLocal(drawn)
+			&& (stacks.isUnplaced(drawnId) || !reallyMoving(drawn) && (!offsets.targetIsMiddle(drawnId) && !offsets.isWalking(drawnId)
+				|| !memberOf(StackRegistry.key(layer, x >> 7, z >> 7), drawnId)))
 			&& otherInMiddle(StackRegistry.key(layer, x >> 7, z >> 7), wv, x, z, drawnId))
 		{
 			// Someone else waiting here is the one shown in the middle (see middleOf): drawn below,
-			// with the others on the tile.
+			// with the others on the tile. So is anyone else still standing in it who doesn't hold it:
+			// given a spot elsewhere and not yet setting off, or just arrived and not one of the stack
+			// yet. The game handed them over first, and drawn there they made the one shown blink out.
+			// Not someone walking through, though: they're only passing the middle.
 			middleKeptSteady++;
 			long key = StackRegistry.key(layer, x >> 7, z >> 7);
 			noteHidden(drawn, drawnId, stacks.isWaiting(drawnId) ? HideLog.WAITING_MIDDLE_TAKEN : HideLog.NO_SPOT_MIDDLE_TAKEN,
 				middleOf(key, wv, x, z), wv, key);
 		}
-		else if (mayKeep && withinKeep(wv, x, y, z))
-		{
-			keep(projection, scene, gameObject, drawn, orientation, orientation, x, y, z, false);
-		}
 		else
 		{
-			delegate.drawTemp(projection, scene, gameObject, model, orientation, x, y, z);
+			int[] legs = drawn.getAnimation() != -1 && reallyMoving(drawn) ? movingLegs(drawn, drawnId, x, z, false) : null;
+			if (mayKeep && withinKeep(wv, x, y, z))
+			{
+				if (legs != null)
+				{
+					keepWithLegs(projection, scene, gameObject, drawn, orientation, x, y, z, legs);
+				}
+				else
+				{
+					keep(projection, scene, gameObject, drawn, orientation, orientation, x, y, z, false);
+				}
+			}
+			else
+			{
+				Model drawModel = model;
+				if (legs != null)
+				{
+					Model withLegs = modelWithLegs(drawn, legs);
+					touchedSharedModel = true;
+					drawModel = withLegs != null ? withLegs : model;
+				}
+				delegate.drawTemp(projection, scene, gameObject, drawModel, orientation, x, y, z);
+				markDrawn(drawn);
+			}
 		}
 
 		// Only a player standing exactly in the middle of its tile hides others there.
@@ -1044,6 +1677,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private final int[] motionOX = new int[OffsetTable.CAPACITY];
 	private final int[] motionOZ = new int[OffsetTable.CAPACITY];
 	private final int[] motionFrame = longAgo(OffsetTable.CAPACITY);
+	/** The frame each player was last drawn with a walk to match their moving. */
+	private final int[] walkShownFrame = longAgo(OffsetTable.CAPACITY);
 
 	private void noteMotion(Player player, int id, int dx, int dz, boolean walkShown, boolean reallyMoving)
 	{
@@ -1060,8 +1695,17 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			int ex = dx - motionOX[id];
 			int ez = dz - motionOZ[id];
-			if (ex * ex + ez * ez >= 4 && !walkShown)
+			// The last stride of a walk lands them on their spot as the walk ends: not a slide.
+			boolean landing = walkShownFrame[id] == frame - 1;
+			if (ex * ex + ez * ez >= 4 && !walkShown && !landing)
 			{
+				int kind = reallyMoving ? HideLog.SLIDE_WALKING_OFF : player.getAnimation() != -1 ? HideLog.SLIDE_BUSY : HideLog.SLIDE_OTHER;
+				LocalPoint at = player.getLocalLocation();
+				WorldView pwv = player.getWorldView();
+				net.runelite.api.coords.WorldPoint wp = player.getWorldLocation();
+				boolean atFire = at != null && pwv != null && wp != null && stacks.fireAt(StackRegistry.key(
+					StackRegistry.layer(pwv.getId(), wp.getPlane()), at.getSceneX(), at.getSceneY())) != null;
+				hides.noteSlide(nameOf(player), kind, client.getGameCycle(), Math.sqrt(ex * ex + ez * ez), atFire);
 				if (reallyMoving)
 				{
 					slideWalkingOff++;
@@ -1093,6 +1737,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		motionOX[id] = dx;
 		motionOZ[id] = dz;
 		motionFrame[id] = frame;
+		if (walkShown)
+		{
+			walkShownFrame[id] = frame;
+		}
 	}
 	private final int[] lastDrawnX = new int[OffsetTable.CAPACITY];
 	private final int[] lastDrawnZ = new int[OffsetTable.CAPACITY];
@@ -1193,9 +1841,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		for (int id : stacks.membersAt(tileKey))
 		{
 			// Someone with a spot is always drawn, and the planner can give out the middle itself as
-			// a spot: then it's theirs, and nobody waiting is drawn inside them.
+			// a spot: then it's theirs, and nobody waiting is drawn inside them. Only if it really is
+			// their spot: given one elsewhere, they stand in the middle a frame or two before setting
+			// off, and taking the middle then made the one shown there blink out.
 			if (id < 0 || id >= OffsetTable.CAPACITY || id == localId || stacks.isUnplaced(id)
-				|| offsets.dx(id) != 0 || offsets.dz(id) != 0 || offsets.isWalking(id))
+				|| offsets.dx(id) != 0 || offsets.dz(id) != 0 || offsets.isWalking(id) || !offsets.targetIsMiddle(id))
 			{
 				continue;
 			}
@@ -1237,11 +1887,73 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		return best;
 	}
 
+	private boolean memberOf(long tileKey, int id)
+	{
+		for (int m : stacks.membersAt(tileKey))
+		{
+			if (m == id)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Whether someone other than {@code id} is the one shown in the middle of this tile. */
 	private boolean otherInMiddle(long tileKey, WorldView wv, int x, int z, int id)
 	{
 		int chosen = middleOf(tileKey, wv, x, z);
 		return chosen >= 0 && chosen != id;
+	}
+
+	/** How far away someone they're dealing with may be for a player drawn at a spot to be turned to face them: 10 tiles. */
+	private static final int FACE_TARGET_REACH = 10 * 128;
+
+	/**
+	 * Which way a player drawn at a spot faces. Whoever they're dealing with (a Grand Exchange clerk,
+	 * a banker, someone they're trading with) they face from where they're drawn, as the game turns
+	 * them to face them from where they stand. Turned instead to a point a tile ahead of their tile,
+	 * like the rest of a row, people at a clerk two tiles away behind the counter were angled well
+	 * past him, unlike you beside them. Otherwise the tile's own rule: the fire, what a row faces, a
+	 * pose. {@code x} and {@code z} are where they really stand.
+	 */
+	private int drawnFacing(Player player, long tileKey, int orientation, int dx, int dz, int x, int z, WorldView wv)
+	{
+		Actor target = player.getInteracting();
+		if (target != null && target.getWorldView() == wv)
+		{
+			LocalPoint at = target.getLocalLocation();
+			if (at != null)
+			{
+				int toX = at.getX();
+				int toZ = at.getY();
+				if (target instanceof Player)
+				{
+					int id = ((Player) target).getId();
+					if (id >= 0 && id < OffsetTable.CAPACITY)
+					{
+						// Someone else drawn at a spot: face them where they're drawn.
+						toX += offsets.dx(id);
+						toZ += offsets.dz(id);
+					}
+				}
+				int facing = facingToward(x + dx, z + dz, toX, toZ, -1);
+				if (facing >= 0)
+				{
+					return facing;
+				}
+			}
+		}
+		return stacks.drawOrientation(tileKey, orientation, dx, dz);
+	}
+
+	/** The orientation that looks from one point to another, or {@code otherwise} if they're on top of each other or too far apart. */
+	static int facingToward(int fromX, int fromZ, int toX, int toZ, int otherwise)
+	{
+		double east = toX - fromX;
+		double north = toZ - fromZ;
+		double d = Math.hypot(east, north);
+		return d < 1 || d > FACE_TARGET_REACH ? otherwise : OffsetTable.facing(east, north);
 	}
 
 	/** Whether the game has this player walking or running for real, rather than standing. */
@@ -1260,6 +1972,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * walk, legs and all, and they glided. Returns null (draw them as the game did) if the animation
 	 * can't be read, or busy walks have been switched off. The model stays valid until the next model
 	 * is built.
+	 *
+	 * <p>The walk goes in as their action as well as their pose ({@link #modelStepping}): in a crowd
+	 * the client stops animating the pose of anyone standing still, and the walk didn't show. Should
+	 * the game ever report the swap, it goes back to the pose alone ({@link #modelMidStep}). Animation
+	 * smoothing is held off for the step: it blends by how far into its frame the player's own
+	 * animation had got, which has nothing to do with this walk, and can throw the legs past the next frame.
 	 */
 	private Model walkModel(Player player, int id)
 	{
@@ -1280,10 +1998,16 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			walkSkippedNoAnimation++;
 			return null;
 		}
-		busySwap = action != -1 ? player : null;
+		busySwap = busyWalks ? player : null;
+		IntPredicate smoothing = client.getAnimationInterpolationFilter();
 		try
 		{
-			Model model = modelMidStep(player, walk, frame);
+			if (smoothing != null)
+			{
+				client.setAnimationInterpolationFilter(null);
+			}
+			Model model = busyWalks ? modelStepping(player, walk, frame) : modelMidStep(player, walk, frame);
+			checkWalkShown(player, id, model, action != -1, WALK_TO_SPOT, walk);
 			if (action != -1)
 			{
 				walkBusy++;
@@ -1302,6 +2026,53 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		finally
 		{
 			busySwap = null;
+			if (smoothing != null)
+			{
+				client.setAnimationInterpolationFilter(smoothing);
+			}
+		}
+	}
+
+	/**
+	 * Client thread only. This player's model taking a step where they stand: their walk, at this
+	 * frame, as both their action and their pose. Everything is put back before returning, as in
+	 * {@link #modelMidStep}, and nobody is told: setAnimation unhooks the actor while it writes.
+	 *
+	 * <p>The pose alone doesn't do it in a crowd. With more than 200 players about (50 in low-memory
+	 * mode), every frame before the scene is drawn the client marks each other player whose pose is
+	 * their idle pose as not animated, and then builds them with no pose at all. Someone being moved
+	 * to a spot is standing still, so a walk put only in their pose was dropped and the idle's
+	 * leftover frame drawn instead: legs still while the body slid. The action is never dropped that
+	 * way. The pose gets the walk too for an action still waiting out its start delay, which the
+	 * client leaves out instead. With the same walk at the same frame in both, the model is just
+	 * that walk. A walk can still freeze when the server has frozen the player's animation (it then
+	 * draws copies the API can't reach); {@link #checkWalkShown} still counts that.
+	 */
+	static Model modelStepping(Player player, int walk, int walkFrame)
+	{
+		int action = player.getAnimation();
+		int actionFrame = player.getAnimationFrame();
+		int pose = player.getPoseAnimation();
+		int poseFrame = player.getPoseAnimationFrame();
+		try
+		{
+			player.setAnimation(walk);
+			player.setAnimationFrame(walkFrame);
+			player.setPoseAnimation(walk);
+			player.setPoseAnimationFrame(walkFrame);
+			return player.getModel();
+		}
+		finally
+		{
+			try
+			{
+				player.setPoseAnimation(pose);
+				player.setPoseAnimationFrame(poseFrame);
+			}
+			finally
+			{
+				restoreAction(player, action, actionFrame);
+			}
 		}
 	}
 
@@ -1484,7 +2255,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// someone else waiting is the one shown there (see middleOf).
 		boolean drawnStepsAside = stacks.isUnplaced(drawn.getId()) && !isLocal(drawn)
 			&& otherInMiddle(tileKey, wv, x, z, drawn.getId());
-		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0 && !drawnStepsAside
+		// ...and someone with a spot elsewhere, still in the middle before setting off, doesn't take it.
+		boolean drawnHoldsMiddle = stacks.isUnplaced(drawn.getId()) || isLocal(drawn)
+			|| offsets.targetIsMiddle(drawn.getId()) && memberOf(tileKey, drawn.getId());
+		boolean middleDrawn = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0 && !drawnStepsAside && drawnHoldsMiddle
 			|| stacks.middleOutOfSight(tileKey);
 		int chosenMiddle = middleOf(tileKey, wv, x, z);
 		Player local = client.getLocalPlayer();
@@ -1516,6 +2290,15 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				int mdx = offsets.dx(id);
 				int mdz = offsets.dz(id);
 				boolean inMiddle = mdx == 0 && mdz == 0 && !offsets.isWalking(id);
+				// Still in the middle without holding it (given a spot elsewhere, not yet setting off,
+				// or held back and not one of the stack yet): hidden there while someone else is shown.
+				boolean sitter = inMiddle && id != localId && !stacks.isUnplaced(id) && !reallyMoving(mate)
+					&& (!offsets.targetIsMiddle(id) || i >= mates.length && !memberOf(tileKey, id));
+				if (sitter && chosenMiddle >= 0 && chosenMiddle != id)
+				{
+					noteHidden(mate, id, HideLog.NO_SPOT_MIDDLE_TAKEN, chosenMiddle, wv, tileKey);
+					continue;
+				}
 				if (inMiddle && id != localId && stacks.isUnplaced(id) && (middleDrawn || chosenMiddle >= 0 && id != chosenMiddle))
 				{
 					boolean waiting = stacks.isWaiting(id);
@@ -1525,7 +2308,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					}
 					else
 					{
-						boolean drawnHasIt = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0 && !drawnStepsAside;
+						boolean drawnHasIt = offsets.dx(drawn.getId()) == 0 && offsets.dz(drawn.getId()) == 0 && !drawnStepsAside && drawnHoldsMiddle;
 						noteHidden(mate, id, waiting ? HideLog.WAITING_MIDDLE_TAKEN : HideLog.NO_SPOT_MIDDLE_TAKEN,
 							drawnHasIt ? drawn.getId() : chosenMiddle, wv, tileKey);
 					}
@@ -1549,7 +2332,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					noteHidden(mate, id, HideLog.OTHER_PLUGIN, -1, wv, tileKey);
 					continue; // hidden by another plugin, e.g. Entity Hider: respect that
 				}
-				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);
+				int mateOrientation = drawnFacing(mate, tileKey, mate.getCurrentOrientation(), mdx, mdz, x, z, wv);
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
 				boolean walking = offsets.isWalking(id);
 				noteMotion(mate, id, mdx, mdz, walking && (busyWalks || mate.getAnimation() == -1), false);
@@ -1579,11 +2362,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 						continue;
 					}
 					delegate.drawTemp(projection, scene, gameObject, mateModel, mateOrientation, x + mdx, mateY, z + mdz);
+					markDrawn(mate);
 				}
 				revealedFrame[id] = frame;
 				revealedDraws++;
 				td.count++;
-				middleDrawn |= inMiddle;
+				// Only someone who holds the middle takes it: one drawn there on their way out doesn't.
+				middleDrawn |= inMiddle && (id == localId || stacks.isUnplaced(id) || offsets.targetIsMiddle(id));
 			}
 			catch (RuntimeException e)
 			{
@@ -1765,6 +2550,14 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			// The game has handed over everyone for this frame: now they're drawn, farthest first.
 			opaquePassSeen = true;
+			try
+			{
+				drawRefused(offsets.frame());
+			}
+			catch (RuntimeException e)
+			{
+				revealErrors++;
+			}
 			countDrops();
 			countBlinks(offsets.frame());
 			drawKept();
@@ -1775,6 +2568,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	@Override
 	public void drawZoneOpaque(Projection projection, Scene scene, int zx, int zy)
 	{
+		if (isMainScene(scene))
+		{
+			// The main scene's zones are counted from the edge of its extended area, five zones out.
+			noteZone(zx - MAIN_ZONE_OFFSET, zy - MAIN_ZONE_OFFSET);
+		}
 		delegate.drawZoneOpaque(projection, scene, zx, zy);
 	}
 

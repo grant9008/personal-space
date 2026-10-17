@@ -556,18 +556,30 @@ final class CrowdPlanner
 	/** Tiles where someone the game shows was left in the middle without a spot last tick. */
 	private Set<Long> waited = new HashSet<>();
 
-	/** How far from the middle of a fire's tile the nearest spots round it are: just clear of the fire. */
-	static final int FIRE_SIDE = HALF_TILE + PersonalSpacePlugin.FIRE_CLEARANCE + 1;
+	/**
+	 * How far from the middle of a fire's tile the nearest spots round it are: clear of the fire's
+	 * flames, which reach a little past its tile. (Just past the tile's edge, people still stood in them.)
+	 */
+	static final int FIRE_SIDE = HALF_TILE + 36;
 	/** How far along a side of the fire, from its middle, the next spots on that side are. */
 	private static final int FIRE_ALONG = 24;
 	/** The circle the people at a fire on the tiles beside it stand on. Every point of it clears the fire. */
 	private static final int FIRE_CIRCLE = 2 * HALF_TILE;
 	/**
-	 * Nobody standing on a fire is given a spot, or keeps one, closer than this to anyone else drawn:
-	 * your personal space. It is a little less than {@link #NEIGHBOUR_GAP}, or a fire boxed in by
-	 * people at it on every side would have nowhere they could stand.
+	 * Nobody standing on a fire is given a spot closer than this to anyone else drawn: a body's width.
+	 * At {@link #YOUR_SPACE}, a spot at the middle of a side of the fire was allowed 43 from someone
+	 * standing in the middle of the tile beyond it, and the two, drawn almost in one place, took turns
+	 * showing through each other. With no spot this clear, they wait in the fire.
 	 */
-	static final int FIRE_GAP = YOUR_SPACE;
+	static final int FIRE_GAP = 56;
+	/** ...and a spot is kept while nobody else is drawn closer than this: a little less, so it isn't given up and back. */
+	static final int FIRE_KEEP = 48;
+	/**
+	 * ...and nobody standing on a fire is drawn closer than this to you: they take the other sides
+	 * of the fire, and the side you're on is yours. Drawn a third of a tile from you, between you and
+	 * the fire, someone in the flames took your place at it.
+	 */
+	static final int FIRE_YOUR_GAP = 112;
 	/**
 	 * Where people standing on a fire may be drawn, as {east, north} from the middle of its tile, best
 	 * first: the middle of each side just clear of the fire, then along each side, then round the
@@ -601,8 +613,23 @@ final class CrowdPlanner
 			double a = Math.toRadians(degrees);
 			out.add(new int[]{(int) Math.round(FIRE_CIRCLE * Math.cos(a)), (int) Math.round(FIRE_CIRCLE * Math.sin(a))});
 		}
+		// A wider ring, for a fire with every nearer spot taken: further out beats waiting in it.
+		for (int degrees = 10; degrees < 360; degrees += 20)
+		{
+			double a = Math.toRadians(degrees);
+			out.add(new int[]{(int) Math.round(FIRE_OUTER * Math.cos(a)), (int) Math.round(FIRE_OUTER * Math.sin(a))});
+		}
 		return out;
 	}
+
+	/** The wider ring round a fire. */
+	private static final int FIRE_OUTER = 2 * HALF_TILE + 40;
+	/**
+	 * With no spot round a fire a body's width clear, someone standing on it takes the roomiest one
+	 * that is at least as clear as a spot is kept, rather than wait in the flames: close beside
+	 * someone, never close enough to show through them.
+	 */
+	static final int FIRE_FALLBACK_GAP = FIRE_KEEP;
 
 	/** Whether one of these fires (as {@link Surroundings#firesNear} gives them) is on the tile itself. */
 	private static boolean fireUnderfoot(List<int[]> fires)
@@ -680,17 +707,154 @@ final class CrowdPlanner
 		fireSpotOf = now;
 	}
 
+	/**
+	 * Spots round a fire for the people on its tile, as {id: index into {@link #FIRE_SPOTS}}, clear
+	 * of everyone in {@code taken} (each spot given is added to it). Remembering, everyone keeps the
+	 * spot they had while it stays clear and goes back to one kept for them; otherwise it's laid out
+	 * afresh, in order.
+	 */
+	private Map<Integer, Integer> fireSpots(long tile, List<Integer> ids, boolean remember, boolean[] standable, List<double[]> taken, int capacity)
+	{
+		boolean[] used = new boolean[FIRE_SPOTS.size()];
+		java.util.function.BiPredicate<Integer, Integer> clear = (i, gap) ->
+		{
+			if (used[i] || !standable[i])
+			{
+				return false;
+			}
+			for (double[] b : taken)
+			{
+				if (Math.hypot(b[0] - FIRE_SPOTS.get(i)[0], b[1] - FIRE_SPOTS.get(i)[1]) < (b.length > 2 && b[2] > 0 ? Math.max(gap, FIRE_YOUR_GAP) : gap))
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+		IntPredicate free = i -> clear.test(i, FIRE_GAP);
+		IntPredicate stillFree = i -> clear.test(i, FIRE_KEEP);
+		Map<Integer, Integer> given = new LinkedHashMap<>();
+		List<Integer> need = new ArrayList<>();
+		// Everyone whose spot is still clear keeps it.
+		for (int id : ids)
+		{
+			long[] had = remember ? fireSpotOf.get(id) : null;
+			int was = had != null && had[0] == tile ? (int) had[1] : -1;
+			if (was >= 0 && given.size() < capacity && stillFree.test(was))
+			{
+				given.put(id, was);
+				used[was] = true;
+				taken.add(new double[]{FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(was)[1]});
+			}
+			else
+			{
+				need.add(id);
+			}
+		}
+		// Then the rest: whoever had to leave their spot steps to the clear one nearest it,
+		// whoever comes back from the middle goes back to the spot kept for them, and anyone
+		// new takes the best clear spot.
+		for (int id : need)
+		{
+			if (given.size() >= capacity)
+			{
+				break;
+			}
+			long[] had = remember ? fireSpotOf.get(id) : null;
+			int was = had != null && had[0] == tile ? (int) had[1] : -1;
+			long[] held = remember ? fireSpotHeld.get(id) : null;
+			int pick = was < 0 && held != null && held[0] == tile && free.test((int) held[1]) ? (int) held[1] : -1;
+			if (pick < 0)
+			{
+				double nearest = Double.MAX_VALUE;
+				for (int i = 0; i < FIRE_SPOTS.size(); i++)
+				{
+					if (!free.test(i))
+					{
+						continue;
+					}
+					if (was < 0)
+					{
+						pick = i;
+						break;
+					}
+					double d = Math.hypot(FIRE_SPOTS.get(i)[0] - FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(i)[1] - FIRE_SPOTS.get(was)[1]);
+					if (d < nearest)
+					{
+						nearest = d;
+						pick = i;
+					}
+				}
+			}
+			if (pick < 0)
+			{
+				// Nothing a body's width clear: the roomiest spot that isn't inside anyone, and
+				// not on your side.
+				double roomiest = FIRE_FALLBACK_GAP;
+				for (int i = 0; i < FIRE_SPOTS.size(); i++)
+				{
+					if (used[i] || !standable[i])
+					{
+						continue;
+					}
+					double room = Double.MAX_VALUE;
+					for (double[] b : taken)
+					{
+						double d = Math.hypot(b[0] - FIRE_SPOTS.get(i)[0], b[1] - FIRE_SPOTS.get(i)[1]);
+						room = b.length > 2 && b[2] > 0 && d < FIRE_YOUR_GAP ? -1 : Math.min(room, d);
+						if (room < 0)
+						{
+							break;
+						}
+					}
+					if (room >= roomiest)
+					{
+						roomiest = room;
+						pick = i;
+					}
+				}
+			}
+			if (pick >= 0)
+			{
+				given.put(id, pick);
+				used[pick] = true;
+				taken.add(new double[]{FIRE_SPOTS.get(pick)[0], FIRE_SPOTS.get(pick)[1]});
+			}
+		}
+		return given;
+	}
+
+	/** Diagnostics: fires laid out afresh to make room for someone left waiting in the flames. */
+	long fireRepacks;
+
+	/** How much nearer a fire a spot must be to count as the one nearest it. */
+	static final int NEARER_THE_FIRE = 16;
+
+	private static double fromFire(int[] spot, int[] fire)
+	{
+		return Math.hypot(spot[0] - fire[0], spot[1] - fire[1]);
+	}
+
 	/** {@link #layOutOnFires}, for the fires anyone stands on this tick: who stands where goes in {@code now}. */
 	private void layOutRoundFires(Plan plan, Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, List<Integer>> onFires,
 		Set<Long> alone, Set<Integer> placed, IntPredicate shown, int capacity, Map<Integer, long[]> now, Surroundings around)
 	{
-		// Everyone else drawn, as {plane, east, north}: at their spots, and one in the middle of any
-		// tile where someone without a spot is drawn (you always are).
+		// Everyone else drawn, as {plane, east, north, 1 if it's you}: at their spots, and one in the
+		// middle of any tile where someone without a spot is drawn: you always are, and so is anyone
+		// alone on their tile, whom the game draws whatever the middle of it is doing.
+		int yourId = -1;
+		for (List<StackSpreader.Entry> there : byTile.values())
+		{
+			for (StackSpreader.Entry en : there)
+			{
+				yourId = en.local ? en.id : yourId;
+			}
+		}
 		List<double[]> bodies = new ArrayList<>();
 		for (StackSpreader.Placement p : plan.placements)
 		{
 			bodies.add(new double[]{StackRegistry.plane(p.tile), StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
-				StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz});
+				StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz, p.id == yourId ? 1 : 0});
 		}
 		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
 		{
@@ -699,10 +863,10 @@ final class CrowdPlanner
 			for (StackSpreader.Entry en : e.getValue())
 			{
 				if (!placed.contains(en.id) && (layingOut == null || !layingOut.contains(en.id))
-					&& (en.local || shown.test(en.id) && !plan.middleOutOfSight.contains(tile)))
+					&& (en.local || shown.test(en.id) && (e.getValue().size() == 1 || !plan.middleOutOfSight.contains(tile))))
 				{
 					bodies.add(new double[]{StackRegistry.plane(tile), StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE,
-						StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE});
+						StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE, en.local ? 1 : 0});
 					break;
 				}
 			}
@@ -718,9 +882,9 @@ final class CrowdPlanner
 			List<double[]> taken = new ArrayList<>();
 			for (double[] b : bodies)
 			{
-				if (b[0] == plane && Math.hypot(b[1] - fx, b[2] - fz) < FIRE_CIRCLE + FIRE_GAP)
+				if (b[0] == plane && Math.hypot(b[1] - fx, b[2] - fz) < FIRE_OUTER + (b[3] > 0 ? FIRE_YOUR_GAP : FIRE_GAP))
 				{
-					taken.add(new double[]{b[1] - fx, b[2] - fz});
+					taken.add(new double[]{b[1] - fx, b[2] - fz, b[3]});
 				}
 			}
 			boolean[] standable = new boolean[FIRE_SPOTS.size()];
@@ -730,83 +894,28 @@ final class CrowdPlanner
 				standable[i] = around.canStand(tile, FIRE_SPOTS.get(i)[0], FIRE_SPOTS.get(i)[1]);
 				spots += standable[i] ? 1 : 0;
 			}
-			boolean[] used = new boolean[FIRE_SPOTS.size()];
-			IntPredicate free = i ->
-			{
-				if (used[i] || !standable[i])
-				{
-					return false;
-				}
-				for (double[] b : taken)
-				{
-					if (Math.hypot(b[0] - FIRE_SPOTS.get(i)[0], b[1] - FIRE_SPOTS.get(i)[1]) < FIRE_GAP)
-					{
-						return false;
-					}
-				}
-				return true;
-			};
 			List<Integer> ids = onFires.get(tile);
-			Map<Integer, Integer> given = new LinkedHashMap<>();
-			List<Integer> need = new ArrayList<>();
-			// Everyone whose spot is still clear keeps it.
-			for (int id : ids)
+			List<double[]> before = new ArrayList<>(taken);
+			Map<Integer, Integer> given = fireSpots(tile, ids, true, standable, taken, capacity);
+			if (given.size() < Math.min(ids.size(), capacity))
 			{
-				long[] had = fireSpotOf.get(id);
-				int was = had != null && had[0] == tile ? (int) had[1] : -1;
-				if (was >= 0 && given.size() < capacity && free.test(was))
+				// Someone left waiting in the fire. Everyone keeping their spot can leave the gaps
+				// between them too small for one more, where laid out afresh (turning the plugin off
+				// and on) they all fit: then they're laid out afresh.
+				List<double[]> afresh = new ArrayList<>(before);
+				Map<Integer, Integer> repacked = fireSpots(tile, ids, false, standable, afresh, capacity);
+				if (repacked.size() > given.size())
 				{
-					given.put(id, was);
-					used[was] = true;
-					taken.add(new double[]{FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(was)[1]});
-				}
-				else
-				{
-					need.add(id);
+					given = repacked;
+					taken.clear();
+					taken.addAll(afresh);
+					fireRepacks++;
 				}
 			}
-			// Then the rest: whoever had to leave their spot steps to the clear one nearest it,
-			// whoever comes back from the middle goes back to the spot kept for them, and anyone
-			// new takes the best clear spot.
-			for (int id : need)
+			for (Map.Entry<Integer, Integer> g : given.entrySet())
 			{
-				if (given.size() >= capacity)
-				{
-					break;
-				}
-				long[] had = fireSpotOf.get(id);
-				int was = had != null && had[0] == tile ? (int) had[1] : -1;
-				long[] held = fireSpotHeld.get(id);
-				int pick = was < 0 && held != null && held[0] == tile && free.test((int) held[1]) ? (int) held[1] : -1;
-				if (pick < 0)
-				{
-					double nearest = Double.MAX_VALUE;
-					for (int i = 0; i < FIRE_SPOTS.size(); i++)
-					{
-						if (!free.test(i))
-						{
-							continue;
-						}
-						if (was < 0)
-						{
-							pick = i;
-							break;
-						}
-						double d = Math.hypot(FIRE_SPOTS.get(i)[0] - FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(i)[1] - FIRE_SPOTS.get(was)[1]);
-						if (d < nearest)
-						{
-							nearest = d;
-							pick = i;
-						}
-					}
-				}
-				if (pick >= 0)
-				{
-					given.put(id, pick);
-					used[pick] = true;
-					taken.add(new double[]{FIRE_SPOTS.get(pick)[0], FIRE_SPOTS.get(pick)[1]});
-					fireMoves += was >= 0 ? 1 : 0;
-				}
+				long[] had = fireSpotOf.get(g.getKey());
+				fireMoves += had != null && had[0] == tile && had[1] != g.getValue() ? 1 : 0;
 			}
 			for (Map.Entry<Integer, Integer> g : given.entrySet())
 			{
@@ -816,11 +925,25 @@ final class CrowdPlanner
 				now.put(g.getKey(), new long[]{tile, g.getValue()});
 				fireSpotHeld.remove(g.getKey());
 				// The fires after this one keep clear of them too.
-				bodies.add(new double[]{plane, fx + s[0], fz + s[1]});
+				bodies.add(new double[]{plane, fx + s[0], fz + s[1], 0});
 			}
 			if (given.size() < ids.size() && !alone.contains(tile))
 			{
-				bodies.add(new double[]{plane, fx, fz});
+				// Whoever is still left without a spot waits out of sight: nobody is drawn standing
+				// in the flames. Unless it's you, whom the game draws there whatever.
+				boolean youWait = false;
+				for (int id : ids)
+				{
+					youWait |= id == yourId && !given.containsKey(id);
+				}
+				if (youWait)
+				{
+					bodies.add(new double[]{plane, fx, fz, 1});
+				}
+				else
+				{
+					plan.middleOutOfSight.add(tile);
+				}
 			}
 			if (alone.contains(tile) && given.isEmpty())
 			{
@@ -2244,6 +2367,27 @@ final class CrowdPlanner
 			if (east * view[0] + north * view[1] > VIEW_IN_FRONT && Math.abs(north * view[0] - east * view[1]) < VIEW_OVERLAP)
 			{
 				slots.pairSideForYou.put(youTileNow, 1);
+			}
+		}
+		// Beside a fire, the spot nearest it is yours, whoever else is there and wherever the camera
+		// is: you were left further off than someone just standing about by it. Only when it's
+		// really nearer: a row facing the fire is level with it, and the camera's side still counts.
+		slots.fireSideForYou = new HashMap<>();
+		int[] fireBesideYou = youTileNow == Long.MIN_VALUE ? null : plan.fires.get(youTileNow);
+		if (fireBesideYou != null && (fireBesideYou[0] != 0 || fireBesideYou[1] != 0) && withYou != null && withYou.size() >= 2
+			&& yourSpots != null && yourSpots.size() >= 2)
+		{
+			int picked = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
+			int nearest = picked;
+			// Of the spots your group fills, so nobody is left with a gap beside them.
+			for (int s = 0; s < Math.min(Math.min(capacity, withYou.size()), yourSpots.size()); s++)
+			{
+				nearest = fromFire(yourSpots.get(s), fireBesideYou) < fromFire(yourSpots.get(nearest), fireBesideYou) ? s : nearest;
+			}
+			if (fromFire(yourSpots.get(nearest), fireBesideYou) < fromFire(yourSpots.get(picked), fireBesideYou) - NEARER_THE_FIRE)
+			{
+				slots.fireSideForYou.put(youTileNow, nearest);
+				slots.pairSideForYou.put(youTileNow, nearest);
 			}
 		}
 		// Your personal space and line of sight are judged from where you'll stand. The tick you
