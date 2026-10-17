@@ -3284,4 +3284,238 @@ public class CrowdPlannerTest
 			}
 		}
 	}
+
+	/**
+	 * A Forester's Campfire on {@link #TILE}, which can be stood on, while {@code lit[0]}: nobody is
+	 * drawn within the plugin's fire clearance of its tile, as in the game.
+	 */
+	private static CrowdPlanner.Surroundings campfireUnderfoot(boolean[] lit)
+	{
+		return new CrowdPlanner.Surroundings()
+		{
+			private boolean fireOn(int sceneX, int sceneY)
+			{
+				return lit[0] && sceneX == 50 && sceneY == 50;
+			}
+
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + 64 + dx;
+				int z = StackRegistry.sceneY(t) * 128 + 64 + dz;
+				for (int cx : new int[]{x - PersonalSpacePlugin.FIRE_CLEARANCE, x + PersonalSpacePlugin.FIRE_CLEARANCE})
+				{
+					for (int cz : new int[]{z - PersonalSpacePlugin.FIRE_CLEARANCE, z + PersonalSpacePlugin.FIRE_CLEARANCE})
+					{
+						if (fireOn(cx >> 7, cz >> 7))
+						{
+							return false;
+						}
+					}
+				}
+				return true;
+			}
+			public boolean facesObstacle(long t, double a) { return false; }
+			public boolean isCounter(long t, double a) { return false; }
+			public boolean facesFire(long t, double a)
+			{
+				return fireOn(StackRegistry.sceneX(t) + (int) Math.round(-Math.sin(a)), StackRegistry.sceneY(t) + (int) Math.round(-Math.cos(a)));
+			}
+			public List<int[]> firesNear(long t)
+			{
+				List<int[]> out = new ArrayList<>();
+				for (int east = -1; east <= 1; east++)
+				{
+					for (int north = -1; north <= 1; north++)
+					{
+						if (fireOn(StackRegistry.sceneX(t) + east, StackRegistry.sceneY(t) + north))
+						{
+							out.add(new int[]{east, north});
+						}
+					}
+				}
+				return out;
+			}
+		};
+	}
+
+	@Test
+	public void peopleStandingOnACampfireStandRoundItAndStayPut()
+	{
+		// Three people tending a Forester's Campfire stand on it, with people tending it on every tile
+		// round them, coming and going. Their tile closed up to make room for the neighbours until
+		// none of its spots cleared the fire: they all waited out of sight in the fire, and glided out
+		// and back every time someone next door came or went.
+		CrowdPlanner.Surroundings campfire = campfireUnderfoot(new boolean[]{true});
+		java.util.Random rnd = new java.util.Random(3);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Long, List<Integer>> there = new java.util.LinkedHashMap<>();
+		int nextId = 100;
+		for (int east = -1; east <= 1; east++)
+		{
+			for (int north = -1; north <= 1; north++)
+			{
+				if (east != 0 || north != 0)
+				{
+					List<Integer> ids = new ArrayList<>();
+					ids.add(nextId++);
+					ids.add(nextId++);
+					there.put(StackRegistry.key(0, 50 + east, 50 + north), ids);
+				}
+			}
+		}
+		Map<Integer, int[]> last = new HashMap<>();
+		int moves = 0;
+		for (int t = 1; t <= 300; t++)
+		{
+			for (List<Integer> ids : there.values())
+			{
+				if (t > 20 && rnd.nextInt(100) < 5)
+				{
+					if (ids.size() > 1 && (ids.size() >= 3 || rnd.nextBoolean()))
+					{
+						ids.remove(rnd.nextInt(ids.size()));
+					}
+					else
+					{
+						ids.add(nextId++);
+					}
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int id = 1; id <= 3; id++)
+			{
+				still.add(new StackSpreader.Entry(id, TILE, false, id * 512, true));
+			}
+			for (Map.Entry<Long, List<Integer>> e : there.entrySet())
+			{
+				int facing = OffsetTable.facing(50 - StackRegistry.sceneX(e.getKey()), 50 - StackRegistry.sceneY(e.getKey()));
+				for (int id : e.getValue())
+				{
+					still.add(new StackSpreader.Entry(id, e.getKey(), false, facing, true));
+				}
+			}
+			CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.DEFAULT_STACK,
+				true, false, t, campfire);
+			if (t < 4)
+			{
+				continue;
+			}
+			Assert.assertArrayEquals("tick " + t + ": they face the fire", new int[]{0, 0}, plan.fires.get(TILE));
+			Map<Integer, int[]> now = spots(plan);
+			Map<Integer, double[]> at = drawnAt(plan, still);
+			for (int id = 1; id <= 3; id++)
+			{
+				int[] spot = now.get(id);
+				Assert.assertNotNull("tick " + t + ": player " + id + " is left waiting in the fire", spot);
+				Assert.assertTrue("tick " + t + ": player " + id + " is drawn in the fire", campfire.canStand(TILE, spot[0], spot[1]));
+				for (Map.Entry<Integer, double[]> other : at.entrySet())
+				{
+					double d = Math.hypot(other.getValue()[0] - at.get(id)[0], other.getValue()[1] - at.get(id)[1]);
+					Assert.assertTrue("tick " + t + ": player " + id + " is drawn " + d + " from player " + other.getKey(),
+						other.getKey() == id || d >= CrowdPlanner.YOUR_SPACE);
+				}
+				int[] was = last.get(id);
+				moves += was != null && (was[0] != spot[0] || was[1] != spot[1]) ? 1 : 0;
+			}
+			last = now;
+		}
+		Assert.assertTrue("the people on the fire moved " + moves + " times", moves <= 3);
+	}
+
+	@Test
+	public void someoneAloneOnACampfireStandsBesideItNotInIt()
+	{
+		// Alone on their tile they were left to the game, which draws them in the flames.
+		boolean[] lit = {true};
+		CrowdPlanner.Surroundings campfire = campfireUnderfoot(lit);
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> alone = new ArrayList<>();
+		alone.add(new StackSpreader.Entry(1, TILE, false, NORTH, true));
+		int[] spot = null;
+		for (int t = 1; t <= 30; t++)
+		{
+			if (t == 21)
+			{
+				lit[0] = false;
+			}
+			CrowdPlanner.Plan plan = planner.plan(alone, q -> true, PersonalSpaceConfig.SPACING_WIDE,
+				PersonalSpaceConfig.DEFAULT_STACK, true, false, t, campfire);
+			Map<Integer, int[]> now = spots(plan);
+			if (t <= 20)
+			{
+				Assert.assertNotNull("tick " + t + ": they're drawn in the fire", now.get(1));
+				Assert.assertTrue("tick " + t + ": their spot is in the fire", campfire.canStand(TILE, now.get(1)[0], now.get(1)[1]));
+				Assert.assertArrayEquals("tick " + t + ": they face the fire", new int[]{0, 0}, plan.fires.get(TILE));
+				if (spot != null)
+				{
+					Assert.assertArrayEquals("tick " + t + ": they moved", spot, now.get(1));
+				}
+				spot = now.get(1);
+			}
+			else
+			{
+				Assert.assertTrue("tick " + t + ": with the fire out, they're left where they stand", plan.placements.isEmpty());
+			}
+		}
+	}
+
+	@Test
+	public void yourOwnCharacterAloneOnACampfireIsLeftAloneUnlessMoveMeIsOn()
+	{
+		CrowdPlanner.Surroundings campfire = campfireUnderfoot(new boolean[]{true});
+		List<StackSpreader.Entry> you = new ArrayList<>();
+		you.add(new StackSpreader.Entry(1, TILE, true, NORTH, true));
+		CrowdPlanner off = new CrowdPlanner();
+		CrowdPlanner on = new CrowdPlanner();
+		CrowdPlanner.Plan notMoved = null;
+		CrowdPlanner.Plan moved = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			notMoved = off.plan(you, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.DEFAULT_STACK, true, false, t, campfire);
+			moved = on.plan(you, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.DEFAULT_STACK, true, true, t, campfire);
+		}
+		Assert.assertTrue(notMoved.placements.isEmpty());
+		Assert.assertNotNull(spots(moved).get(1));
+	}
+
+	@Test
+	public void theLastOneLeftOnACampfireStaysBesideItUntilItGoesOut()
+	{
+		// Walking back to the middle of their tile, the last one tending the fire glided into it, and
+		// out again as soon as anyone else came.
+		boolean[] lit = {true};
+		CrowdPlanner.Surroundings campfire = campfireUnderfoot(lit);
+		CrowdPlanner planner = new CrowdPlanner();
+		List<StackSpreader.Entry> both = new ArrayList<>();
+		both.add(new StackSpreader.Entry(1, TILE, false, NORTH, true));
+		both.add(new StackSpreader.Entry(2, TILE, false, SOUTH, true));
+		List<StackSpreader.Entry> one = both.subList(0, 1);
+		int[] spot = null;
+		for (int t = 1; t <= 50; t++)
+		{
+			if (t == 41)
+			{
+				lit[0] = false;
+			}
+			CrowdPlanner.Plan plan = planner.plan(t <= 5 ? both : one, q -> true, PersonalSpaceConfig.SPACING_WIDE,
+				PersonalSpaceConfig.DEFAULT_STACK, true, false, t, campfire);
+			Map<Integer, int[]> now = spots(plan);
+			if (t <= 5)
+			{
+				spot = now.get(1);
+				Assert.assertNotNull("tick " + t + ": player 1 is left waiting in the fire", spot);
+				Assert.assertTrue("tick " + t + ": player 1 is drawn in the fire", campfire.canStand(TILE, spot[0], spot[1]));
+			}
+			else if (t <= 40)
+			{
+				Assert.assertArrayEquals("tick " + t + ": the last one left moved", spot, now.get(1));
+				Assert.assertArrayEquals("tick " + t + ": they face the fire", new int[]{0, 0}, plan.fires.get(TILE));
+			}
+			else
+			{
+				Assert.assertTrue("tick " + t + ": with the fire out, they're alone on their tile", plan.placements.isEmpty());
+				Assert.assertNull("tick " + t + ": there is no fire to face", plan.fires.get(TILE));
+			}
+		}
+	}
 }

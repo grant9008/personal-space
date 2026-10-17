@@ -22,6 +22,8 @@ import java.util.function.IntPredicate;
  * for a few seconds, so if the others come straight back everyone returns to the same places.)</li>
  * <li>The tile's shape comes from {@link ShapeMemory}, its spots from {@link StackSpreader#spots},
  * and who stands where from {@link SlotBook}.</li>
+ * <li>People standing on a fire, which a Forester's Campfire allows, stand round it instead, and
+ * the last one left there keeps their spot beside it: see {@link #layOutOnFires}.</li>
  * </ul>
  *
  * <p>Client thread only. Knows nothing about RuneLite; unit tested.
@@ -553,6 +555,287 @@ final class CrowdPlanner
 
 	/** Tiles where someone the game shows was left in the middle without a spot last tick. */
 	private Set<Long> waited = new HashSet<>();
+
+	/** How far from the middle of a fire's tile the nearest spots round it are: just clear of the fire. */
+	static final int FIRE_SIDE = HALF_TILE + PersonalSpacePlugin.FIRE_CLEARANCE + 1;
+	/** How far along a side of the fire, from its middle, the next spots on that side are. */
+	private static final int FIRE_ALONG = 24;
+	/** The circle the people at a fire on the tiles beside it stand on. Every point of it clears the fire. */
+	private static final int FIRE_CIRCLE = 2 * HALF_TILE;
+	/**
+	 * Nobody standing on a fire is given a spot, or keeps one, closer than this to anyone else drawn:
+	 * your personal space. It is a little less than {@link #NEIGHBOUR_GAP}, or a fire boxed in by
+	 * people at it on every side would have nowhere they could stand.
+	 */
+	static final int FIRE_GAP = YOUR_SPACE;
+	/**
+	 * Where people standing on a fire may be drawn, as {east, north} from the middle of its tile, best
+	 * first: the middle of each side just clear of the fire, then along each side, then round the
+	 * circle the people at the fire next door stand on. All of them are out over the tiles beside it.
+	 */
+	static final List<int[]> FIRE_SPOTS = fireSpots();
+	/** Who stood at which of {@link #FIRE_SPOTS} last tick: id to {tile, spot}. */
+	private Map<Integer, long[]> fireSpotOf = new HashMap<>();
+	/** A spot round a fire kept a while for someone who lost it, to go back to: id to {tile, spot, until}. */
+	private final Map<Integer, long[]> fireSpotHeld = new HashMap<>();
+	/** Diagnostics: times someone standing on a fire stepped to another spot round it. */
+	private long fireMoves;
+
+	private static List<int[]> fireSpots()
+	{
+		List<int[]> out = new ArrayList<>();
+		int[][] sides = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+		for (int[] s : sides)
+		{
+			out.add(new int[]{s[0] * FIRE_SIDE, s[1] * FIRE_SIDE});
+		}
+		for (int[] s : sides)
+		{
+			for (int k : new int[]{1, -1})
+			{
+				out.add(new int[]{s[0] * FIRE_SIDE - s[1] * FIRE_ALONG * k, s[1] * FIRE_SIDE + s[0] * FIRE_ALONG * k});
+			}
+		}
+		for (int degrees = 0; degrees < 360; degrees += 15)
+		{
+			double a = Math.toRadians(degrees);
+			out.add(new int[]{(int) Math.round(FIRE_CIRCLE * Math.cos(a)), (int) Math.round(FIRE_CIRCLE * Math.sin(a))});
+		}
+		return out;
+	}
+
+	/** Whether one of these fires (as {@link Surroundings#firesNear} gives them) is on the tile itself. */
+	private static boolean fireUnderfoot(List<int[]> fires)
+	{
+		for (int[] fire : fires)
+		{
+			if (fire[0] == 0 && fire[1] == 0)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Lays out the crowds standing on a fire, once everyone else's spots are known. A Forester's
+	 * Campfire can be stood on, and people tending one stand right on it, where nobody is drawn.
+	 * Made room for like any other crowd, a busy campfire's own tile was closed up until none of its
+	 * spots cleared the fire: everyone on it waited out of sight in the fire, and slid out and back
+	 * whenever someone next door came or went. Tending never pauses, so every move was a glide.
+	 *
+	 * <p>Instead they stand round the fire at {@link #FIRE_SPOTS}, wherever nobody else is drawn
+	 * within {@link #FIRE_GAP}. Everyone keeps their spot while it stays clear. Only when someone
+	 * comes too close do they step to the clear spot nearest it, or wait in the middle if there is
+	 * none, and they go back to the same spot once it's clear. Someone alone on the fire stands
+	 * beside it too, so the last one left keeps their spot rather than going back into the fire and
+	 * out again when someone else comes.
+	 *
+	 * @param onFires the people on each fire's tile who may be moved, in the order they get spots
+	 * @param placed  everyone given a spot so far; anyone given one here is added
+	 */
+	private void layOutOnFires(Plan plan, Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, List<Integer>> onFires,
+		Set<Integer> placed, IntPredicate shown, int capacity, boolean includeLocal, int tick, Surroundings around)
+	{
+		fireSpotHeld.values().removeIf(h -> h[2] < tick);
+		Set<Long> alone = new HashSet<>();
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			long tile = e.getKey();
+			StackSpreader.Entry only = null;
+			int seen = 0;
+			for (StackSpreader.Entry en : e.getValue())
+			{
+				if (shown.test(en.id))
+				{
+					only = en;
+					seen++;
+				}
+			}
+			// Alone on a fire too: drawn standing in the flames, burning logs, they looked like nobody
+			// had told them where to stand.
+			if (!onFires.containsKey(tile) && seen == 1 && (includeLocal || !only.local)
+				&& fireUnderfoot(around.firesNear(tile)))
+			{
+				List<Integer> one = new ArrayList<>(1);
+				one.add(only.id);
+				onFires.put(tile, one);
+				alone.add(tile);
+			}
+		}
+		Map<Integer, long[]> now = new HashMap<>();
+		if (!onFires.isEmpty())
+		{
+			layOutRoundFires(plan, byTile, onFires, alone, placed, shown, capacity, now, around);
+		}
+		// Whoever lost their spot round a fire (waiting in the middle, the last to leave, or the fire
+		// gone) has it kept for them a while.
+		for (Map.Entry<Integer, long[]> e : fireSpotOf.entrySet())
+		{
+			if (!now.containsKey(e.getKey()))
+			{
+				fireSpotHeld.put(e.getKey(), new long[]{e.getValue()[0], e.getValue()[1], tick + SlotBook.HOLD_TICKS});
+			}
+		}
+		fireSpotOf = now;
+	}
+
+	/** {@link #layOutOnFires}, for the fires anyone stands on this tick: who stands where goes in {@code now}. */
+	private void layOutRoundFires(Plan plan, Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, List<Integer>> onFires,
+		Set<Long> alone, Set<Integer> placed, IntPredicate shown, int capacity, Map<Integer, long[]> now, Surroundings around)
+	{
+		// Everyone else drawn, as {plane, east, north}: at their spots, and one in the middle of any
+		// tile where someone without a spot is drawn (you always are).
+		List<double[]> bodies = new ArrayList<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			bodies.add(new double[]{StackRegistry.plane(p.tile), StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
+				StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz});
+		}
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			long tile = e.getKey();
+			List<Integer> layingOut = onFires.get(tile);
+			for (StackSpreader.Entry en : e.getValue())
+			{
+				if (!placed.contains(en.id) && (layingOut == null || !layingOut.contains(en.id))
+					&& (en.local || shown.test(en.id) && !plan.middleOutOfSight.contains(tile)))
+				{
+					bodies.add(new double[]{StackRegistry.plane(tile), StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE,
+						StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE});
+					break;
+				}
+			}
+		}
+
+		List<Long> fires = new ArrayList<>(onFires.keySet());
+		fires.sort(Comparator.naturalOrder());
+		for (long tile : fires)
+		{
+			int plane = StackRegistry.plane(tile);
+			double fx = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE;
+			double fz = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE;
+			List<double[]> taken = new ArrayList<>();
+			for (double[] b : bodies)
+			{
+				if (b[0] == plane && Math.hypot(b[1] - fx, b[2] - fz) < FIRE_CIRCLE + FIRE_GAP)
+				{
+					taken.add(new double[]{b[1] - fx, b[2] - fz});
+				}
+			}
+			boolean[] standable = new boolean[FIRE_SPOTS.size()];
+			int spots = 0;
+			for (int i = 0; i < FIRE_SPOTS.size(); i++)
+			{
+				standable[i] = around.canStand(tile, FIRE_SPOTS.get(i)[0], FIRE_SPOTS.get(i)[1]);
+				spots += standable[i] ? 1 : 0;
+			}
+			boolean[] used = new boolean[FIRE_SPOTS.size()];
+			IntPredicate free = i ->
+			{
+				if (used[i] || !standable[i])
+				{
+					return false;
+				}
+				for (double[] b : taken)
+				{
+					if (Math.hypot(b[0] - FIRE_SPOTS.get(i)[0], b[1] - FIRE_SPOTS.get(i)[1]) < FIRE_GAP)
+					{
+						return false;
+					}
+				}
+				return true;
+			};
+			List<Integer> ids = onFires.get(tile);
+			Map<Integer, Integer> given = new LinkedHashMap<>();
+			List<Integer> need = new ArrayList<>();
+			// Everyone whose spot is still clear keeps it.
+			for (int id : ids)
+			{
+				long[] had = fireSpotOf.get(id);
+				int was = had != null && had[0] == tile ? (int) had[1] : -1;
+				if (was >= 0 && given.size() < capacity && free.test(was))
+				{
+					given.put(id, was);
+					used[was] = true;
+					taken.add(new double[]{FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(was)[1]});
+				}
+				else
+				{
+					need.add(id);
+				}
+			}
+			// Then the rest: whoever had to leave their spot steps to the clear one nearest it,
+			// whoever comes back from the middle goes back to the spot kept for them, and anyone
+			// new takes the best clear spot.
+			for (int id : need)
+			{
+				if (given.size() >= capacity)
+				{
+					break;
+				}
+				long[] had = fireSpotOf.get(id);
+				int was = had != null && had[0] == tile ? (int) had[1] : -1;
+				long[] held = fireSpotHeld.get(id);
+				int pick = was < 0 && held != null && held[0] == tile && free.test((int) held[1]) ? (int) held[1] : -1;
+				if (pick < 0)
+				{
+					double nearest = Double.MAX_VALUE;
+					for (int i = 0; i < FIRE_SPOTS.size(); i++)
+					{
+						if (!free.test(i))
+						{
+							continue;
+						}
+						if (was < 0)
+						{
+							pick = i;
+							break;
+						}
+						double d = Math.hypot(FIRE_SPOTS.get(i)[0] - FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(i)[1] - FIRE_SPOTS.get(was)[1]);
+						if (d < nearest)
+						{
+							nearest = d;
+							pick = i;
+						}
+					}
+				}
+				if (pick >= 0)
+				{
+					given.put(id, pick);
+					used[pick] = true;
+					taken.add(new double[]{FIRE_SPOTS.get(pick)[0], FIRE_SPOTS.get(pick)[1]});
+					fireMoves += was >= 0 ? 1 : 0;
+				}
+			}
+			for (Map.Entry<Integer, Integer> g : given.entrySet())
+			{
+				int[] s = FIRE_SPOTS.get(g.getValue());
+				plan.placements.add(new StackSpreader.Placement(g.getKey(), tile, s[0], s[1]));
+				placed.add(g.getKey());
+				now.put(g.getKey(), new long[]{tile, g.getValue()});
+				fireSpotHeld.remove(g.getKey());
+				// The fires after this one keep clear of them too.
+				bodies.add(new double[]{plane, fx + s[0], fz + s[1]});
+			}
+			if (given.size() < ids.size() && !alone.contains(tile))
+			{
+				bodies.add(new double[]{plane, fx, fz});
+			}
+			if (alone.contains(tile) && given.isEmpty())
+			{
+				continue;
+			}
+			int seen = 0;
+			for (StackSpreader.Entry en : byTile.get(tile))
+			{
+				seen += shown.test(en.id) ? 1 : 0;
+			}
+			plan.fires.put(tile, new int[]{0, 0});
+			plan.tiles.put(tile, new TileReport(alone.contains(tile) ? "alone by the fire" : "crowd on the fire", FIRE_SIDE, seen,
+				given.size(), spots, FIRE_SPOTS.size() - spots));
+		}
+	}
 
 	/**
 	 * How a crowd of {@code people} makes room for the groups and people on the tiles around it.
@@ -1515,6 +1798,7 @@ final class CrowdPlanner
 		Map<Long, Integer> shownByTile = new HashMap<>();
 		Map<Long, Integer> blockedByTile = new HashMap<>();
 		List<Straight> pendingStraight = new ArrayList<>();
+		Map<Long, List<Integer>> onFires = new HashMap<>();
 		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
 		{
 			List<StackSpreader.Entry> everyone = e.getValue();
@@ -1554,6 +1838,15 @@ final class CrowdPlanner
 			}
 			if (movable.isEmpty())
 			{
+				continue;
+			}
+			List<int[]> firesHere = around.firesNear(tile);
+			if (fireUnderfoot(firesHere))
+			{
+				// Standing on a fire (a Forester's Campfire can be stood on): never made room for like
+				// a crowd, nor lined up across it, but stood round the fire once everyone else's spots
+				// are known, by layOutOnFires.
+				onFires.put(tile, movable);
 				continue;
 			}
 			boolean middleTaken = movable.size() < group.size() || movable.size() > capacity;
@@ -1630,11 +1923,8 @@ final class CrowdPlanner
 			{
 				// Gathered round a fire, in a row or not: stay close, whatever the slider says, and
 				// everyone faces the fire.
-				int[] fire = fireFaced(group, around.firesNear(tile));
-				// Standing on the fire, the crowd keeps its own spacing: drawn close in, they'd all be
-				// on the fire, where nobody is drawn.
-				boolean onTheFire = fire != null && fire[0] == 0 && fire[1] == 0;
-				if (fire != null && !onTheFire || (row && around.facesFire(tile, rowAngle)))
+				int[] fire = fireFaced(group, firesHere);
+				if (fire != null || (row && around.facesFire(tile, rowAngle)))
 				{
 					tileSpacing = smallGroupsClose
 						? Math.min(tileSpacing, group.size() <= PersonalSpaceConfig.SMALL_FIRE_GROUP
@@ -2130,6 +2420,7 @@ final class CrowdPlanner
 			plan.tiles.put(tile, new TileReport(shapeByTile.get(tile), spacingByTile.get(tile), shownByTile.get(tile),
 				e.getValue().size(), spots.size(), blockedByTile.get(tile)));
 		}
+		layOutOnFires(plan, byTile, onFires, placed, shown, capacity, includeLocal, tick, around);
 		plan.placements.sort(Comparator.comparingInt(p -> p.id));
 
 		// You first: the draw shim shows only one player in the middle of a tile, and it should be you.
@@ -2250,7 +2541,7 @@ final class CrowdPlanner
 	/** Times a player with a spot was moved to a different spot to fill a gap; total. */
 	long spotMoves()
 	{
-		return slots.moves + lineBook.moves;
+		return slots.moves + lineBook.moves + fireMoves;
 	}
 
 	void clear()
@@ -2276,5 +2567,7 @@ final class CrowdPlanner
 		presence.clear();
 		waited.clear();
 		busyLineUntil.clear();
+		fireSpotOf.clear();
+		fireSpotHeld.clear();
 	}
 }

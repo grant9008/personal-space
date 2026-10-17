@@ -94,10 +94,25 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long orderedDraws;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass. Expected to stay 0. */
 	long passMissedFrames;
-	/** Moving players drawn without walk frames because they were busy with an emote or action. */
+	/** Moving players drawn without walk frames because they were busy and busy walks were off. */
 	long walkSkippedBusy;
-	/** Diagnostics: which animations kept people from walking (animation id to frames), for the report. */
+	/** Moving players drawn walking although busy with an emote or action. */
+	long walkBusy;
+	/** Diagnostics: which actions people were shown walking out of (animation id to frames), for the report. */
 	final Map<Integer, Long> busyAnimations = new HashMap<>();
+	/**
+	 * Whether busy players are shown walking ({@link #modelMidStep}). The plugin switches it off for
+	 * the session if the game ever reports an animation change from it.
+	 */
+	boolean busyWalks = true;
+	/** The busy player whose action is left out of their model right now, or null. */
+	private Actor busySwap;
+
+	/** Client thread. Whether an AnimationChanged for this actor came from leaving their action out of a walk. */
+	boolean fromBusySwap(Actor actor)
+	{
+		return actor != null && actor == busySwap;
+	}
 	/** Moving players drawn without walk frames because the animation couldn't be loaded (yet). */
 	long walkSkippedNoAnimation;
 
@@ -895,7 +910,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				: stacks.drawOrientation(StackRegistry.key(layer, x >> 7, z >> 7), orientation, dx, dz);
 			int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
 			boolean walking = offsets.isWalking(drawnId) && !reallyMoving;
-			noteMotion(drawn, drawnId, dx, dz, walking && drawn.getAnimation() == -1, reallyMoving);
+			noteMotion(drawn, drawnId, dx, dz, walking && (busyWalks || drawn.getAnimation() == -1), reallyMoving);
 			if (mayKeep && withinKeep(wv, x + dx, drawY, z + dz))
 			{
 				keep(projection, scene, gameObject, drawn, drawOrientation, offsets.walkOrientation(drawnId), x + dx, drawY, z + dz, walking);
@@ -1240,19 +1255,18 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 
 	/**
 	 * This player's model mid-step: their own walk animation at the frame matching how long they've
-	 * been walking. Returns null (draw them as the game did) if they're busy with an action such as
-	 * sitting or smithing, or the animation can't be read. Their real animation state is restored
-	 * before returning; the model stays valid until the next model is built.
+	 * been walking. Someone busy with an action (alching, tending a campfire) is shown walking too,
+	 * the action left out for the step (see {@link #modelMidStep}): with it in, it was drawn over the
+	 * walk, legs and all, and they glided. Returns null (draw them as the game did) if the animation
+	 * can't be read, or busy walks have been switched off. The model stays valid until the next model
+	 * is built.
 	 */
 	private Model walkModel(Player player, int id)
 	{
-		if (player.getAnimation() != -1)
+		int action = player.getAnimation();
+		if (action != -1 && !busyWalks)
 		{
 			walkSkippedBusy++;
-			if (busyAnimations.size() < 64 || busyAnimations.containsKey(player.getAnimation()))
-			{
-				busyAnimations.merge(player.getAnimation(), 1L, Long::sum);
-			}
 			return null;
 		}
 		int walk = player.getWalkAnimation();
@@ -1266,18 +1280,88 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			walkSkippedNoAnimation++;
 			return null;
 		}
+		busySwap = action != -1 ? player : null;
+		try
+		{
+			Model model = modelMidStep(player, walk, frame);
+			if (action != -1)
+			{
+				walkBusy++;
+				if (busyAnimations.size() < 64 || busyAnimations.containsKey(action))
+				{
+					busyAnimations.merge(action, 1L, Long::sum);
+				}
+			}
+			return model;
+		}
+		catch (RuntimeException e)
+		{
+			revealErrors++;
+			return null;
+		}
+		finally
+		{
+			busySwap = null;
+		}
+	}
+
+	/**
+	 * Client thread only. This player's model with their walk, at this frame, in place of their pose,
+	 * and any action they're busy with left out of it. Everything is put back before returning, the
+	 * action at the frame it had reached, so the game's own animation update never sees a change.
+	 * Nobody is told about it either: the client's setAnimation unhooks the actor from the animation
+	 * while it writes, so no AnimationChanged is posted or queued (checked in clients 1.12.38 to
+	 * 1.13.2), and the pose has no hook at all. If one ever is, the plugin switches busy walks off
+	 * ({@link #fromBusySwap}).
+	 */
+	static Model modelMidStep(Player player, int walk, int walkFrame)
+	{
+		int action = player.getAnimation();
+		int actionFrame = player.getAnimationFrame();
 		int pose = player.getPoseAnimation();
 		int poseFrame = player.getPoseAnimationFrame();
 		try
 		{
+			if (action != -1)
+			{
+				player.setAnimation(-1);
+			}
 			player.setPoseAnimation(walk);
-			player.setPoseAnimationFrame(frame);
+			player.setPoseAnimationFrame(walkFrame);
 			return player.getModel();
 		}
 		finally
 		{
-			player.setPoseAnimation(pose);
-			player.setPoseAnimationFrame(poseFrame);
+			try
+			{
+				player.setPoseAnimation(pose);
+				player.setPoseAnimationFrame(poseFrame);
+			}
+			finally
+			{
+				if (action != -1)
+				{
+					restoreAction(player, action, actionFrame);
+				}
+			}
+		}
+	}
+
+	/** The action back, then its frame: choosing an action starts it from its first frame. */
+	private static void restoreAction(Player player, int action, int frame)
+	{
+		try
+		{
+			player.setAnimation(action);
+			player.setAnimationFrame(frame);
+		}
+		catch (RuntimeException e)
+		{
+			// Left half-chosen, the actor would stop telling any plugin about its animation changes
+			// until the next one. Cleared instead (that can't fail), the action is just lost until
+			// the server sends the next one. Never seen to happen.
+			player.setAnimation(-1);
+			throw e;
 		}
 	}
 
@@ -1468,7 +1552,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				int mateOrientation = stacks.drawOrientation(tileKey, mate.getCurrentOrientation(), mdx, mdz);
 				int mateY = ground - mate.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + mdx, z + mdz);
 				boolean walking = offsets.isWalking(id);
-				noteMotion(mate, id, mdx, mdz, walking && mate.getAnimation() == -1, false);
+				noteMotion(mate, id, mdx, mdz, walking && (busyWalks || mate.getAnimation() == -1), false);
 				if (mayKeep && withinKeep(wv, x + mdx, mateY, z + mdz))
 				{
 					keep(projection, scene, gameObject, mate, mateOrientation, offsets.walkOrientation(id), x + mdx, mateY, z + mdz, walking);

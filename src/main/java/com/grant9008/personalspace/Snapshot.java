@@ -89,8 +89,12 @@ final class Snapshot
 	long passMissedFrames;
 	/** Times someone waiting in the middle of a tile in front of you was left undrawn; total. */
 	long hiddenInYourWay;
-	/** Moving players drawn without a walk animation because they were busy with an emote or action; total. */
+	/** Moving players drawn without a walk animation because they were busy and busy walks were off; total. */
 	long walkSkippedBusy;
+	/** Moving players shown walking although busy with an emote or action; total. */
+	long walkBusy;
+	/** Whether busy walks were switched off because the game reported an animation change from one. */
+	boolean busyWalksOff;
 	String busyAnimations = "";
 	long driftFrames;
 	long slideBusy;

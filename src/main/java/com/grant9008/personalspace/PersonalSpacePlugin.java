@@ -26,6 +26,7 @@ import net.runelite.api.WorldType;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -63,7 +64,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.8.89";
+	static final String VERSION = "1.8.92";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -130,9 +131,9 @@ public class PersonalSpacePlugin extends Plugin
 	private static final int BUSY_TICKS = 10;
 	/**
 	 * Someone given a spot while in the middle of an action waits in the middle of their tile for
-	 * a break in it, then walks out: moved mid-action they could only glide there, with no walk to
-	 * show. An alcher pauses between casts within a second or two; anyone who never pauses moves
-	 * after this many ticks anyway.
+	 * a break in it, then walks out: moved mid-action, the action is cut off for the step (they
+	 * stand, walk, and drop straight back into it). An alcher pauses between casts within a second
+	 * or two; anyone who never pauses moves after this many ticks anyway.
 	 */
 	private static final int BUSY_WAIT_TICKS = 10;
 	/** ...and someone already in a spot, moved because the crowd round them changed, this many. */
@@ -216,6 +217,11 @@ public class PersonalSpacePlugin extends Plugin
 
 	/** Our shim, while it is the client's installed draw callback. Null when nothing is hooked. Client thread. */
 	private SpreadingDrawCallbacks wrapper;
+	/**
+	 * Set if the game ever reported an animation change while a busy player was being shown walking:
+	 * busy players then glide again, in every shim, until the plugin restarts. Client thread.
+	 */
+	private boolean busyWalksOff;
 
 	private volatile PersonalSpacePanel panel;
 	private NavigationButton navButton;
@@ -490,6 +496,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		wrapper = new SpreadingDrawCallbacks(client, offsets, stacks, probe, renderCallbackManager, target);
 		wrapper.hides = hideLog;
+		wrapper.busyWalks = !busyWalksOff;
 		client.setDrawCallbacks(wrapper);
 		shimInstalls++;
 		log.debug("Hooked draw callbacks in front of {}", target.getClass().getName());
@@ -506,6 +513,23 @@ public class PersonalSpacePlugin extends Plugin
 	}
 
 	// ---- per game tick -----------------------------------------------------------------
+
+	/**
+	 * Busy players are shown walking by leaving their action out of the model for a moment, which the
+	 * client doesn't report to anyone. Should it ever, other plugins (an idle notifier, say) would hear
+	 * of animation changes that never happened: busy walks are switched off at once.
+	 */
+	@Subscribe
+	public void onAnimationChanged(AnimationChanged event)
+	{
+		SpreadingDrawCallbacks w = wrapper;
+		if (w != null && w.fromBusySwap(event.getActor()))
+		{
+			busyWalksOff = true;
+			w.busyWalks = false;
+			log.warn("Animation change reported while showing a busy player walking; busy players glide again until restart");
+		}
+	}
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
@@ -1241,6 +1265,8 @@ public class PersonalSpacePlugin extends Plugin
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
+			s.walkBusy = w.walkBusy;
+			s.busyWalksOff = busyWalksOff;
 			s.slideBusy = w.slideBusy;
 			s.slideWalkingOff = w.slideWalkingOff;
 			s.slideOther = w.slideOther;
