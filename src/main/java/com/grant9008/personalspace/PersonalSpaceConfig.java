@@ -422,7 +422,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_IDLE_SIT,
 		name = "Idle players sit",
-		description = "Off (the default). On: other players standing doing nothing are shown sitting, in the game's Sit emote. They get up the moment they walk or do something. Only on your screen; off in PvP areas.",
+		description = "Off (the default). On: other players who've stood doing nothing for 5 seconds sit down, in the game's Sit emote. They get up the moment they walk or do something; alching counts, even with Alchers behavior on Still. Only on your screen; off in PvP areas.",
 		position = 5
 	)
 	default boolean idlePlayersSit()

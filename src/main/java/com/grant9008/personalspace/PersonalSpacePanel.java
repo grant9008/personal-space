@@ -464,7 +464,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Idle players sit", sitSwitch, "Off (the default). On: other players standing doing nothing are shown sitting, in the game's Sit emote. They get up the moment they walk or do something. Only on your screen; off in PvP areas."), c);
+		card.add(switchRow("Idle players sit", sitSwitch, "Off (the default). On: other players who've stood doing nothing for 5 seconds sit down, in the game's Sit emote. They get up the moment they walk or do something; alching counts, even with Alchers behavior on Still. Only on your screen; off in PvP areas."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);

@@ -68,7 +68,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.22";
+	static final String VERSION = "1.9.23";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -296,6 +296,7 @@ public class PersonalSpacePlugin extends Plugin
 		chatHider = new ChatHider(client, levelFilter);
 		alchStyler = new AlchStyler(client);
 		idleSitter = new IdleSitter(client);
+		alchStyler.sitter = idleSitter;
 		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager, levelFilter);
 		overlayManager.add(namesOverlay);
 		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager, levelFilter);

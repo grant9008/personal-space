@@ -84,6 +84,8 @@ final class AlchStyler
 
 	/** Diagnostics: casts drawn still or as an emote. */
 	long restyled;
+	/** Told whenever someone's cast is restyled: they're busy, so they don't sit (Idle players sit). */
+	IdleSitter sitter;
 
 	AlchStyler(Client client)
 	{
@@ -174,6 +176,12 @@ final class AlchStyler
 		if (CASTS.contains(p.getAnimation()))
 		{
 			casting.put(p, cycle + EFFECT_WATCH_CYCLES);
+			IdleSitter s = sitter;
+			if (s != null)
+			{
+				// Still clears their cast, so the game would show them idle: sat down mid-alch.
+				s.busy(p, cycle);
+			}
 			if (style == PersonalSpaceConfig.Alchers.PARTY)
 			{
 				int emote = nextEmote(p.getId());
