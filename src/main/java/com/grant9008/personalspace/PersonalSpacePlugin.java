@@ -68,7 +68,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.19";
+	static final String VERSION = "1.9.20";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -1209,7 +1209,12 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return null;
 		}
-		String shape = yours.shape;
+		return yourTileLine(yours.shape, autoSpace && yours.spacing < slider);
+	}
+
+	/** The report's line about your tile, for a tile of this shape; {@code keptClose} if Auto-space closed it up. */
+	static String yourTileLine(String shape, boolean keptClose)
+	{
 		String what;
 		if (shape.startsWith("counter row"))
 		{
@@ -1225,7 +1230,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		else if (shape.startsWith(CrowdPlanner.ROUND_OBJECT))
 		{
-			what = "a crowd all round what you're facing";
+			what = "a crowd round what you're facing";
 		}
 		else if (shape.startsWith("curved row"))
 		{
@@ -1240,7 +1245,7 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			why = ", squeezed for room";
 		}
-		else if (autoSpace && yours.spacing < slider)
+		else if (keptClose)
 		{
 			why = ", kept close by Auto-space";
 		}

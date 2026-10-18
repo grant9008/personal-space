@@ -74,21 +74,6 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JLabel statusTitle = new JLabel();
 	/** One line under the title saying what the plugin is doing right now, e.g. "Spreading 7 players on 3 tiles". */
 	private final JLabel liveLine = new JLabel();
-	/** A second line saying what shape you're standing in, e.g. "You're in a row along the counter or wall". */
-	/**
-	 * Always two lines high, whatever it says, and always shown: it came and went (and changed
-	 * from one line to two) as you walked in and out of crowds, and the whole page jumped.
-	 */
-	private final JLabel shapeLine = new JLabel()
-	{
-		@Override
-		public Dimension getPreferredSize()
-		{
-			Dimension d = super.getPreferredSize();
-			return new Dimension(d.width, Math.max(d.height, shapeLineHeight));
-		}
-	};
-	private int shapeLineHeight;
 	private final JLabel liveDot = new JLabel();
 	private final JLabel statusDetail = new JLabel();
 
@@ -189,8 +174,6 @@ final class PersonalSpacePanel extends PluginPanel
 		StatusSummary.Headline h = StatusSummary.headline(s);
 		liveDot.setIcon(new Dot(colorFor(h.level), 7));
 		liveLine.setText(h.title);
-		shapeLine.setText(wrap(s.yourShape != null ? s.yourShape
-			: s.active && s.gate == Snapshot.Gate.SAFE ? "Nobody else is on your tile." : " "));
 		gpuButton.setVisible(s.renderer == null && !s.hdEnabled && s.gate != Snapshot.Gate.NOT_LOGGED_IN);
 		if (!troubleshootingBody.isVisible())
 		{
@@ -294,17 +277,6 @@ final class PersonalSpacePanel extends PluginPanel
 		liveLine.setToolTipText(tip("What Personal Space is doing right now."));
 		live.add(liveLine, BorderLayout.CENTER);
 
-		shapeLine.setFont(FontManager.getRunescapeSmallFont());
-		shapeLine.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-		shapeLine.setBorder(new EmptyBorder(3, 13, 0, 0));
-		shapeLine.setToolTipText(tip("The shape your own tile is using right now."));
-		JLabel twoLines = new JLabel("<html><div style='width:" + TEXT_WIDTH_PX + "px'>A<br>A</div></html>");
-		twoLines.setFont(shapeLine.getFont());
-		twoLines.setBorder(shapeLine.getBorder());
-		shapeLineHeight = twoLines.getPreferredSize().height;
-		shapeLine.setVerticalAlignment(javax.swing.SwingConstants.TOP);
-		shapeLine.setText(wrap(" "));
-
 		// Offered only while no GPU renderer is running and 117 HD isn't switched on: Personal Space
 		// can't do anything without one, and finding the GPU plugin in RuneLite's list is a hunt.
 		// Bright, as it's the one thing to do while it shows: nothing is spread out until it's pressed.
@@ -342,7 +314,6 @@ final class PersonalSpacePanel extends PluginPanel
 
 		JPanel under = new JPanel(new BorderLayout());
 		under.setOpaque(false);
-		under.add(shapeLine, BorderLayout.NORTH);
 		under.add(gpuRow, BorderLayout.SOUTH);
 
 		JPanel lines = new JPanel(new BorderLayout());
@@ -570,8 +541,9 @@ final class PersonalSpacePanel extends PluginPanel
 			new EmptyBorder(6, 10, 8, 10)));
 		GridBagConstraints c = column();
 
-		// Quiet links, then the version: nothing here needs to shout. Feedback on one line,
-		// support on the next, as three don't fit side by side in the sidebar.
+		// Quiet links, then the version: nothing here needs to shout. Feedback on one line, support
+		// and the version on the next, as three links don't fit side by side in the sidebar. (On
+		// three lines it took a lot of the sidebar for very little.)
 		JPanel links = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
 		links.setOpaque(false);
 		JLabel report = new JLabel("Report a problem");
@@ -586,18 +558,18 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(3, 0, 0, 0);
+		JPanel more = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+		more.setOpaque(false);
 		JLabel support = new JLabel("Support the dev", new HeartIcon(ColorScheme.MEDIUM_GRAY_COLOR), SwingConstants.CENTER);
 		support.setIconTextGap(4);
 		support.setToolTipText(tip("Personal Space is free. If you enjoy it, you can chip in here."));
 		link(support, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(SUPPORT_URL));
-		p.add(support, c);
-
-		c.gridy++;
-		c.insets = new Insets(3, 0, 0, 0);
+		more.add(support);
 		JLabel version = new JLabel("v" + PersonalSpacePlugin.VERSION, SwingConstants.CENTER);
 		version.setFont(FontManager.getRunescapeSmallFont());
 		version.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-		p.add(version, c);
+		more.add(version);
+		p.add(more, c);
 		return p;
 	}
 
