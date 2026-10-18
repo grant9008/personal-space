@@ -175,6 +175,7 @@ final class StatusSummary
 			.append(", draw me in front ").append(yesNo(s.drawMeInFront))
 			.append(", depth between players ").append(yesNo(s.depthTest))
 			.append(", walk while busy ").append(yesNo(s.walkWhileBusy))
+			.append(", idle players sit ").append(s.idleSit ? "yes (" + s.sitting + " sat down)" : "no")
 			.append(", click past moved ").append(yesNo(s.clickPast))
 			.append(", small groups close ").append(yesNo(s.smallGroupsClose))
 			.append(", pose ").append(s.pose)

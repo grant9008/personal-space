@@ -37,6 +37,9 @@ final class Snapshot
 	boolean drawMeInFront;
 	boolean depthTest;
 	boolean walkWhileBusy;
+	/** Idle players sit, and how many are sat down now. */
+	boolean idleSit;
+	int sitting;
 	boolean clickPast;
 	boolean names;
 	boolean hover;

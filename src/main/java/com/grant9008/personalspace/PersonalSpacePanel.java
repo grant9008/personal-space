@@ -108,6 +108,7 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
 	private final ToggleSwitch depthTestSwitch = new ToggleSwitch();
 	private final ToggleSwitch walkBusySwitch = new ToggleSwitch();
+	private final ToggleSwitch sitSwitch = new ToggleSwitch();
 	private final ToggleSwitch clickPastSwitch = new ToggleSwitch();
 	private final JPanel checksPanel = new JPanel(new GridBagLayout());
 	private final List<JLabel[]> checkRows = new ArrayList<>();
@@ -224,6 +225,7 @@ final class PersonalSpacePanel extends PluginPanel
 		combatSwitch.setOn(config.pauseInCombat());
 		depthTestSwitch.setOn(config.depthBetweenPlayers());
 		walkBusySwitch.setOn(config.walkWhileBusy());
+		sitSwitch.setOn(config.idlePlayersSit());
 		clickPastSwitch.setOn(config.clickPastMoved());
 		setEverydayEnabled(config.active());
 	}
@@ -405,7 +407,7 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(fieldLabel("Alchers behavior"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		alcherPills.setToolTipText(tip("How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer or jump for joy, at random. Your own spells never change."));
+		alcherPills.setToolTipText(tip("How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer, jump for joy or the Party emote with its glowing floor, at random. Your own spells never change."));
 		card.add(alcherPills, c);
 
 		c.gridy++;
@@ -459,6 +461,10 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Walk while busy", walkBusySwitch,
 			"On (the default): anyone doing something as they walk, alching on the run say, is drawn walking. Off: as the game draws them, gliding along in the pose of what they're doing."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Idle players sit", sitSwitch, "Off (the default). On: other players standing doing nothing are shown sitting, in the game's Sit emote. They get up the moment they walk or do something. Only on your screen; off in PvP areas."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -667,6 +673,7 @@ final class PersonalSpacePanel extends PluginPanel
 		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
 		depthTestSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DEPTH, on));
 		walkBusySwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_WALK_WHILE_BUSY, on));
+		sitSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_IDLE_SIT, on));
 		clickPastSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_CLICK_PAST, on));
 	}
 
@@ -717,6 +724,7 @@ final class PersonalSpacePanel extends PluginPanel
 		inFrontSwitch.setEnabled(enabled);
 		depthTestSwitch.setEnabled(enabled);
 		walkBusySwitch.setEnabled(enabled);
+		sitSwitch.setEnabled(enabled);
 		clickPastSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);
 		combatSwitch.setEnabled(enabled);

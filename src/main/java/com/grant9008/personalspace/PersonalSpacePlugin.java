@@ -68,7 +68,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.20";
+	static final String VERSION = "1.9.22";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -113,6 +113,7 @@ public class PersonalSpacePlugin extends Plugin
 
 	private ChatHider chatHider;
 	private AlchStyler alchStyler;
+	private IdleSitter idleSitter;
 
 	private NamesOverlay namesOverlay;
 
@@ -294,6 +295,7 @@ public class PersonalSpacePlugin extends Plugin
 		renderCallbackManager.register(levelFilter);
 		chatHider = new ChatHider(client, levelFilter);
 		alchStyler = new AlchStyler(client);
+		idleSitter = new IdleSitter(client);
 		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager, levelFilter);
 		overlayManager.add(namesOverlay);
 		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager, levelFilter);
@@ -340,8 +342,14 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		chatHider = null;
 		alchStyler = null;
+		IdleSitter sitter = idleSitter;
+		idleSitter = null;
 		clientThread.invoke(() ->
 		{
+			if (sitter != null)
+			{
+				sitter.standAll();
+			}
 			if (client.getGameState() == GameState.LOGGED_IN)
 			{
 				client.refreshChat();
@@ -737,6 +745,10 @@ public class PersonalSpacePlugin extends Plugin
 		gate = newGate;
 		levelFilter.below = config.hideBelowLevel();
 		levelFilter.enabled = true;
+		if (idleSitter != null)
+		{
+			idleSitter.update(config.idlePlayersSit());
+		}
 
 		if (wrapper == null && !warnedNoRenderer && client.getDrawCallbacks() == null)
 		{
@@ -1060,6 +1072,11 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			levelFilter.enabled = false;
 		}
+		if (idleSitter != null)
+		{
+			// Off, unsafe or logged out: everyone stands in their own pose again.
+			idleSitter.standAll();
+		}
 		offsets.snapAllToZero();
 		stacks.clear();
 		planner.clear();
@@ -1369,6 +1386,8 @@ public class PersonalSpacePlugin extends Plugin
 		s.drawMeInFront = config.drawMeInFront();
 		s.depthTest = config.depthBetweenPlayers();
 		s.walkWhileBusy = config.walkWhileBusy();
+		s.idleSit = config.idlePlayersSit();
+		s.sitting = idleSitter == null ? 0 : idleSitter.sitting();
 		s.clickPast = config.clickPastMoved();
 		s.names = config.namesFollowPlayers();
 		s.hover = config.hoverShowsWho();

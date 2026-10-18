@@ -52,11 +52,18 @@ final class AlchStyler
 		SpotanimID.ENCHANT_AMULET2_LVL4, SpotanimID.ENCHANT_AMULET2_LVL5, SpotanimID.ENCHANT_AMULET2_LVL6,
 		SpotanimID.ENCHANT_RING, SpotanimID.XBOWS_ENCHANTING_TIPS_SPOT);
 
-	/** Party: dance, jig, spin, cheer and jump for joy, anyone's emotes. */
+	/** Party: dance, jig, spin, cheer, jump for joy and the Party emote, with its glowing floor. */
 	static final int[] PARTY_EMOTES = {
 		AnimationID.EMOTE_DANCE, AnimationID.EMOTE_DANCE_SCOTTISH, AnimationID.EMOTE_DANCE_SPIN,
-		AnimationID.EMOTE_CHEER, AnimationID.EMOTE_JUMP_WITH_JOY,
+		AnimationID.EMOTE_CHEER, AnimationID.EMOTE_JUMP_WITH_JOY, AnimationID.EMOTE_PARTY,
 	};
+	/** The Party emote's floor glow, put under whoever does it (it changes colour as they dance). */
+	static final int PARTY_GLOW = SpotanimID.FX_EMOTE_PARTY01_ACTIVE;
+	/**
+	 * The slot the glow goes in, among a player's spell effects: well clear of the game's own, and
+	 * so taken off again when their next cast is another emote.
+	 */
+	static final int PARTY_GLOW_SLOT = 0x5053;
 
 	private final Client client;
 	/** Players whose animation or spell effect changed since the last frame. */
@@ -70,6 +77,8 @@ final class AlchStyler
 	/** How long after a cast its effect is still looked for, in game cycles (4 s). */
 	static final int EFFECT_WATCH_CYCLES = 200;
 	private final Random random = new Random();
+	/** Players given the Party emote's glow: it's taken off as soon as they're doing anything else. */
+	private final Set<Player> glowing = Collections.newSetFromMap(new IdentityHashMap<>());
 	/** The emote each player last did for a cast (Party), so the next one is always another. */
 	private final int[] lastEmote = new int[OffsetTable.CAPACITY];
 
@@ -93,7 +102,7 @@ final class AlchStyler
 	/** Before each frame is drawn: restyle whoever started alching, if the setting asks and may. Client thread. */
 	void apply(PersonalSpaceConfig.Alchers style, boolean allowed)
 	{
-		if (changed.isEmpty() && casting.isEmpty())
+		if (changed.isEmpty() && casting.isEmpty() && glowing.isEmpty())
 		{
 			return;
 		}
@@ -101,6 +110,7 @@ final class AlchStyler
 		{
 			changed.clear();
 			casting.clear();
+			endGlows(true);
 			return;
 		}
 		Player you = client.getLocalPlayer();
@@ -113,6 +123,7 @@ final class AlchStyler
 			}
 		}
 		changed.clear();
+		endGlows(false);
 		for (java.util.Iterator<java.util.Map.Entry<Player, Integer>> it = casting.entrySet().iterator(); it.hasNext(); )
 		{
 			java.util.Map.Entry<Player, Integer> e = it.next();
@@ -123,6 +134,20 @@ final class AlchStyler
 			else
 			{
 				removeEffects(e.getKey());
+			}
+		}
+	}
+
+	/** Take the Party emote's glow off everyone given it ({@code all}), or off those no longer doing it. */
+	private void endGlows(boolean all)
+	{
+		for (java.util.Iterator<Player> it = glowing.iterator(); it.hasNext(); )
+		{
+			Player p = it.next();
+			if (all || p.getAnimation() != AnimationID.EMOTE_PARTY)
+			{
+				p.removeSpotAnim(PARTY_GLOW_SLOT);
+				it.remove();
 			}
 		}
 	}
@@ -151,8 +176,19 @@ final class AlchStyler
 			casting.put(p, cycle + EFFECT_WATCH_CYCLES);
 			if (style == PersonalSpaceConfig.Alchers.PARTY)
 			{
-				p.setAnimation(nextEmote(p.getId()));
+				int emote = nextEmote(p.getId());
+				p.setAnimation(emote);
 				p.setAnimationFrame(0);
+				if (emote == AnimationID.EMOTE_PARTY)
+				{
+					p.createSpotAnim(PARTY_GLOW_SLOT, PARTY_GLOW, 0, 0);
+					glowing.add(p);
+				}
+				else
+				{
+					p.removeSpotAnim(PARTY_GLOW_SLOT);
+					glowing.remove(p);
+				}
 			}
 			else
 			{

@@ -34,6 +34,9 @@ public class AlchStylerTest
 					case "removeSpotAnim":
 						effects.remove((Integer) args[0]);
 						return null;
+					case "createSpotAnim":
+						effects.put((Integer) args[0], (Integer) args[1]);
+						return null;
 					case "setAnimation":
 						animation = (Integer) args[0];
 						return null;
@@ -182,8 +185,55 @@ public class AlchStylerTest
 		}
 		for (int i = 0; i < seen.length; i++)
 		{
-			Assert.assertTrue("emote " + AlchStyler.PARTY_EMOTES[i] + " came up " + seen[i] + " times in 600", seen[i] > 70);
+			Assert.assertTrue("emote " + AlchStyler.PARTY_EMOTES[i] + " came up " + seen[i] + " times in 600", seen[i] > 55);
 		}
+	}
+
+	@Test
+	public void thePartyEmoteBringsItsGlowAndTheNextEmoteTakesItAway()
+	{
+		cycle = 5000;
+		AlchStyler styler = new AlchStyler(client(new FakePlayer().proxy()));
+		FakePlayer alcher = new FakePlayer();
+		Player p = alcher.proxy();
+		boolean sawParty = false;
+		boolean sawGlowGo = false;
+		for (int cast = 0; cast < 200; cast++)
+		{
+			alcher.animation = AnimationID.HUMAN_CASTHIGHLVLALCHEMY;
+			styler.noticed(p);
+			styler.apply(PersonalSpaceConfig.Alchers.PARTY, true);
+			boolean glow = AlchStyler.PARTY_GLOW == (alcher.effects.getOrDefault(AlchStyler.PARTY_GLOW_SLOT, -1));
+			if (alcher.animation == AnimationID.EMOTE_PARTY)
+			{
+				sawParty = true;
+				Assert.assertTrue("cast " + cast + ": the Party emote without its glow", glow);
+			}
+			else
+			{
+				Assert.assertFalse("cast " + cast + ": the glow stayed under " + alcher.animation, glow);
+				sawGlowGo |= sawParty;
+			}
+		}
+		Assert.assertTrue(sawParty && sawGlowGo);
+		// Dancing done, or Party switched off: no glow left under them.
+		while (alcher.animation != AnimationID.EMOTE_PARTY)
+		{
+			alcher.animation = AnimationID.HUMAN_CASTHIGHLVLALCHEMY;
+			styler.noticed(p);
+			styler.apply(PersonalSpaceConfig.Alchers.PARTY, true);
+		}
+		alcher.animation = -1;
+		styler.apply(PersonalSpaceConfig.Alchers.PARTY, true);
+		Assert.assertFalse("the glow outlasted the dance", alcher.effects.containsKey(AlchStyler.PARTY_GLOW_SLOT));
+		while (alcher.animation != AnimationID.EMOTE_PARTY)
+		{
+			alcher.animation = AnimationID.HUMAN_CASTHIGHLVLALCHEMY;
+			styler.noticed(p);
+			styler.apply(PersonalSpaceConfig.Alchers.PARTY, true);
+		}
+		styler.apply(PersonalSpaceConfig.Alchers.NORMAL, true);
+		Assert.assertFalse("the glow outlasted Party", alcher.effects.containsKey(AlchStyler.PARTY_GLOW_SLOT));
 	}
 
 	@Test
@@ -193,7 +243,7 @@ public class AlchStylerTest
 		{
 			Assert.assertFalse(AlchStyler.CASTS.contains(e));
 		}
-		Assert.assertEquals(5, AlchStyler.PARTY_EMOTES.length);
+		Assert.assertEquals(6, AlchStyler.PARTY_EMOTES.length);
 		Assert.assertTrue("alchs, superheat, charge orb, enchants", AlchStyler.CASTS.containsAll(Arrays.asList(712, 713, 725, 726, 719, 931)));
 		Assert.assertTrue(AlchStyler.EFFECTS.containsAll(Arrays.asList(112, 113, 148, 149, 150, 151, 152, 114, 238)));
 	}

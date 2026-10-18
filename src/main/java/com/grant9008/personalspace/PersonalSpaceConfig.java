@@ -40,6 +40,7 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_DEPTH = "depthBetweenPlayers";
 	String KEY_WALK_WHILE_BUSY = "walkWhileBusy";
+	String KEY_IDLE_SIT = "idlePlayersSit";
 	String KEY_CLICK_PAST = "clickPastMoved";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
 
@@ -328,7 +329,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_OTHER_ALCHERS,
 		name = "Alchers behavior",
-		description = "How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer or jump for joy, at random. Your own spells never change.",
+		description = "How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer, jump for joy or the Party emote with its glowing floor, at random. Your own spells never change.",
 		position = 14
 	)
 	default Alchers otherAlchers()
@@ -416,6 +417,17 @@ public interface PersonalSpaceConfig extends Config
 	default boolean walkWhileBusy()
 	{
 		return true;
+	}
+
+	@ConfigItem(
+		keyName = KEY_IDLE_SIT,
+		name = "Idle players sit",
+		description = "Off (the default). On: other players standing doing nothing are shown sitting, in the game's Sit emote. They get up the moment they walk or do something. Only on your screen; off in PvP areas.",
+		position = 5
+	)
+	default boolean idlePlayersSit()
+	{
+		return false;
 	}
 
 	@ConfigItem(
