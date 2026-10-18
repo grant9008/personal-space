@@ -4523,4 +4523,676 @@ public class CrowdPlannerTest
 			}
 		}
 	}
+
+	/** The fire in the busy-fire tests below, on (50, 50), and the tiles round it. */
+	private static final long FIRE = StackRegistry.key(0, 50, 50);
+	private static final int[][] ROUND_IT = {{0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}, {-1, 0}, {-1, 1}};
+
+	/** Open ground, as the game's collision map has it. */
+	private static int[][][] openFlags()
+	{
+		int[][][] flags = new int[4][][];
+		flags[0] = new int[104][104];
+		return flags;
+	}
+
+	/**
+	 * A fire on (50, 50) as the plugin sees it, with the game's collision rules: nobody drawn within
+	 * the plugin's clearance of its tile. A Forester's Campfire, which can be stood on, unless
+	 * {@code blocked}, as a fire someone lit or cooks on is.
+	 */
+	private static CrowdPlanner.Surroundings fireAt5050(int[][][] flags, boolean blocked)
+	{
+		if (blocked)
+		{
+			flags[0][50][50] = CollisionTerrain.BLOCK_FULL;
+		}
+		CollisionTerrain terrain = new CollisionTerrain(flags);
+		return new CrowdPlanner.Surroundings()
+		{
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + 64;
+				int z = StackRegistry.sceneY(t) * 128 + 64;
+				return terrain.canStand(0, x, z, x + dx, z + dz) && !inFireClearance(x + dx, z + dz);
+			}
+			public boolean facesObstacle(long t, double a) { return terrain.facesObstacle(0, StackRegistry.sceneX(t), StackRegistry.sceneY(t), a); }
+			public boolean isCounter(long t, double a) { return terrain.isCounter(0, StackRegistry.sceneX(t), StackRegistry.sceneY(t), a); }
+			public boolean facesFire(long t, double a)
+			{
+				return StackRegistry.sceneX(t) + (int) Math.round(-Math.sin(a)) == 50 && StackRegistry.sceneY(t) + (int) Math.round(-Math.cos(a)) == 50;
+			}
+			public List<int[]> firesNear(long t)
+			{
+				List<int[]> out = new ArrayList<>();
+				int east = 50 - StackRegistry.sceneX(t);
+				int north = 50 - StackRegistry.sceneY(t);
+				if (Math.abs(east) <= 1 && Math.abs(north) <= 1)
+				{
+					out.add(new int[]{east, north});
+				}
+				return out;
+			}
+		};
+	}
+
+	/** Whether a body at scene point (x, z) is within the plugin's clearance of the fire on (50, 50). */
+	private static boolean inFireClearance(int x, int z)
+	{
+		int c = PersonalSpacePlugin.FIRE_CLEARANCE;
+		return x + c >= 50 * 128 && x - c < 51 * 128 && z + c >= 50 * 128 && z - c < 51 * 128;
+	}
+
+	/** How far a scene point is from the fire's tile, (50, 50): 0 on it. */
+	private static double fromTheFiresTile(double x, double z)
+	{
+		return Math.hypot(Math.max(0, Math.abs(x - (50 * 128 + 64)) - 64), Math.max(0, Math.abs(z - (50 * 128 + 64)) - 64));
+	}
+
+	/** {@code count} tending the fire on (50, 50) from tile (x, y), or standing on it, ids from {@code id[0]} up. */
+	private static void tending(List<StackSpreader.Entry> out, int[] id, int x, int y, int count)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			int facing = x == 50 && y == 50 ? (id[0] * 300) % 2048 : OffsetTable.facing(50 - x, 50 - y);
+			out.add(new StackSpreader.Entry(id[0]++, StackRegistry.key(0, x, y), false, facing, true));
+		}
+	}
+
+	/** A busy campfire: {@code onIt} on it, {@code round} on each tile round it, and you tending it from the south. */
+	private static List<StackSpreader.Entry> busyCampfire(int onIt, int round, boolean you)
+	{
+		List<StackSpreader.Entry> out = new ArrayList<>();
+		int[] id = {1};
+		tending(out, id, 50, 50, onIt);
+		for (int[] d : ROUND_IT)
+		{
+			tending(out, id, 50 + d[0], 50 + d[1], d[0] == 0 && d[1] == -1 && you ? round - 1 : round);
+		}
+		if (you)
+		{
+			out.add(new StackSpreader.Entry(YOU, StackRegistry.key(0, 50, 49), true, OffsetTable.facing(0, 1), true));
+		}
+		return out;
+	}
+
+	/**
+	 * Where everyone is drawn, in scene units, as the plugin draws them: everyone given a spot there,
+	 * and on each tile, whoever is left without one in its middle: you, or someone alone, or one of
+	 * those waiting unless its middle is kept out of sight.
+	 */
+	private static Map<Integer, double[]> drawnAsThePluginDoes(CrowdPlanner.Plan plan, List<StackSpreader.Entry> still)
+	{
+		Map<Integer, double[]> at = new HashMap<>();
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			at.put(p.id, new double[]{StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx, StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz});
+		}
+		Map<Long, List<StackSpreader.Entry>> byTile = new HashMap<>();
+		for (StackSpreader.Entry e : still)
+		{
+			byTile.computeIfAbsent(e.tile, k -> new ArrayList<>()).add(e);
+		}
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			StackSpreader.Entry middle = null;
+			for (StackSpreader.Entry en : e.getValue())
+			{
+				if (!at.containsKey(en.id) && (en.local || middle == null && (e.getValue().size() == 1 || !plan.middleOutOfSight.contains(e.getKey()))))
+				{
+					middle = en.local || middle == null ? en : middle;
+				}
+			}
+			if (middle != null)
+			{
+				at.put(middle.id, new double[]{StackRegistry.sceneX(e.getKey()) * 128 + 64, StackRegistry.sceneY(e.getKey()) * 128 + 64});
+			}
+		}
+		return at;
+	}
+
+	/** Checks that nobody drawn is inside anybody else: a body's width apart, and a little more from you. */
+	private static void assertNobodyInsideAnybody(String when, Map<Integer, double[]> at)
+	{
+		List<Integer> ids = new ArrayList<>(at.keySet());
+		ids.sort(Comparator.naturalOrder());
+		for (int i = 0; i < ids.size(); i++)
+		{
+			for (int j = i + 1; j < ids.size(); j++)
+			{
+				double d = Math.hypot(at.get(ids.get(i))[0] - at.get(ids.get(j))[0], at.get(ids.get(i))[1] - at.get(ids.get(j))[1]);
+				int least = ids.get(i) == YOU || ids.get(j) == YOU ? CrowdPlanner.OBJECT_YOUR_GAP : CrowdPlanner.OBJECT_KEEP;
+				Assert.assertTrue(when + ": players " + ids.get(i) + " and " + ids.get(j) + " are drawn " + Math.round(d) + " apart", d >= least - 0.5);
+			}
+		}
+	}
+
+	private static CrowdPlanner.Plan atTheFire(CrowdPlanner planner, List<StackSpreader.Entry> still, int tick, CrowdPlanner.Surroundings fire)
+	{
+		return planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, tick, fire);
+	}
+
+	@Test
+	public void aBusyCampfireIsStoodRoundByOneCrowdWithNobodyInsideAnybody()
+	{
+		// Sixteen tending a Forester's Campfire from on top of it and eight on every tile round it, you
+		// among them. Each tile round it was laid out on its own, squeezed into its slice of the ring
+		// until its people stood 26 apart, and the people on the fire, laid out last in whatever gaps
+		// were left, waited out of sight in it.
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		List<StackSpreader.Entry> still = busyCampfire(16, 8, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 10; t++)
+		{
+			plan = atTheFire(planner, still, t, campfire);
+			if (t >= 3)
+			{
+				assertNobodyInsideAnybody("tick " + t, drawnAsThePluginDoes(plan, still));
+			}
+		}
+		Assert.assertArrayEquals("those on it face it", new int[]{0, 0}, plan.fires.get(FIRE));
+		for (int[] d : ROUND_IT)
+		{
+			Assert.assertArrayEquals("those round it face it", new int[]{-d[0] * 128, -d[1] * 128}, plan.fires.get(StackRegistry.key(0, 50 + d[0], 50 + d[1])));
+		}
+		int onIt = 0;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			onIt += p.tile == FIRE ? 1 : 0;
+		}
+		Assert.assertTrue("only " + onIt + " of the 16 on the fire stand round it", onIt >= 8);
+	}
+
+	@Test
+	public void theCrowdRoundABusyCampfireIsReportedAsOne()
+	{
+		List<StackSpreader.Entry> still = busyCampfire(10, 6, true);
+		CrowdPlanner.Plan plan = null;
+		CrowdPlanner planner = new CrowdPlanner();
+		for (int t = 1; t <= 3; t++)
+		{
+			plan = atTheFire(planner, still, t, fireAt5050(openFlags(), false));
+		}
+		Assert.assertEquals(CrowdPlanner.ROUND_FIRE, plan.tiles.get(FIRE).shape);
+		for (int[] d : ROUND_IT)
+		{
+			CrowdPlanner.TileReport report = plan.tiles.get(StackRegistry.key(0, 50 + d[0], 50 + d[1]));
+			Assert.assertEquals(CrowdPlanner.ROUND_FIRE, report.shape);
+			Assert.assertEquals("in the open, nothing is in the way", 0, report.blocked);
+		}
+		Assert.assertEquals("You're in a ring round the fire", PersonalSpacePlugin.yourTileLine(plan.tiles.get(StackRegistry.key(0, 50, 49)).shape, false));
+	}
+
+	@Test
+	public void nobodyAtABusyCampfireIsDrawnInOrWalksThroughTheFlames()
+	{
+		// People coming and going on every side, some coming back to another side. Nobody is drawn
+		// nearer the fire than its own people stand when nobody crowds round it, and nobody walks to
+		// their spot through it (only those standing on it walk out of it).
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		java.util.Random rnd = new java.util.Random(7);
+		List<StackSpreader.Entry> roster = busyCampfire(12, 7, true);
+		Map<Integer, Long> away = new HashMap<>();
+		Map<Integer, Long> tileOf = new HashMap<>();
+		for (StackSpreader.Entry e : roster)
+		{
+			tileOf.put(e.id, e.tile);
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> last = new HashMap<>();
+		Map<Integer, Long> lastTile = new HashMap<>();
+		for (int t = 1; t <= 300; t++)
+		{
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (StackSpreader.Entry e : roster)
+			{
+				Long back = away.get(e.id);
+				if (back == null && e.id != YOU && rnd.nextInt(100) < 2)
+				{
+					away.put(e.id, (long) (t + 5 + rnd.nextInt(40)));
+					// ...and some come back to another side.
+					if (e.tile != FIRE && rnd.nextInt(3) == 0)
+					{
+						int[] d = ROUND_IT[rnd.nextInt(8)];
+						tileOf.put(e.id, StackRegistry.key(0, 50 + d[0], 50 + d[1]));
+					}
+				}
+				else if (back != null && t >= back)
+				{
+					away.remove(e.id);
+				}
+				if (!away.containsKey(e.id))
+				{
+					long tile = tileOf.get(e.id);
+					int facing = tile == FIRE ? e.orientation : OffsetTable.facing(50 - StackRegistry.sceneX(tile), 50 - StackRegistry.sceneY(tile));
+					still.add(new StackSpreader.Entry(e.id, tile, e.local, facing, true));
+				}
+			}
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, campfire);
+			Map<Integer, int[]> now = new HashMap<>();
+			Map<Integer, Long> nowTile = new HashMap<>();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				double x = StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx;
+				double z = StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz;
+				Assert.assertTrue("tick " + t + ": player " + p.id + " is drawn " + Math.round(fromTheFiresTile(x, z)) + " from the fire's tile",
+					fromTheFiresTile(x, z) >= CrowdPlanner.FIRE_SIDE - 64 - 0.5);
+				int[] was = lastTile.get(p.id) != null && lastTile.get(p.id) == p.tile ? last.get(p.id) : null;
+				int[] from = was != null ? was : new int[]{0, 0};
+				if (p.tile != FIRE || was != null)
+				{
+					for (int k = 0; k <= 64; k++)
+					{
+						int wx = StackRegistry.sceneX(p.tile) * 128 + 64 + from[0] + (int) Math.round((p.dx - from[0]) * k / 64.0);
+						int wz = StackRegistry.sceneY(p.tile) * 128 + 64 + from[1] + (int) Math.round((p.dz - from[1]) * k / 64.0);
+						Assert.assertFalse("tick " + t + ": player " + p.id + " walks through the fire from (" + from[0] + ", " + from[1] + ") to ("
+							+ p.dx + ", " + p.dz + ")", inFireClearance(wx, wz));
+					}
+				}
+				now.put(p.id, new int[]{p.dx, p.dz});
+				nowTile.put(p.id, p.tile);
+			}
+			last = now;
+			lastTile = nowTile;
+		}
+	}
+
+	@Test
+	public void everyoneWithNoRoomAtABusyCampfireWaitsOutOfSight()
+	{
+		// Far more at the fire than can stand round it a body's width apart. Whoever is left over
+		// waits out of sight rather than being drawn in the middle of their tile, inside the people
+		// standing there, or out on their own away from it. The people standing on the fire take
+		// their share of the room round it: laid out last, they all waited in the flames.
+		List<StackSpreader.Entry> still = busyCampfire(16, 12, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheFire(planner, still, t, fireAt5050(openFlags(), false));
+		}
+		Map<Integer, double[]> at = drawnAsThePluginDoes(plan, still);
+		assertNobodyInsideAnybody("a packed campfire", at);
+		Set<Integer> placed = spots(plan).keySet();
+		Assert.assertTrue("only " + placed.size() + " of " + still.size() + " are given a spot", placed.size() >= 36 && placed.size() < still.size());
+		int onIt = 0;
+		for (StackSpreader.Entry e : still)
+		{
+			if (!placed.contains(e.id) && !e.local)
+			{
+				Assert.assertTrue("player " + e.id + " waits in the middle of their tile, in sight", plan.middleOutOfSight.contains(e.tile));
+			}
+			onIt += e.tile == FIRE && placed.contains(e.id) ? 1 : 0;
+		}
+		Assert.assertTrue("only " + onIt + " of the 16 on the fire stand round it", onIt >= 8);
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertTrue("player " + p.id + " is drawn " + Math.round(Math.hypot(p.dx, p.dz)) + " from their tile",
+				Math.hypot(p.dx, p.dz) <= CrowdPlanner.FIRE_SIDE + 2 * 64 - 36);
+		}
+	}
+
+	@Test
+	public void peopleRoundABusyCampfireKeepTheirSpotsAsOthersComeAndGo()
+	{
+		// Every arrival or departure laid its whole tile out afresh, and everyone on it slid somewhere new.
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		java.util.Random rnd = new java.util.Random(11);
+		List<StackSpreader.Entry> roster = busyCampfire(12, 8, true);
+		Set<Integer> away = new HashSet<>();
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> last = new HashMap<>();
+		int moves = 0;
+		int stays = 0;
+		for (int t = 1; t <= 300; t++)
+		{
+			for (StackSpreader.Entry e : roster)
+			{
+				if (e.id != YOU && t > 10 && rnd.nextInt(100) < 2)
+				{
+					if (!away.remove(e.id))
+					{
+						away.add(e.id);
+					}
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (StackSpreader.Entry e : roster)
+			{
+				if (!away.contains(e.id))
+				{
+					still.add(e);
+				}
+			}
+			Map<Integer, int[]> now = spots(atTheFire(planner, still, t, campfire));
+			for (Map.Entry<Integer, int[]> e : now.entrySet())
+			{
+				int[] was = last.get(e.getKey());
+				if (t > 10 && was != null)
+				{
+					stays++;
+					moves += Math.hypot(was[0] - e.getValue()[0], was[1] - e.getValue()[1]) >= 16 ? 1 : 0;
+				}
+			}
+			last = now;
+		}
+		Assert.assertTrue("people who stayed at the fire moved " + moves + " times in " + stays, stays > 5000 && moves <= 5);
+	}
+
+	@Test
+	public void youStandNearestTheFireOnYourSideOfABusyCampfire()
+	{
+		// Packed round a busy fire you could lose yourself, someone a body's width from you on
+		// every side: you take the place at the fire on your side, with a little room round you.
+		List<StackSpreader.Entry> still = busyCampfire(16, 8, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheFire(planner, still, t, fireAt5050(openFlags(), false));
+		}
+		Assert.assertArrayEquals("you're at the fire, on your side of it", new int[]{0, 128 - CrowdPlanner.OBJECT_NEAR_RING}, spots(plan).get(YOU));
+		Map<Integer, double[]> at = drawnAsThePluginDoes(plan, still);
+		for (Map.Entry<Integer, double[]> o : at.entrySet())
+		{
+			double d = Math.hypot(o.getValue()[0] - at.get(YOU)[0], o.getValue()[1] - at.get(YOU)[1]);
+			Assert.assertTrue("player " + o.getKey() + " is drawn " + Math.round(d) + " from you", o.getKey() == YOU || d >= CrowdPlanner.OBJECT_YOUR_GAP - 0.5);
+		}
+	}
+
+	@Test
+	public void aCampfireThatGetsBusyFormsItsCrowdRoundWhereEveryoneStands()
+	{
+		// Four tending a campfire from on top of it and two from beside it, then three more arrive. Laid
+		// out afresh the moment it got busy, the people already there walked somewhere new, some of them
+		// straight through the fire.
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		tending(still, id, 50, 50, 4);
+		tending(still, id, 50, 51, 2);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> before = null;
+		for (int t = 1; t <= 20; t++)
+		{
+			before = spots(atTheFire(planner, still, t, campfire));
+		}
+		Assert.assertEquals("a few at a fire stand round it", 6, before.size());
+		tending(still, id, 51, 50, 3);
+		for (int t = 21; t <= 30; t++)
+		{
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, campfire);
+			Map<Integer, int[]> now = spots(plan);
+			assertNobodyInsideAnybody("tick " + t, drawnAsThePluginDoes(plan, still));
+			for (int who = 1; who <= 6; who++)
+			{
+				Assert.assertNotNull("tick " + t + ": player " + who + " lost their spot", now.get(who));
+				double moved = Math.hypot(now.get(who)[0] - before.get(who)[0], now.get(who)[1] - before.get(who)[1]);
+				Assert.assertTrue("tick " + t + ": player " + who + " moved " + Math.round(moved), moved < 16);
+			}
+		}
+	}
+
+	@Test
+	public void aFewAtACampfireStillStandInTheirOwnRows()
+	{
+		// Nobody crowding round it: the rows a few people at a fire stand in suit them, as before.
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		tending(still, id, 50, 50, 2);
+		tending(still, id, 50, 51, 3);
+		CrowdPlanner.Plan plan = null;
+		CrowdPlanner planner = new CrowdPlanner();
+		for (int t = 1; t <= 3; t++)
+		{
+			plan = atTheFire(planner, still, t, fireAt5050(openFlags(), false));
+		}
+		Assert.assertEquals("fire row", plan.tiles.get(StackRegistry.key(0, 50, 51)).shape);
+		Assert.assertEquals(PersonalSpaceConfig.SMALL_FIRE_SPACING, plan.tiles.get(StackRegistry.key(0, 50, 51)).spacing);
+		Assert.assertEquals("crowd on the fire", plan.tiles.get(FIRE).shape);
+	}
+
+	@Test
+	public void onlySmartStandsOneCrowdRoundABusyFire()
+	{
+		List<StackSpreader.Entry> still = busyCampfire(8, 4, false);
+		for (PersonalSpaceConfig.Arrangement arrangement : PersonalSpaceConfig.Arrangement.values())
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			planner.arrangement = arrangement;
+			CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK,
+				arrangement != PersonalSpaceConfig.Arrangement.CIRCLE, false, 1, fireAt5050(openFlags(), false));
+			CrowdPlanner.TileReport north = plan.tiles.get(StackRegistry.key(0, 50, 51));
+			Assert.assertEquals(arrangement.toString(), arrangement == PersonalSpaceConfig.Arrangement.AUTO,
+				north != null && CrowdPlanner.ROUND_FIRE.equals(north.shape));
+		}
+	}
+
+	@Test
+	public void aBusyCookingFireIsStoodRoundByOneCrowdToo()
+	{
+		// An ordinary fire, which nobody can stand on, with a crowd cooking on it from every side: each
+		// side squeezed into its own slice as at a campfire. Like an anvil, it's stood round by one crowd,
+		// out of its flames and walking round it, not through it.
+		int[][][] flags = openFlags();
+		CrowdPlanner.Surroundings fire = fireAt5050(flags, true);
+		CollisionTerrain terrain = new CollisionTerrain(flags);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		tending(still, id, 50, 51, 7);
+		tending(still, id, 51, 50, 6);
+		tending(still, id, 49, 50, 6);
+		tending(still, id, 50, 49, 5);
+		tending(still, id, 49, 49, 3);
+		tending(still, id, 51, 51, 3);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheFire(planner, still, t, fire);
+		}
+		assertNobodyInsideAnybody("a busy cooking fire", drawnAsThePluginDoes(plan, still));
+		Assert.assertEquals("everyone is given a spot", still.size(), plan.placements.size());
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			Assert.assertNotNull("player " + p.id + " faces the fire", plan.fires.get(p.tile));
+			Assert.assertTrue("player " + p.id + " walks through the fire to (" + p.dx + ", " + p.dz + ")",
+				walksClear(terrain, p.tile, p.dx, p.dz));
+			double x = StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx;
+			double z = StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz;
+			Assert.assertTrue("player " + p.id + " is drawn in the flames", fromTheFiresTile(x, z) >= CrowdPlanner.FIRE_SIDE - 64 - 0.5);
+		}
+	}
+
+	@Test
+	public void theCrowdOnACampfireInACornerWalksOutOfItButNotThroughTheWalls()
+	{
+		// The fire's own tile in the corner of a room, walls along its west and south edges. Walking
+		// out of the fire, someone headed for the gap between the two walls, through the corner.
+		int[][][] flags = openFlags();
+		for (int y = 50; y <= 60; y++)
+		{
+			flags[0][49][y] |= CollisionTerrain.BLOCK_EAST;
+			flags[0][50][y] |= CollisionTerrain.BLOCK_WEST;
+		}
+		for (int x = 50; x <= 60; x++)
+		{
+			flags[0][x][49] |= CollisionTerrain.BLOCK_NORTH;
+			flags[0][x][50] |= CollisionTerrain.BLOCK_SOUTH;
+		}
+		CrowdPlanner.Surroundings campfire = fireAt5050(flags, false);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		tending(still, id, 50, 50, 14);
+		tending(still, id, 50, 51, 4);
+		tending(still, id, 51, 51, 4);
+		tending(still, id, 51, 50, 4);
+		CrowdPlanner planner = new CrowdPlanner();
+		for (int t = 1; t <= 10; t++)
+		{
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, campfire);
+			Assert.assertEquals(CrowdPlanner.ROUND_FIRE, plan.tiles.get(FIRE).shape);
+			assertNobodyInsideAnybody("tick " + t, drawnAsThePluginDoes(plan, still));
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				int x = StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx;
+				int z = StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz;
+				Assert.assertTrue("tick " + t + ": player " + p.id + " is drawn outside the room at (" + p.dx + ", " + p.dz + ")",
+					x >= 50 * 128 && z >= 50 * 128);
+				// Their walk there, one tile to the next: never across a wall, nor through a corner both walls meet at.
+				int px = StackRegistry.sceneX(p.tile);
+				int pz = StackRegistry.sceneY(p.tile);
+				for (int k = 1; k <= 64; k++)
+				{
+					int tx = Math.floorDiv(StackRegistry.sceneX(p.tile) * 128 + 64 + (int) Math.round(p.dx * k / 64.0), 128);
+					int tz = Math.floorDiv(StackRegistry.sceneY(p.tile) * 128 + 64 + (int) Math.round(p.dz * k / 64.0), 128);
+					if (tx != px || tz != pz)
+					{
+						Assert.assertTrue("tick " + t + ": player " + p.id + " walks through a wall to (" + p.dx + ", " + p.dz + ")",
+							CollisionTerrain.canStep(flags[0], px, pz, tx - px, tz - pz));
+						px = tx;
+						pz = tz;
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	public void theLastAtABusyCampfireKeepTheirPlacesRoundItAndNeverWalkThroughIt()
+	{
+		// A busy campfire empties until one is left on it and one beside it, each alone on their tile,
+		// then only the one on it. With nobody left sharing a tile the crowd wasn't laid out at all:
+		// the one on the fire was given the first place by it afresh, and walked straight through it.
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		List<StackSpreader.Entry> still = busyCampfire(10, 3, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> was = null;
+		for (int t = 1; t <= 10; t++)
+		{
+			was = spots(atTheFire(planner, still, t, campfire));
+		}
+		// The one on the fire standing furthest west, across it from the first place by it.
+		StackSpreader.Entry onIt = null;
+		StackSpreader.Entry beside = null;
+		for (StackSpreader.Entry e : still)
+		{
+			if (e.tile == FIRE && was.containsKey(e.id) && (onIt == null || was.get(e.id)[0] < was.get(onIt.id)[0]))
+			{
+				onIt = e;
+			}
+			beside = beside == null && e.tile == StackRegistry.key(0, 50, 51) ? e : beside;
+		}
+		Assert.assertTrue("someone on the fire stands west of it", was.get(onIt.id)[0] < -64);
+		List<StackSpreader.Entry> few = new ArrayList<>();
+		few.add(onIt);
+		few.add(beside);
+		int[] at = was.get(onIt.id);
+		for (int t = 11; t <= 30; t++)
+		{
+			List<StackSpreader.Entry> now = t <= 20 ? few : few.subList(0, 1);
+			int[] spot = spots(atTheFire(planner, now, t, campfire)).get(onIt.id);
+			Assert.assertNotNull("tick " + t + ": the last one on the fire is drawn in it", spot);
+			for (int k = 0; k <= 64; k++)
+			{
+				int x = 50 * 128 + 64 + at[0] + (int) Math.round((spot[0] - at[0]) * k / 64.0);
+				int z = 50 * 128 + 64 + at[1] + (int) Math.round((spot[1] - at[1]) * k / 64.0);
+				Assert.assertFalse("tick " + t + ": the last one on the fire walks through it from (" + at[0] + ", " + at[1] + ") to ("
+					+ spot[0] + ", " + spot[1] + ")", inFireClearance(x, z));
+			}
+			double moved = Math.hypot(spot[0] - at[0], spot[1] - at[1]);
+			Assert.assertTrue("tick " + t + ": the last one on the fire moved " + Math.round(moved), t == 21 ? moved < 48 : moved < 16);
+			at = spot;
+		}
+	}
+
+	@Test
+	public void twoBusyCampfiresSideBySideAreStoodRoundClearOfBothFires()
+	{
+		// Two Forester's Campfires on neighbouring tiles, both busy. The crowd round each stood clear of
+		// its own flames, but up against the other fire's, and walked round the corner of them.
+		int[][][] flags = openFlags();
+		CollisionTerrain terrain = new CollisionTerrain(flags);
+		long other = StackRegistry.key(0, 51, 50);
+		CrowdPlanner.Surroundings two = new CrowdPlanner.Surroundings()
+		{
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + 64;
+				int z = StackRegistry.sceneY(t) * 128 + 64;
+				return terrain.canStand(0, x, z, x + dx, z + dz) && !inFireClearance(x + dx, z + dz) && !inFireClearance(x + dx - 128, z + dz);
+			}
+			public boolean facesObstacle(long t, double a) { return false; }
+			public boolean isCounter(long t, double a) { return false; }
+			public boolean facesFire(long t, double a)
+			{
+				int x = StackRegistry.sceneX(t) + (int) Math.round(-Math.sin(a));
+				int y = StackRegistry.sceneY(t) + (int) Math.round(-Math.cos(a));
+				return (x == 50 || x == 51) && y == 50;
+			}
+			public List<int[]> firesNear(long t)
+			{
+				List<int[]> out = new ArrayList<>();
+				for (int fx = 50; fx <= 51; fx++)
+				{
+					int east = fx - StackRegistry.sceneX(t);
+					int north = 50 - StackRegistry.sceneY(t);
+					if (Math.abs(east) <= 1 && Math.abs(north) <= 1)
+					{
+						out.add(new int[]{east, north});
+					}
+				}
+				return out;
+			}
+		};
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		int[][] crowd = {{50, 50, 8, 50}, {51, 50, 8, 51}, {49, 50, 5, 50}, {52, 50, 5, 51}, {50, 51, 5, 50}, {51, 51, 5, 51},
+			{50, 49, 4, 50}, {51, 49, 5, 51}, {49, 51, 3, 50}, {52, 49, 3, 51}};
+		for (int[] c : crowd)
+		{
+			for (int i = 0; i < c[2]; i++)
+			{
+				int facing = c[0] == c[3] && c[1] == 50 ? (id[0] * 300) % 2048 : OffsetTable.facing(c[3] - c[0], 50 - c[1]);
+				still.add(new StackSpreader.Entry(id[0]++, StackRegistry.key(0, c[0], c[1]), false, facing, true));
+			}
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> last = new HashMap<>();
+		for (int t = 1; t <= 10; t++)
+		{
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, two);
+			assertNobodyInsideAnybody("tick " + t, drawnAsThePluginDoes(plan, still));
+			Map<Integer, int[]> now = new HashMap<>();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				Assert.assertEquals("tick " + t + ": player " + p.id + " is one of a crowd round a fire", CrowdPlanner.ROUND_FIRE, plan.tiles.get(p.tile).shape);
+				int x = StackRegistry.sceneX(p.tile) * 128 + 64 + p.dx;
+				int z = StackRegistry.sceneY(p.tile) * 128 + 64 + p.dz;
+				for (int fire = 0; fire <= 1; fire++)
+				{
+					double clear = fromTheFiresTile(x - fire * 128, z);
+					Assert.assertTrue("tick " + t + ": player " + p.id + " is drawn " + Math.round(clear) + " from a fire's tile", clear >= CrowdPlanner.FIRE_MARGIN - 0.5);
+				}
+				int[] from = last.getOrDefault(p.id, new int[]{0, 0});
+				for (int fire = 0; fire <= 1; fire++)
+				{
+					if (from[0] == 0 && from[1] == 0 && p.tile == (fire == 0 ? FIRE : other))
+					{
+						continue; // walking out of the fire they stand on
+					}
+					for (int k = 0; k <= 64; k++)
+					{
+						int wx = StackRegistry.sceneX(p.tile) * 128 + 64 + from[0] + (int) Math.round((p.dx - from[0]) * k / 64.0);
+						int wz = StackRegistry.sceneY(p.tile) * 128 + 64 + from[1] + (int) Math.round((p.dz - from[1]) * k / 64.0);
+						Assert.assertFalse("tick " + t + ": player " + p.id + " walks through a fire from (" + from[0] + ", " + from[1] + ") to ("
+							+ p.dx + ", " + p.dz + ")", inFireClearance(wx - fire * 128, wz));
+					}
+				}
+				now.put(p.id, new int[]{p.dx, p.dz});
+			}
+			last = now;
+		}
+	}
 }

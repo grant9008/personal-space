@@ -27,6 +27,8 @@ import java.util.function.IntPredicate;
  * <li>With Smart, everyone using one thing nobody can stand on, such as an anvil, from the tiles
  * round it is one crowd, laid out all round it like the people at a campfire: see
  * {@link #layOutRoundObjects}.</li>
+ * <li>With Smart, a busy fire is stood round by one crowd the same way, everyone standing on it
+ * included (see {@link #FIRE_CROWD}): out of its flames, each on their own side of it.</li>
  * </ul>
  *
  * <p>Client thread only. Knows nothing about RuneLite; unit tested.
@@ -661,6 +663,9 @@ final class CrowdPlanner
 	 * beside it too, so the last one left keeps their spot rather than going back into the fire and
 	 * out again when someone else comes.
 	 *
+	 * <p>A busy fire isn't laid out here: everyone on it and round it is one crowd (see
+	 * {@link #FIRE_CROWD} and {@link #layOutRoundObjects}).
+	 *
 	 * @param onFires the people on each fire's tile who may be moved, in the order they get spots
 	 * @param placed  everyone given a spot so far; anyone given one here is added
 	 */
@@ -684,8 +689,8 @@ final class CrowdPlanner
 			}
 			// Alone on a fire too: drawn standing in the flames, burning logs, they looked like nobody
 			// had told them where to stand.
-			if (!onFires.containsKey(tile) && seen == 1 && (includeLocal || !only.local)
-				&& fireUnderfoot(around.firesNear(tile)))
+			if (!onFires.containsKey(tile) && seen == 1 && (includeLocal || !only.local) && !roundFires.contains(tile)
+				&& fireUnderfoot(firesNear(tile, around)))
 			{
 				List<Integer> one = new ArrayList<>(1);
 				one.add(only.id);
@@ -765,8 +770,11 @@ final class CrowdPlanner
 			}
 			long[] had = remember ? fireSpotOf.get(id) : null;
 			int was = had != null && had[0] == tile ? (int) had[1] : -1;
+			// Drawn round this fire last tick by its crowd, now broken up: the spot nearest where they
+			// stand. Given the first clear one, the last one left walked straight through the fire to it.
+			double[] drawn = remember && was < 0 ? drawnLastTick(id, tile) : null;
 			long[] held = remember ? fireSpotHeld.get(id) : null;
-			int pick = was < 0 && held != null && held[0] == tile && free.test((int) held[1]) ? (int) held[1] : -1;
+			int pick = was < 0 && drawn == null && held != null && held[0] == tile && free.test((int) held[1]) ? (int) held[1] : -1;
 			if (pick < 0)
 			{
 				double nearest = Double.MAX_VALUE;
@@ -776,12 +784,13 @@ final class CrowdPlanner
 					{
 						continue;
 					}
-					if (was < 0)
+					if (was < 0 && drawn == null)
 					{
 						pick = i;
 						break;
 					}
-					double d = Math.hypot(FIRE_SPOTS.get(i)[0] - FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(i)[1] - FIRE_SPOTS.get(was)[1]);
+					double d = drawn != null ? Math.hypot(FIRE_SPOTS.get(i)[0] - drawn[0], FIRE_SPOTS.get(i)[1] - drawn[1])
+						: Math.hypot(FIRE_SPOTS.get(i)[0] - FIRE_SPOTS.get(was)[0], FIRE_SPOTS.get(i)[1] - FIRE_SPOTS.get(was)[1]);
 					if (d < nearest)
 					{
 						nearest = d;
@@ -1017,6 +1026,140 @@ final class CrowdPlanner
 	private static final long NO_OBJECT = Long.MIN_VALUE;
 
 	/**
+	 * A fire with at least this many at it, on its tile and the tiles round it (at least two of
+	 * them), is stood round by one crowd, as an anvil is (see {@link #layOutRoundObjects}). Each
+	 * tile round a busy campfire used to be laid out on its own, squeezed into its own slice of the
+	 * ring until its people stood 26 apart, and the people standing on the fire, laid out last in
+	 * whatever gaps were left, waited out of sight in it for minutes. A few at a fire keep their
+	 * own rows, which suit them.
+	 */
+	static final int FIRE_CROWD = PersonalSpaceConfig.FULL_CROWD;
+	/**
+	 * ...and it stays one crowd while at least this many are still at it: a crowd that broke up
+	 * and formed again as people came and went laid everyone at the fire out afresh each time.
+	 */
+	static final int FIRE_CROWD_KEEP = 2;
+	/** What the troubleshooting report calls a tile laid out as part of the crowd round a fire. */
+	static final String ROUND_FIRE = "one crowd round the fire";
+	/**
+	 * How far clear of a fire's tile, all round it, the people in the crowd round it stand: as far
+	 * out as {@link #FIRE_SIDE}, past the flames.
+	 */
+	static final int FIRE_MARGIN = FIRE_SIDE - HALF_TILE;
+	/**
+	 * How far round a fire, either way from their own tile, the people on a tile beside it may stand
+	 * in its crowd: anywhere there's room. They still take their own side first (the own-side cost),
+	 * and never walk through the flames to get round. Held to their own side, they waited out of
+	 * sight while open ground beside the fire stood empty, which looked better filled.
+	 */
+	static final double FIRE_SIDE_ARC = Math.PI;
+	/** Nobody walks to their spot round a fire through this square round its tile: the flames, as the plugin keeps everyone out of them. */
+	private static final int FLAMES = HALF_TILE + PersonalSpacePlugin.FIRE_CLEARANCE;
+	/** Fires stood round by one crowd this tick, and last tick. */
+	private Set<Long> fireCrowds = new HashSet<>();
+	private Set<Long> fireCrowdsWas = new HashSet<>();
+	/** The fire each tile's people stood round in a crowd last tick, and this tick. */
+	private Map<Long, Long> previousFireOf = new HashMap<>();
+	private Map<Long, Long> currentFireOf = new HashMap<>();
+	/** The fires near each tile, looked up once a tick. */
+	private final Map<Long, List<int[]>> firesNearNow = new HashMap<>();
+	/** Tiles whose people are laid out in the crowd round a fire this tick. */
+	private final Set<Long> roundFires = new HashSet<>();
+	/**
+	 * Everyone in the crowd round a fire left waiting out of sight for a spot, and the tick they
+	 * started waiting, last tick and this. Whoever has waited longest on a tile is given the next
+	 * spot from it: given in the order people stood on the tile, someone back from the bank went
+	 * straight to the front while one who had waited there for minutes stayed out of sight.
+	 */
+	private Map<Integer, Integer> waitingSince = new HashMap<>();
+	private Map<Integer, Integer> waitingSinceNow = new HashMap<>();
+
+	/** {@link Surroundings#firesNear}, looked up once a tick for each tile. */
+	private List<int[]> firesNear(long tile, Surroundings around)
+	{
+		return firesNearNow.computeIfAbsent(tile, around::firesNear);
+	}
+
+	/**
+	 * The fire the people on this tile are at, or {@link #NO_OBJECT}: the one they stand on, the one
+	 * their tile stood round in a crowd last tick while anyone there still faces it, else the one
+	 * most of them face.
+	 */
+	private long fireOf(long tile, List<StackSpreader.Entry> group, Surroundings around)
+	{
+		List<int[]> fires = firesNear(tile, around);
+		if (fires.isEmpty())
+		{
+			return NO_OBJECT;
+		}
+		if (fireUnderfoot(fires))
+		{
+			return tile;
+		}
+		Long was = previousFireOf.get(tile);
+		if (was != null && facingCount(group, tile, was) > 0)
+		{
+			for (int[] fire : fires)
+			{
+				if (StackRegistry.key(StackRegistry.plane(tile), StackRegistry.sceneX(tile) + fire[0], StackRegistry.sceneY(tile) + fire[1]) == was)
+				{
+					return was;
+				}
+			}
+		}
+		int[] faced = fireFaced(group, fires);
+		return faced == null ? NO_OBJECT
+			: StackRegistry.key(StackRegistry.plane(tile), StackRegistry.sceneX(tile) + faced[0], StackRegistry.sceneY(tile) + faced[1]);
+	}
+
+	/**
+	 * Which fires are stood round by one crowd this tick (see {@link #FIRE_CROWD}), and which fire
+	 * each tile's people are at.
+	 */
+	private Map<Long, Long> findFireCrowds(Map<Long, List<StackSpreader.Entry>> byTile, IntPredicate shown, Surroundings around)
+	{
+		Map<Long, Long> fireOfTile = new HashMap<>();
+		Map<Long, int[]> atFire = new HashMap<>();
+		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+		{
+			List<StackSpreader.Entry> group = new ArrayList<>(e.getValue().size());
+			for (StackSpreader.Entry en : e.getValue())
+			{
+				if (shown.test(en.id))
+				{
+					group.add(en);
+				}
+			}
+			long fire = group.isEmpty() ? NO_OBJECT : fireOf(e.getKey(), group, around);
+			if (fire != NO_OBJECT)
+			{
+				fireOfTile.put(e.getKey(), fire);
+				int[] count = atFire.computeIfAbsent(fire, k -> new int[2]);
+				count[0] += group.size();
+				count[1]++;
+			}
+		}
+		for (Map.Entry<Long, int[]> e : atFire.entrySet())
+		{
+			int people = e.getValue()[0];
+			if (e.getValue()[1] >= 2 && people >= FIRE_CROWD || fireCrowdsWas.contains(e.getKey()) && people >= FIRE_CROWD_KEEP)
+			{
+				fireCrowds.add(e.getKey());
+			}
+		}
+		return fireOfTile;
+	}
+
+	/** Puts the people on {@code tile} who may be moved in the crowd round {@code fire}. */
+	private void joinFireCrowd(long fire, long tile, List<Integer> movable, Map<Long, List<Long>> crowds, Map<Long, List<Integer>> ids)
+	{
+		crowds.computeIfAbsent(fire, k -> new ArrayList<>()).add(tile);
+		ids.put(tile, movable);
+		currentFireOf.put(tile, fire);
+		roundFires.add(tile);
+	}
+
+	/**
 	 * Where the people round an object may be drawn, as {east, north, ring} from its middle: rings
 	 * {@link #OBJECT_RING_STEP} apart from {@link #OBJECT_NEAR_RING} out to {@link #OBJECT_REACH},
 	 * each with a spot straight out from every tile round the object.
@@ -1038,11 +1181,15 @@ final class CrowdPlanner
 	private static final int[][] OBJECT_CHEAPEST = new int[9][];
 	/** How many spots the nearest ring round an object has. */
 	private static final int NEAR_RING_SPOTS;
+	/** How many spots each ring round an object has. */
+	private static final int[] RING_SPOTS;
 	/**
 	 * For each of {@link #OBJECT_SPOTS}, the spots nearer to it than {@link #SPOT_NEIGHBOUR_REACH}: the
 	 * only ones someone standing there can make too crowded, so the only ones worth checking.
 	 */
 	private static final short[][] SPOT_NEIGHBOURS = new short[OBJECT_SPOTS.size()][];
+	/** Which of {@link #OBJECT_SPOTS} are {@link #FIRE_MARGIN} clear of a fire's tile all round, for the crowd round a fire. */
+	private static final boolean[] CLEAR_OF_FLAMES = new boolean[OBJECT_SPOTS.size()];
 
 	static
 	{
@@ -1053,8 +1200,14 @@ final class CrowdPlanner
 			SPOT_Z[s] = OBJECT_SPOTS.get(s)[1];
 			SPOT_RING[s] = OBJECT_SPOTS.get(s)[2];
 			nearRing += SPOT_RING[s] == 0 ? 1 : 0;
+			CLEAR_OF_FLAMES[s] = Math.hypot(Math.max(0, Math.abs(SPOT_X[s]) - HALF_TILE), Math.max(0, Math.abs(SPOT_Z[s]) - HALF_TILE)) >= FIRE_MARGIN;
 		}
 		NEAR_RING_SPOTS = nearRing;
+		RING_SPOTS = new int[SPOT_RING[SPOT_RING.length - 1] + 1];
+		for (int ring : SPOT_RING)
+		{
+			RING_SPOTS[ring]++;
+		}
 		for (int s = 0; s < SPOT_X.length; s++)
 		{
 			short[] near = new short[SPOT_X.length];
@@ -1086,7 +1239,11 @@ final class CrowdPlanner
 			float[] cost = new float[SPOT_X.length];
 			for (int s = 0; s < SPOT_X.length; s++)
 			{
-				cost[s] = (float) (SPOT_RING[s] * OBJECT_RING_STEP + OBJECT_TILE_WEIGHT * from[s]
+				// Standing on the thing itself, which only a Forester's Campfire allows, they have no
+				// side of their own: just the nearest ring with room, wherever round it that is. Charged
+				// for their walk out to it as if from a tile beside it, they waited out of sight while
+				// the people beside it took every place within reach.
+				cost[s] = beside == 4 ? SPOT_RING[s] * OBJECT_RING_STEP : (float) (SPOT_RING[s] * OBJECT_RING_STEP + OBJECT_TILE_WEIGHT * from[s]
 					+ OBJECT_FAR_WEIGHT * Math.max(0, from[s] - 2.0 * HALF_TILE));
 			}
 			order.sort(Comparator.<Integer>comparingDouble(s -> cost[s]).thenComparingInt(s -> SPOT_RING[s]).thenComparingDouble(s -> from[s]).thenComparingInt(s -> s));
@@ -1294,13 +1451,27 @@ final class CrowdPlanner
 		private static final int WEST = 1;
 		private static final int NORTH = 2;
 		private static final int SOUTH = 3;
+		private static final int MIDDLE = SIZE * SIZE / 2;
 		private final boolean[] open = new boolean[SIZE * SIZE];
 		private final boolean[] step = new boolean[SIZE * SIZE * 4];
 		/** Worked out once while the ground stays the same: see {@link #walksFrom}. */
 		private final boolean[][] walks = new boolean[9][];
+		/**
+		 * Whether the object is a fire. Nobody walks through its flames, as through an anvil, but the
+		 * people standing on it (a Forester's Campfire can be stood on) walk out of them.
+		 */
+		private final boolean fire;
+		/**
+		 * Round a fire, which of the five by five tiles centred on it have another fire on them, or
+		 * null: nobody walks through those flames either. Two campfires side by side, someone walked
+		 * from one round the corner of the other.
+		 */
+		private final boolean[] otherFire;
 
-		Ground(long object, Surroundings around)
+		Ground(long object, Surroundings around, boolean fire, boolean[] otherFire)
 		{
+			this.fire = fire;
+			this.otherFire = otherFire;
 			int plane = StackRegistry.plane(object);
 			for (int i = 0; i < SIZE; i++)
 			{
@@ -1309,7 +1480,9 @@ final class CrowdPlanner
 					long tile = StackRegistry.key(plane, StackRegistry.sceneX(object) + i - SIZE / 2, StackRegistry.sceneY(object) + j - SIZE / 2);
 					int t = i * SIZE + j;
 					open[t] = around.canStand(tile, 0, 0);
-					if (open[t])
+					// A fire's own tile can't be stood on (the flames), but whether a wall keeps anyone
+					// from stepping off it onto the tiles beside it says which way they can walk out.
+					if (open[t] || fire && t == MIDDLE)
 					{
 						step[t * 4 + EAST] = around.canStand(tile, 2 * HALF_TILE, 0);
 						step[t * 4 + WEST] = around.canStand(tile, -2 * HALF_TILE, 0);
@@ -1322,7 +1495,8 @@ final class CrowdPlanner
 
 		boolean sameAs(Ground other)
 		{
-			return other != null && java.util.Arrays.equals(open, other.open) && java.util.Arrays.equals(step, other.step);
+			return other != null && fire == other.fire && java.util.Arrays.equals(otherFire, other.otherFire)
+				&& java.util.Arrays.equals(open, other.open) && java.util.Arrays.equals(step, other.step);
 		}
 
 		/**
@@ -1355,10 +1529,19 @@ final class CrowdPlanner
 			{
 				double fromX = (beside / 3 - 1) * 2.0 * HALF_TILE;
 				double fromZ = (beside % 3 - 1) * 2.0 * HALF_TILE;
+				// Standing on a fire, they walk out of it to stand round it: no further out than the
+				// people on a fire nobody crowds round stand (FIRE_OUTER), so they're still at it.
+				boolean outOfTheFire = fire && beside == 4;
+				// Beside a fire, on their own side of it: no further round than the next tile's way
+				// out from it. Sent round to whatever gap was left, someone from the north side of a
+				// busy fire was drawn on its far side, the hover arrow pointing back across it.
+				boolean ownSide = fire && beside != 4;
 				boolean[] out = new boolean[SPOT_X.length];
 				for (int s = 0; s < out.length; s++)
 				{
-					out[s] = clearAt(SPOT_X[s], SPOT_Z[s]) && clearWalk(fromX, fromZ, SPOT_X[s], SPOT_Z[s]);
+					out[s] = clearAt(SPOT_X[s], SPOT_Z[s]) && (!outOfTheFire || OBJECT_NEAR_RING + SPOT_RING[s] * OBJECT_RING_STEP <= FIRE_OUTER)
+						&& (!ownSide || Math.abs(signedAngle(fromX, fromZ, SPOT_X[s], SPOT_Z[s])) <= FIRE_SIDE_ARC + 1e-9)
+						&& clearWalk(fromX, fromZ, SPOT_X[s], SPOT_Z[s], outOfTheFire);
 				}
 				walks[beside] = out;
 			}
@@ -1368,16 +1551,33 @@ final class CrowdPlanner
 		/** Whether someone standing at one of {@link #OBJECT_SPOTS} can walk straight to another without passing through anything. */
 		boolean walkBetween(int from, int to)
 		{
-			return from == to || clearWalk(SPOT_X[from], SPOT_Z[from], SPOT_X[to], SPOT_Z[to]);
+			return from == to || clearWalk(SPOT_X[from], SPOT_Z[from], SPOT_X[to], SPOT_Z[to], false);
 		}
 
 		/**
 		 * Whether a straight walk between two points (from the object's middle) never passes where a
 		 * body couldn't stand: through a tile that can't be stood on, or within
-		 * {@link CollisionTerrain#EDGE_MARGIN} of an edge that can't be stepped over.
+		 * {@link CollisionTerrain#EDGE_MARGIN} of an edge that can't be stepped over, or round a fire
+		 * through its flames.
+		 *
+		 * @param outOfTheFire whether it's a walk out of the fire from its middle, by someone standing
+		 *                     on it: only a wall along its tile's edges stops that
 		 */
-		private boolean clearWalk(double ax, double az, double bx, double bz)
+		private boolean clearWalk(double ax, double az, double bx, double bz, boolean outOfTheFire)
 		{
+			if (fire && !outOfTheFire && crosses(ax, az, bx, bz, -FLAMES, -FLAMES, FLAMES, FLAMES))
+			{
+				return false;
+			}
+			for (int t = 0; otherFire != null && t < otherFire.length; t++)
+			{
+				double x = (t / SIZE - SIZE / 2) * 2.0 * HALF_TILE;
+				double z = (t % SIZE - SIZE / 2) * 2.0 * HALF_TILE;
+				if (otherFire[t] && crosses(ax, az, bx, bz, x - FLAMES, z - FLAMES, x + FLAMES, z + FLAMES))
+				{
+					return false;
+				}
+			}
 			int margin = CollisionTerrain.EDGE_MARGIN;
 			int tile = 2 * HALF_TILE;
 			double westmost = Math.min(ax, bx);
@@ -1395,17 +1595,35 @@ final class CrowdPlanner
 					{
 						continue; // the walk never comes into this tile
 					}
-					if (!open[t] ? crosses(ax, az, bx, bz, x0, z0, x0 + tile, z0 + tile)
-						: !step[t * 4 + WEST] && crosses(ax, az, bx, bz, x0, z0, x0 + margin, z0 + tile)
-						|| !step[t * 4 + EAST] && crosses(ax, az, bx, bz, x0 + tile - 1 - margin, z0, x0 + tile, z0 + tile)
-						|| !step[t * 4 + SOUTH] && crosses(ax, az, bx, bz, x0, z0, x0 + tile, z0 + margin)
-						|| !step[t * 4 + NORTH] && crosses(ax, az, bx, bz, x0, z0 + tile - 1 - margin, x0 + tile, z0 + tile))
+					// Walking out of the fire, its own tile is only in the way where a wall runs along it.
+					if (!open[t] && !(outOfTheFire && t == MIDDLE) ? crosses(ax, az, bx, bz, x0, z0, x0 + tile, z0 + tile)
+						: !steps(t, WEST, outOfTheFire) && crosses(ax, az, bx, bz, x0, z0, x0 + margin, z0 + tile)
+						|| !steps(t, EAST, outOfTheFire) && crosses(ax, az, bx, bz, x0 + tile - 1 - margin, z0, x0 + tile, z0 + tile)
+						|| !steps(t, SOUTH, outOfTheFire) && crosses(ax, az, bx, bz, x0, z0, x0 + tile, z0 + margin)
+						|| !steps(t, NORTH, outOfTheFire) && crosses(ax, az, bx, bz, x0, z0 + tile - 1 - margin, x0 + tile, z0 + tile))
 					{
 						return false;
 					}
 				}
 			}
 			return true;
+		}
+
+		/**
+		 * Whether tile {@code t} can be stepped off that way. Walking out of a fire, the edge of a tile
+		 * beside it towards the fire only counts as a wall if it is one: that it can't be stepped over
+		 * otherwise just says the flames are on the other side.
+		 */
+		private boolean steps(int t, int direction, boolean outOfTheFire)
+		{
+			if (step[t * 4 + direction] || !outOfTheFire)
+			{
+				return step[t * 4 + direction];
+			}
+			return direction == WEST && t == MIDDLE + SIZE && step[MIDDLE * 4 + EAST]
+				|| direction == EAST && t == MIDDLE - SIZE && step[MIDDLE * 4 + WEST]
+				|| direction == SOUTH && t == MIDDLE + 1 && step[MIDDLE * 4 + NORTH]
+				|| direction == NORTH && t == MIDDLE - 1 && step[MIDDLE * 4 + SOUTH];
 		}
 
 		/** Whether the segment from (ax, az) to (bx, bz) passes through the inside of the box from (x0, z0) to (x1, z1). */
@@ -1610,11 +1828,77 @@ final class CrowdPlanner
 		return objectTick + Math.max(0, (int) Math.ceil(Math.hypot(east, north) / (2 * HALF_TILE)) - 1);
 	}
 
-	/** The spot someone on {@code tile} had round {@code object} last tick, or -1. */
+	/**
+	 * The spot someone on {@code tile} had round {@code object} last tick, or -1. Joining the crowd
+	 * round a fire from a spot of their own on their tile (laid out on its own, before the fire got
+	 * busy), the spot round it nearest where they were drawn: the crowd forms round where everyone
+	 * already stands. Given the best places afresh, everyone at the fire walked somewhere new the
+	 * moment it got busy, some of them straight through it.
+	 */
 	private int remembered(int id, long object, long tile)
 	{
 		long[] had = objectSpotOf.get(id);
-		return had != null && had[0] == object && had[1] == tile ? (int) had[2] : -1;
+		if (had != null || !fireCrowds.contains(object))
+		{
+			return had != null && had[0] == object && had[1] == tile ? (int) had[2] : -1;
+		}
+		double[] drawn = drawnLastTick(id, tile);
+		if (drawn == null)
+		{
+			return -1;
+		}
+		double east = drawn[0] + (StackRegistry.sceneX(tile) - StackRegistry.sceneX(object)) * 2.0 * HALF_TILE;
+		double north = drawn[1] + (StackRegistry.sceneY(tile) - StackRegistry.sceneY(object)) * 2.0 * HALF_TILE;
+		int nearest = -1;
+		double best = Double.MAX_VALUE;
+		for (int s = 0; s < SPOT_X.length; s++)
+		{
+			double d = Math.hypot(SPOT_X[s] - east, SPOT_Z[s] - north);
+			if (d < best)
+			{
+				best = d;
+				nearest = s;
+			}
+		}
+		return nearest;
+	}
+
+	/** Everyone given a spot last tick, and the same by id, worked out only when it's needed. */
+	private List<StackSpreader.Placement> placedBefore = new ArrayList<>();
+	private Map<Integer, StackSpreader.Placement> drawnBefore;
+
+	/**
+	 * Whether a point (from a fire's middle) is nearer than {@link #FIRE_MARGIN} to any of the other
+	 * fires near it ({@link Ground#otherFire}): the crowd round one fire stands as clear of the flames
+	 * of the fire beside it as of its own.
+	 */
+	private static boolean nearOtherFire(double east, double north, boolean[] otherFire)
+	{
+		for (int t = 0; t < otherFire.length; t++)
+		{
+			double x = (t / Ground.SIZE - Ground.SIZE / 2) * 2.0 * HALF_TILE;
+			double z = (t % Ground.SIZE - Ground.SIZE / 2) * 2.0 * HALF_TILE;
+			if (otherFire[t] && Math.hypot(Math.max(0, Math.abs(east - x) - HALF_TILE), Math.max(0, Math.abs(north - z) - HALF_TILE)) < FIRE_MARGIN)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Where someone on {@code tile} was given a spot last tick, as {east, north} from its middle, or null. */
+	private double[] drawnLastTick(int id, long tile)
+	{
+		if (drawnBefore == null)
+		{
+			drawnBefore = new HashMap<>();
+			for (StackSpreader.Placement p : placedBefore)
+			{
+				drawnBefore.put(p.id, p);
+			}
+		}
+		StackSpreader.Placement was = drawnBefore.get(id);
+		return was == null || was.tile != tile ? null : new double[]{was.dx, was.dz};
 	}
 
 	/**
@@ -1636,6 +1920,14 @@ final class CrowdPlanner
 	 * Everyone keeps their spot while it stays clear, whoever loses it steps to the clear spot nearest
 	 * it, and anyone left over once the rings are full waits out of sight rather than being drawn out
 	 * on their own.
+	 *
+	 * <p>A busy fire (see {@link #FIRE_CROWD}) is stood round the same way, with these differences.
+	 * Nobody stands nearer it than {@link #FIRE_SIDE}, out of its flames, nor walks through them to
+	 * their spot. Everyone at it faces it. The people beside it keep to their own side of it, no
+	 * further round than {@link #FIRE_SIDE_ARC}, and the people standing on it, who have no side of
+	 * their own, take the nearest ring with room wherever it is, out to {@link #FIRE_OUTER}. Whoever
+	 * has waited longest on a tile is given its next spot. The crowd forms round where everyone at
+	 * the fire already stands, and keeps clear of the middle of every tile two out from it.
 	 *
 	 * @param crowds    for each object, the tiles round it laid out here
 	 * @param idsByTile the people on each of those tiles who may be moved, in the order they get spots
@@ -1671,19 +1963,23 @@ final class CrowdPlanner
 			for (long object : objects)
 			{
 				List<Long> tiles = crowds.get(object);
+				boolean fire = fireCrowds.contains(object);
 				for (int east = -1; east <= 1; east++)
 				{
 					for (int north = -1; north <= 1; north++)
 					{
 						long tile = StackRegistry.key(StackRegistry.plane(object), StackRegistry.sceneX(object) + east, StackRegistry.sceneY(object) + north);
 						List<StackSpreader.Entry> there = byTile.get(tile);
-						if (tile == object || there == null || there.size() != 1 || idsByTile.containsKey(tile) || elsewhere.contains(tile))
+						// Someone alone on a busy fire is one of its crowd too: drawn standing in the flames
+						// otherwise, the one place nobody else is.
+						boolean onTheFire = tile == object;
+						if (onTheFire && !fire || there == null || there.size() != 1 || idsByTile.containsKey(tile) || elsewhere.contains(tile))
 						{
 							continue;
 						}
 						StackSpreader.Entry only = there.get(0);
 						if (!shown.test(only.id) || (only.local && !includeLocal) || placed.contains(only.id)
-							|| objectForAlone(tile, there, crowds) != object || fireUnderfoot(around.firesNear(tile)))
+							|| !onTheFire && (objectForAlone(tile, there, crowds) != object || fireUnderfoot(firesNear(tile, around))))
 						{
 							continue;
 						}
@@ -1692,11 +1988,21 @@ final class CrowdPlanner
 						idsByTile.put(tile, one);
 						tiles.add(tile);
 						alone.add(tile);
-						plan.curvedRows.add(tile);
+						if (fire)
+						{
+							currentFireOf.put(tile, object);
+							roundFires.add(tile);
+						}
+						else
+						{
+							plan.curvedRows.add(tile);
+						}
 					}
 				}
 				tiles.sort(Comparator.naturalOrder());
 			}
+			// A fire's crowd with nobody left to lay out (see plan).
+			objects.removeIf(object -> crowds.get(object).isEmpty());
 			// Everyone else drawn, as {plane, east, north, 1 if it's you}: at their spots, and one in the
 			// middle of any tile where someone without a spot is drawn. Fires are laid out after, clear of these.
 			List<double[]> bodies = new ArrayList<>();
@@ -1777,6 +2083,8 @@ final class CrowdPlanner
 			}
 		}
 		objectSpotOf = now;
+		waitingSince = waitingSinceNow;
+		waitingSinceNow = new HashMap<>();
 		// The ground round objects nobody stands round this tick is kept a while too, so a crowd that
 		// breaks up and gathers again a moment later doesn't work out every walk round it afresh.
 		for (Map.Entry<Long, Ground> e : grounds.entrySet())
@@ -1817,7 +2125,22 @@ final class CrowdPlanner
 		int objectY = StackRegistry.sceneY(object);
 		int middleX = objectX * 2 * HALF_TILE + HALF_TILE;
 		int middleZ = objectY * 2 * HALF_TILE + HALF_TILE;
-		Ground ground = new Ground(object, around);
+		boolean fire = fireCrowds.contains(object);
+		// Round a fire, any other fire near it, on the five by five tiles centred on it.
+		boolean[] otherFire = fire ? new boolean[Ground.SIZE * Ground.SIZE] : null;
+		for (int east = -1; fire && east <= 1; east++)
+		{
+			for (int north = -1; north <= 1; north++)
+			{
+				for (int[] f : firesNear(StackRegistry.key(plane, objectX + east, objectY + north), around))
+				{
+					int i = east + f[0] + Ground.SIZE / 2;
+					int j = north + f[1] + Ground.SIZE / 2;
+					otherFire[i * Ground.SIZE + j] |= i != Ground.SIZE / 2 || j != Ground.SIZE / 2;
+				}
+			}
+		}
+		Ground ground = new Ground(object, around, fire, otherFire);
 		Ground was = grounds.get(object);
 		if (ground.sameAs(was))
 		{
@@ -1826,10 +2149,15 @@ final class CrowdPlanner
 		groundsNow.put(object, ground);
 		int n = SPOT_X.length;
 		// Where the walk there is clear, the spot itself as the plugin judges it (which also keeps
-		// clear of fires): asked only of the spots someone is looking at.
+		// clear of fires): asked only of the spots someone is looking at. Round a fire, never nearer
+		// it than FIRE_SIDE, out of its flames.
 		byte[] stand = new byte[n];
 		IntPredicate standable = s ->
 		{
+			if (fire && (!CLEAR_OF_FLAMES[s] || nearOtherFire(SPOT_X[s], SPOT_Z[s], otherFire)))
+			{
+				return false;
+			}
 			int x = middleX + SPOT_X[s];
 			int z = middleZ + SPOT_Z[s];
 			int tx = Math.floorDiv(x, 2 * HALF_TILE);
@@ -1849,6 +2177,40 @@ final class CrowdPlanner
 			if (b[0] == plane && Math.hypot(b[1] - middleX, b[2] - middleZ) < OBJECT_REACH + OBJECT_YOUR_GAP)
 			{
 				taken.add(new double[]{b[1] - middleX, b[2] - middleZ, b[3]});
+			}
+		}
+		if (fire)
+		{
+			// Round a fire, the middle of every other tile near it where anyone stands, and of every
+			// tile two out from it, where anyone may: whoever stands alone there is drawn in its
+			// middle, and the people at the fire standing there vanished every time one came.
+			Set<Long> middles = new HashSet<>();
+			for (long other : byTile.keySet())
+			{
+				if (StackRegistry.plane(other) == plane && other != object && !tiles.contains(other))
+				{
+					middles.add(other);
+				}
+			}
+			for (int east = -2; east <= 2; east++)
+			{
+				for (int north = -2; north <= 2; north++)
+				{
+					long other = StackRegistry.key(plane, objectX + east, objectY + north);
+					if ((Math.abs(east) == 2 || Math.abs(north) == 2) && around.canStand(other, 0, 0))
+					{
+						middles.add(other);
+					}
+				}
+			}
+			for (long other : middles)
+			{
+				double x = (StackRegistry.sceneX(other) - objectX) * 2.0 * HALF_TILE;
+				double z = (StackRegistry.sceneY(other) - objectY) * 2.0 * HALF_TILE;
+				if (Math.hypot(x, z) < OBJECT_REACH + OBJECT_GAP)
+				{
+					taken.add(new double[]{x, z, 0});
+				}
 			}
 		}
 		// Unlike a fire's few spots, these are close enough together that keeping everyone where they
@@ -1879,6 +2241,10 @@ final class CrowdPlanner
 				{
 					someoneWaits = true;
 					youWait |= id == yourId;
+					if (fire)
+					{
+						waitingSinceNow.put(id, waitingSince.getOrDefault(id, objectTick));
+					}
 				}
 			}
 			if (at.middles.contains(tile))
@@ -1917,14 +2283,37 @@ final class CrowdPlanner
 					room.addSpot(s, false);
 				}
 			}
-			// The front-row places round the object this tile can't use: behind it, or past a wall.
-			int outOfReach = 0;
-			for (int s = 0; s < n; s++)
+			int blocked;
+			if (fire)
 			{
-				outOfReach += SPOT_RING[s] == 0 && !r.ok(s) ? 1 : 0;
+				// Round a fire, the places nearest it on this tile's side, within a tile of it, that it
+				// can't use, past a wall or something else in the way, in bodies' widths. (Not the
+				// flames, nor the other sides: nobody from here would stand there anyway.)
+				double[] m = middleOf(tile, object);
+				double width = 0;
+				for (int s = 0; s < n; s++)
+				{
+					if (SPOT_RING[s] <= 1 && CLEAR_OF_FLAMES[s] && Math.hypot(SPOT_X[s] - m[0], SPOT_Z[s] - m[1]) <= 2 * HALF_TILE
+						&& (tile == object || Math.abs(signedAngle(m[0], m[1], SPOT_X[s], SPOT_Z[s])) <= FIRE_SIDE_ARC + 1e-9) && !r.ok(s))
+					{
+						width += 2 * Math.PI * (OBJECT_NEAR_RING + SPOT_RING[s] * OBJECT_RING_STEP) / RING_SPOTS[SPOT_RING[s]];
+					}
+				}
+				blocked = (int) Math.round(width / OBJECT_GAP);
+				// Everyone at the fire faces it.
+				plan.fires.put(tile, new int[]{(objectX - StackRegistry.sceneX(tile)) * 2 * HALF_TILE, (objectY - StackRegistry.sceneY(tile)) * 2 * HALF_TILE});
 			}
-			int blocked = (int) Math.round(outOfReach * 2 * Math.PI * OBJECT_NEAR_RING / NEAR_RING_SPOTS / OBJECT_GAP);
-			plan.tiles.put(tile, new TileReport(ROUND_OBJECT, OBJECT_GAP, seen, mine, mine + more, blocked));
+			else
+			{
+				// The front-row places round the object this tile can't use: behind it, or past a wall.
+				int outOfReach = 0;
+				for (int s = 0; s < n; s++)
+				{
+					outOfReach += SPOT_RING[s] == 0 && !r.ok(s) ? 1 : 0;
+				}
+				blocked = (int) Math.round(outOfReach * 2 * Math.PI * OBJECT_NEAR_RING / NEAR_RING_SPOTS / OBJECT_GAP);
+			}
+			plan.tiles.put(tile, new TileReport(fire ? ROUND_FIRE : ROUND_OBJECT, OBJECT_GAP, seen, mine, mine + more, blocked));
 		}
 	}
 
@@ -2037,6 +2426,10 @@ final class CrowdPlanner
 					lost.put(id, had);
 				}
 				left.add(id);
+			}
+			if (fireCrowds.contains(object))
+			{
+				left.sort(Comparator.comparingInt(id -> waitingSince.getOrDefault(id, objectTick)));
 			}
 			waiting.put(tile, left);
 		}
@@ -3213,6 +3606,15 @@ final class CrowdPlanner
 		objectAt.clear();
 		previousObjectOf = currentObjectOf;
 		currentObjectOf = new HashMap<>();
+		firesNearNow.clear();
+		roundFires.clear();
+		fireCrowdsWas = fireCrowds;
+		fireCrowds = new HashSet<>();
+		previousFireOf = currentFireOf;
+		currentFireOf = new HashMap<>();
+		// Smart, at a busy fire: one crowd all round it, as at an anvil, with everyone standing on it.
+		Map<Long, Long> fireOfTile = smart && arrangement == PersonalSpaceConfig.Arrangement.AUTO
+			? findFireCrowds(byTile, shown, around) : new HashMap<>();
 		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
 		{
 			List<StackSpreader.Entry> everyone = e.getValue();
@@ -3254,9 +3656,15 @@ final class CrowdPlanner
 			{
 				continue;
 			}
-			List<int[]> firesHere = around.firesNear(tile);
+			List<int[]> firesHere = firesNear(tile, around);
 			if (fireUnderfoot(firesHere))
 			{
+				if (fireCrowds.contains(tile))
+				{
+					// A busy fire: everyone standing on it is one crowd with everyone round it.
+					joinFireCrowd(tile, tile, movable, objectCrowds, objectIds);
+					continue;
+				}
 				// Standing on a fire (a Forester's Campfire can be stood on): never made room for like
 				// a crowd, nor lined up across it, but stood round the fire once everyone else's spots
 				// are known, by layOutOnFires.
@@ -3336,6 +3744,14 @@ final class CrowdPlanner
 			}
 			else
 			{
+				Long crowdFire = fireOfTile.get(tile);
+				if (crowdFire != null && fireCrowds.contains(crowdFire))
+				{
+					// At a busy fire: one crowd all round it with everyone else at it, laid out once
+					// everyone else's spots are known (see layOutRoundObjects).
+					joinFireCrowd(crowdFire, tile, movable, objectCrowds, objectIds);
+					continue;
+				}
 				// Gathered round a fire, in a row or not: stay close, whatever the slider says, and
 				// everyone faces the fire.
 				int[] fire = fireFaced(group, firesHere);
@@ -3869,6 +4285,17 @@ final class CrowdPlanner
 			plan.tiles.put(tile, new TileReport(shapeByTile.get(tile), spacingByTile.get(tile), shownByTile.get(tile),
 				e.getValue().size(), spots.size(), blockedByTile.get(tile)));
 		}
+		// A busy fire stood round by a crowd last tick stays one while anyone is left at it, even with
+		// nobody left sharing a tile: whoever is alone on it or beside it keeps their place round it
+		// (see layOutRoundObjects). Left out, the last one on the fire was laid out afresh and walked
+		// straight through it to the first place by it.
+		for (long fire : fireCrowds)
+		{
+			if (!objectCrowds.containsKey(fire) && previousFireOf.containsValue(fire))
+			{
+				objectCrowds.put(fire, new ArrayList<>());
+			}
+		}
 		layOutRoundObjects(plan, byTile, objectCrowds, objectIds, onFires.keySet(), placed, shown, capacity, includeLocal, tick, around);
 		layOutOnFires(plan, byTile, onFires, placed, shown, capacity, includeLocal, tick, around);
 		plan.placements.sort(Comparator.comparingInt(p -> p.id));
@@ -3979,6 +4406,8 @@ final class CrowdPlanner
 		}
 		lastYouKey = youKey;
 		lastYouAt = youAt;
+		placedBefore = new ArrayList<>(plan.placements);
+		drawnBefore = null;
 		return plan;
 	}
 
@@ -4026,5 +4455,15 @@ final class CrowdPlanner
 		objectSpotHeld.clear();
 		steppingBack.clear();
 		grounds.clear();
+		fireCrowds.clear();
+		fireCrowdsWas.clear();
+		previousFireOf.clear();
+		currentFireOf.clear();
+		firesNearNow.clear();
+		roundFires.clear();
+		waitingSince.clear();
+		waitingSinceNow.clear();
+		placedBefore.clear();
+		drawnBefore = null;
 	}
 }

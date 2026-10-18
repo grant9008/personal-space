@@ -68,7 +68,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.27";
+	static final String VERSION = "1.9.29";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
