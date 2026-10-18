@@ -51,7 +51,7 @@ public class RenderSidebar
 		set(s, "nudgedDrawsPerSec", 200.0);
 		set(s, "revealedDrawsPerSec", 600.0);
 		set(s, "pluginVersion", PersonalSpacePlugin.VERSION);
-		set(s, "yourShape", "You're in a row along the counter or wall, kept close by Auto-space");
+		set(s, "yourShape", "You're in a row along the counter or wall, kept close by Auto spacing");
 		set(s, "spacing", 256);
 		set(s, "maxStack", 5);
 		set(s, "smallGroupsClose", true);

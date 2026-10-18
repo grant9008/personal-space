@@ -141,6 +141,9 @@ final class PersonalSpacePanel extends PluginPanel
 		content.add(buildCrowdCard(), c);
 
 		c.gridy++;
+		content.add(buildExtrasCard(), c);
+
+		c.gridy++;
 		content.add(buildTroubleshooting(), c);
 
 		// Keep the content at the top of the scroll area.
@@ -265,7 +268,7 @@ final class PersonalSpacePanel extends PluginPanel
 			// no icon, no problem
 		}
 		p.add(title, BorderLayout.WEST);
-		activeSwitch.setToolTipText(tip("Spread out crowds, or show the game as normal."));
+		activeSwitch.setToolTipText(tip("Turns Personal Space on or off. Off shows the game exactly as normal."));
 		p.add(activeSwitch, BorderLayout.EAST);
 
 		JPanel live = new JPanel(new BorderLayout(5, 0));
@@ -305,8 +308,7 @@ final class PersonalSpacePanel extends PluginPanel
 				gpuButton.setBackground(ColorScheme.BRAND_ORANGE);
 			}
 		});
-		gpuButton.setToolTipText(tip("Switches on RuneLite's GPU plugin, which Personal Space needs to draw crowds. "
-			+ "Same as ticking it in RuneLite's plugin list. 117 HD works too, instead."));
+		gpuButton.setToolTipText(tip("Personal Space needs RuneLite's GPU plugin, or 117 HD, to draw crowds. This switches the GPU plugin on for you."));
 		gpuButton.addActionListener(e -> turnOnGpu.run());
 		gpuButton.setVisible(false);
 		JPanel gpuRow = new JPanel(new BorderLayout());
@@ -348,38 +350,111 @@ final class PersonalSpacePanel extends PluginPanel
 		return card;
 	}
 
+	/**
+	 * The crowd card: how crowds are spread, and the switches that are on by default. Everything off
+	 * by default is in {@link #buildExtrasCard}, so the everyday settings aren't lost among extras.
+	 */
 	private JPanel buildCrowdCard()
 	{
 		JLabel recommended = new JLabel("Use recommended");
 		recommended.setFont(FontManager.getRunescapeSmallFont());
-		recommended.setToolTipText(tip("Sets the crowd settings back to the ones that look best in most places: 5 players per tile, "
-			+ "Wide spacing, Smart arrangement, Auto-space on and a Natural pose. Your other switches stay as they are."));
+		recommended.setToolTipText(tip("Puts the crowd settings back to what looks best in most places: 5 per tile, Wide, Smart shape, Auto spacing on, Natural pose. Your other switches aren't touched."));
 		link(recommended, ColorScheme.MEDIUM_GRAY_COLOR, this::useRecommended);
 		JPanel card = card("Crowd", recommended);
 		GridBagConstraints c = cardConstraints();
 
 		card.add(labelWithValue("Players per tile", perTileValue), c);
 		c.gridy++;
-		perTileSlider.setToolTipText(tip("How many players on one tile get their own spot. 5 suits most places. Raise it if a busy bank leaves a heap in the middle."));
+		perTileSlider.setToolTipText(tip("How many people on one tile get spread out. 5 suits most places. Raise it if a busy bank still leaves a pile in the middle."));
 		card.add(slider(perTileSlider), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 4, 0);
+		card.add(labelWithValue("Spacing", spacingValue), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		spacingPills.setToolTipText(tip("How far apart spread-out people stand. Pick one, or drag the slider for anything in between."));
+		card.add(spacingPills, c);
+		c.gridy++;
+		spacingSlider.setToolTipText(tip("How far apart spread-out people stand. With Auto spacing on, banks, counters and fires stay close anyway."));
+		card.add(slider(spacingSlider), c);
+
+		c.gridy++;
+		c.insets = new Insets(6, 0, 4, 0);
+		card.add(fieldLabel("Shape"), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		arrangementPills.setToolTipText(tip("The shape people spread into. Smart: picks one for the place (rows at banks and counters, one crowd round an anvil or fire, a ring in the open). Circle, Line and Arc: that shape everywhere."));
+		card.add(arrangementPills, c);
+
+		c.gridy++;
+		c.insets = new Insets(6, 0, 4, 0);
+		card.add(fieldLabel("Pose for 2 or 3 players"), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		posePills.setToolTipText(tip("How 2 or 3 people standing together are turned. Natural: the way they really face. Angled: half turned to each other. Facing: face to face."));
+		card.add(posePills, c);
+
+		c.gridy++;
+		c.insets = new Insets(10, 0, 0, 0);
+		card.add(switchRow("Auto spacing", smallGroupsSwitch,
+			"On (recommended): the gaps suit the place, staying close at banks, counters, walls and fires and for small groups. Off: the Spacing slider sets every gap, everywhere, which is handy for photos."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Give me a spot", includeMeSwitch,
+			"On (recommended): you're spread out too, taking a spot in the crowd like everyone else (the front one, at a bank counter). Off: you always stay exactly where you really stand, and the people on your tile spread out around you."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Depth between players", depthTestSwitch,
+			"On (recommended): in a crowd, shields, capes and hats stay properly in front of or behind the people next to them as you turn the camera. Off: everyone is drawn whole, one over another, so gear pops between people. Only worth turning off if something looks wrong. GPU plugin only."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Walk while busy", walkBusySwitch,
+			"On (recommended): people moved while they're doing something (alching, cooking) are shown walking to their spot. Off: they glide there in the pose of what they're doing."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Hover shows who", hoverSwitch,
+			"On: hover someone who's been moved to see their name and level. You still click people where they really stand."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Use items through players", clickPastSwitch,
+			"On (recommended): when you use an item or spell on something (a fire, a booth), moved or hidden people don't take the left-click. Right-click still lists them."), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 0, 0);
+		card.add(switchRow("Pause while I'm fighting", combatSwitch,
+			"On (recommended): while you're fighting, everyone goes back to where they really stand, so you can see who's where. Keep it on for raids and bosses; turn it off for training spots like rock crabs."), c);
+
+		return wrapCard(card);
+	}
+
+	/** The extras card: everything off by default (hiding players and chat, alchers, sitting, and so on). */
+	private JPanel buildExtrasCard()
+	{
+		JLabel offNote = new JLabel("Off by default");
+		offNote.setFont(FontManager.getRunescapeSmallFont());
+		offNote.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		JPanel card = card("Extras", offNote);
+		GridBagConstraints c = cardConstraints();
+
+		c.insets = new Insets(0, 0, 4, 0);
 		JPanel hideBelowLabel = labelWithValue("Hide players below", hideBelowValue);
 		card.add(hideBelowLabel, c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		String hideBelowTip = tip("Off, or a combat level: anyone below it isn't drawn, nor is their overhead chat, like Entity Hider. "
-			+ "Good for hiding bots at the Grand Exchange: most are level 3, so set it to 4. "
-			+ "It goes by combat level only; total level can't be used, as the game never tells you anyone else's. "
-			+ "Friends, friends chat and clan always stay.");
+		String hideBelowTip = tip("Hide anyone under this combat level, bodies and overhead chat, like Entity Hider. Set 4 to hide the level-3 bots at the Grand Exchange. Friends, friends chat and clan are never hidden. Off in PvP areas and while you fight.");
 		hideBelowLabel.setToolTipText(hideBelowTip);
 		hideBelowSlider.setToolTipText(hideBelowTip);
 		card.add(slider(hideBelowSlider), c);
 		c.gridy++;
 		c.insets = new Insets(4, 0, 0, 0);
 		JPanel hideChat = switchRow("Hide their chat too", hideChatSwitch,
-			"On: chat from the players hidden above is dropped from the chat box too, even after they walk off. Nothing while the level is Off.");
+			"On: the players hidden by 'Hide players below' are also taken out of your chat box. Does nothing while that's Off.");
 		// Small, like the other labels in this card: it belongs to the slider above it.
 		for (java.awt.Component part : hideChat.getComponents())
 		{
@@ -397,7 +472,7 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(chatRangeLabel, c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		String chatRangeTip = tip("Off (the default), or a distance in tiles: public chat from anyone further from you than this isn't shown over their head or in the chat box, such as a busy bank across the road while you're at an anvil. Friends, friends chat and clan members always show. Changing it applies to chat already in the box too.");
+		String chatRangeTip = tip("Hide public chat from anyone further away than this many tiles, over their heads and in the chat box. Handy at an anvil next to a noisy bank. Friends, friends chat and clan always show. 0 is off.");
 		chatRangeLabel.setToolTipText(chatRangeTip);
 		chatRangeSlider.setToolTipText(chatRangeTip);
 		card.add(slider(chatRangeSlider), c);
@@ -407,89 +482,28 @@ final class PersonalSpacePanel extends PluginPanel
 		card.add(fieldLabel("Alchers behavior"), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
-		alcherPills.setToolTipText(tip("How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer, jump for joy or the Party emote with its glowing floor, at random. Your own spells never change."));
+		alcherPills.setToolTipText(tip("How other players' skilling spells look to you: alching, superheat, charge orb and enchanting. Normal: as the game shows them. Still: no spell animation or glow, so a crowd of alchers stops flashing. Party: each cast becomes a random dance. Your own spells never change."));
 		card.add(alcherPills, c);
 
 		c.gridy++;
-		c.insets = new Insets(8, 0, 4, 0);
-		card.add(labelWithValue("Spacing", spacingValue), c);
-		c.gridy++;
-		c.insets = new Insets(0, 0, 0, 0);
-		spacingPills.setToolTipText(tip("Quick picks. Fine-tune with the slider."));
-		card.add(spacingPills, c);
-		c.gridy++;
-		spacingSlider.setToolTipText(tip("How far apart players stand. With Auto-space on, banks, walls and fires stay close whatever this says."));
-		card.add(slider(spacingSlider), c);
-
-		c.gridy++;
-		c.insets = new Insets(6, 0, 4, 0);
-		card.add(fieldLabel("Arrangement"), c);
-		c.gridy++;
-		c.insets = new Insets(0, 0, 0, 0);
-		arrangementPills.setToolTipText(tip("Smart: lines up at counters, anvils and fires, and makes a ring in the open. Circle: always a ring. Line: side by side. Arc: a curve."));
-		card.add(arrangementPills, c);
-
-		c.gridy++;
-		c.insets = new Insets(6, 0, 4, 0);
-		card.add(fieldLabel("Pose for 2 or 3 players"), c);
-		c.gridy++;
-		c.insets = new Insets(0, 0, 0, 0);
-		posePills.setToolTipText(tip("How two or three players in the open are turned. Natural: as they really face. Angled: half towards each other. Facing: towards each other."));
-		card.add(posePills, c);
-
-		c.gridy++;
 		c.insets = new Insets(10, 0, 0, 0);
-		card.add(switchRow("Auto-space", smallGroupsSwitch,
-			"On: small groups, banks, walls and fires stay close whatever the slider says. Off: the slider decides everywhere."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Move my character too", includeMeSwitch,
-			"Off: you stay put and others step around you. On: you take a spot too, and people step out of your view where there's room."), c);
+		card.add(switchRow("Idle players sit", sitSwitch, "Off by default. On: other players who've done nothing for 30 seconds (AFK) sit down. They stand up as soon as they move, talk or do something. Only on your screen."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Draw me in front", inFrontSwitch,
-			"Off: whoever is between you and the camera covers you, as they really would. On: you're drawn over everyone in your crowd. Nobody moves out of your way either way."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Depth between players", depthTestSwitch,
-			"On (the default): each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front and behind as you turn the camera. Each body's own gear still looks just as the game draws it. Only people overlapping someone are drawn this way. Off: each person is drawn whole, one over another, as the game does it. GPU plugin only; with 117 HD everyone is drawn as the game does it."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Walk while busy", walkBusySwitch,
-			"On (the default): anyone doing something as they walk, alching on the run say, is drawn walking. Off: as the game draws them, gliding along in the pose of what they're doing."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Idle players sit", sitSwitch, "Off (the default). On: other players who've stood doing nothing for 5 seconds sit down, in the game's Sit emote. They get up the moment they walk or do something; alching counts, even with Alchers behavior on Still. Only on your screen; off in PvP areas."), c);
+			"On: you're always drawn on top of your crowd, so you never lose sight of yourself. Off: people between you and the camera cover you, as they really would."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Names over players", namesSwitch,
-			"On: names follow the bodies. Who gets a name, the colours and the rank icons are Player Indicators' settings, so change them there. Turn off Player Indicators' name position (or the plugin) so names aren't doubled."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Hover shows who", hoverSwitch,
-			"On: hover a body drawn away from its tile and a tooltip says who it is. You still click people where they really stand."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Click past moved players", clickPastSwitch,
-			"On (the default): using an item or spell on what you see (a fire, a booth, the ground), someone drawn away from where they really stand, or hidden in a crowd, doesn't take the left-click. Right-click still lists them."), c);
+			"On: names float over where people are drawn, not over where they stand. Uses Player Indicators' settings (who, colours, icons). Turn off Player Indicators' own names so you don't see two."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Arrow to their tile", arrowSwitch,
-			"On: hover a body drawn away from its tile and a small arrow points to where they really stand. Works with or without the tooltip."), c);
+			"On: hover someone who's been moved and an arrow points to where they really stand."), c);
 
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Pause while I'm fighting", combatSwitch,
-			"On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses."), c);
 		return wrapCard(card);
 	}
 
@@ -528,7 +542,7 @@ final class PersonalSpacePanel extends PluginPanel
 
 		b.gridy++;
 		copyButton.setFocusable(false);
-		copyButton.setToolTipText(tip("Copies this report, ready to paste into a bug report."));
+		copyButton.setToolTipText(tip("Copies a full report, ready to paste into a bug report."));
 		copyButton.addActionListener(e -> copyReport());
 		troubleshootingBody.add(copyButton, b);
 
@@ -553,11 +567,11 @@ final class PersonalSpacePanel extends PluginPanel
 		JPanel links = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
 		links.setOpaque(false);
 		JLabel report = new JLabel("Report a problem");
-		report.setToolTipText(tip("Something wrong? Press Copy report under Troubleshooting and paste it into a new issue, with a screenshot."));
+		report.setToolTipText(tip("Something wrong? Click Copy report under Troubleshooting, then paste it into a new issue with a screenshot."));
 		link(report, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(ISSUES_URL));
 		links.add(report);
 		JLabel idea = new JLabel("Suggest an idea");
-		idea.setToolTipText(tip("Something you'd like Personal Space to do? Tell me in a new issue on the same page."));
+		idea.setToolTipText(tip("Got an idea for Personal Space? Share it in a new issue."));
 		link(idea, ColorScheme.MEDIUM_GRAY_COLOR, () -> LinkBrowser.browse(IDEA_URL));
 		links.add(idea);
 		p.add(links, c);
@@ -685,7 +699,7 @@ final class PersonalSpacePanel extends PluginPanel
 	{
 		int answer = JOptionPane.showConfirmDialog(this,
 			"Set the crowd settings back to the recommended ones?\n\n"
-				+ "5 players per tile, Wide spacing, Smart arrangement, Auto-space on, Natural pose.\n"
+				+ "5 players per tile, Wide spacing, Smart shape, Auto spacing on, Natural pose.\n"
 				+ "Your other switches stay as they are.",
 			"Personal Space", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
 		if (answer != JOptionPane.YES_OPTION)

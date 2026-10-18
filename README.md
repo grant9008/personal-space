@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1923.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1927.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -31,7 +31,7 @@ turns out to be four friends hanging out.
   really in front of it, so nothing pops or flickers as you turn the camera.
 - **Calm crowds.** People walk into place, keep their spots as others come and go, and
   neighbouring groups never merge into each other.
-- **You stay in sight.** Nobody is drawn inside you, and with **Move my character too** you get the
+- **You stay in sight.** Nobody is drawn inside you, and with **Give me a spot** you get the
   front spot at a counter or fishing spot. **Draw me in front** keeps you on top of your crowd.
 - **Names and hover.** **Names over players** puts names over the bodies, using your Player
   Indicators settings. Hover anyone to see who they are, with an arrow to where they really stand.
@@ -47,7 +47,7 @@ turns out to be four friends hanging out.
 ### Great for
 
 - **Photos and fashionscape.** Every outfit in a crowd can be seen. Pose pairs and small groups,
-  or draw a crowd up in a Line or an Arc, and turn Auto-space off to spread people out for the shot.
+  or draw a crowd up in a Line or an Arc, and turn Auto spacing off to spread people out for the shot.
 - **Shooting stars.** The team mining a star is a crowd again, not one body.
 - **Rock crabs and other shared training spots.** See everyone sharing the spot. Turn off
   **Pause while I'm fighting** to keep the crowd spread out while you train.
@@ -90,20 +90,21 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | On/off switch | Spread out crowds, or show the game as normal. The line under it says what's happening right now. |
 | Players per tile | How many on one tile get their own spot: 2 to 16, and 5 is the sweet spot. Higher fits more people, packed tighter. |
 | Hide chat further than | Off, or a distance in tiles: public chat from anyone further away isn't shown over their head or in the chat box, so a busy bank across the road stays quiet while you smith. Friends, friends chat and clan always show. |
-| Idle players sit | Off by default. On: other players who've stood doing nothing for 5 seconds sit down, in the game's Sit emote, and get up the moment they move or do something. Only on your screen. |
+| Idle players sit | Off by default. On: other players who've stood doing nothing for 30 seconds (away from the keyboard) sit down, in the game's Sit emote, and get up the moment they move, talk or do something. Only on your screen. |
 | Alchers behavior | **Normal**, **Still** (other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell just stand, with no spell effect) or **Party** (each cast becomes a dance, jig, spin, cheer, jump for joy or the Party emote with its glowing floor, at random). Only how they look to you; your own spells never change. |
 | Hide players below | Off, or a combat level: anyone below it is hidden, like Entity Hider. **Hide their chat too** drops their chat as well. Friends, friends chat and clan always stay. |
 | Spacing | Close, Normal or Wide (the default), or drag the slider. **Use recommended** puts the crowd settings back to the defaults. |
-| Arrangement | **Smart** lines people up at counters, anvils and fires and makes a ring in the open. **Circle**, **Line** and **Arc** use that shape everywhere. |
+| Shape | **Smart** picks one for the place: rows at banks and counters, one crowd round an anvil or fire, a ring in the open. **Circle**, **Line** and **Arc** use that shape everywhere. |
 | Pose for 2 or 3 players | **Natural**, **Angled** (half turned towards each other) or **Facing** each other. |
-| Auto-space | On: sensible distances for small groups, counters and fires. Off: the Spacing slider sets every distance, handy for photos. |
+| Auto spacing | On: the gaps suit the place, staying close at banks, counters, walls and fires and for small groups. Off: the Spacing slider sets every gap, handy for photos. |
 | Names over players | Names over the bodies instead of the pile, with your Player Indicators settings. Turn off Player Indicators' name position, or you'll see two. |
-| Hover shows who / Arrow to their tile | Hover someone drawn away from their tile to see their name and level, and an arrow to where they really stand. |
-| Click past moved players | Using an item or spell on what you see (a fire, a booth), people drawn away from their tile or hidden in a crowd don't take the left-click. Right-click still lists them. |
+| Hover shows who | Hover someone drawn away from their tile to see their name and level. |
+| Arrow to their tile | Off by default. On: hovering someone who's been moved also shows an arrow to where they really stand. |
+| Use items through players | Using an item or spell on what you see (a fire, a booth), people drawn away from their tile or hidden in a crowd don't take the left-click. Right-click still lists them. |
 | Draw me in front | Always draw yourself over the people in your crowd. |
-| Depth between players | On: where people overlap, each part of each body is hidden only where someone is really in front of it, so nothing pops as the camera turns. Anyone not overlapping someone is drawn just as the game does. Off: each person is drawn whole, as the game does, which some prefer for photos. |
+| Depth between players | On (recommended): in a crowd, shields, capes and hats stay properly in front of or behind the people next to them as you turn the camera. Off: everyone is drawn whole, one over another, as the game does, so gear pops between people. GPU plugin only. |
 | Walk while busy | Someone busy with something (alching, tending a fire) is shown taking the steps when they're moved to a spot, instead of gliding there. |
-| Move my character too | You take a spot as well, at the front at a counter or fishing spot. |
+| Give me a spot | On (the default): you're spread out too, taking a spot in the crowd (the front one, at a bank counter). Off: you stay exactly where you stand and the crowd spreads around you. |
 | Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |
 | Show sidebar button | Hide the sidebar button; every setting is still in the plugin's configuration. |
 | Troubleshooting | Live status and checks, and **Copy report** for bug reports. |

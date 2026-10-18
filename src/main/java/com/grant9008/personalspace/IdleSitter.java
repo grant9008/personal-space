@@ -11,7 +11,8 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.gameval.AnimationID;
 
 /**
- * "Idle players sit": other players who've stood doing nothing a while are shown sitting, in the
+ * "Idle players sit": other players who've stood doing nothing a while (away from the keyboard)
+ * are shown sitting, in the
  * game's own Sit emote. Their standing pose is swapped for it, so the game itself shows them
  * sitting only while idle: the moment they walk or do something it plays that instead.
  *
@@ -28,8 +29,11 @@ final class IdleSitter
 {
 	/** The Sit emote, looping. */
 	static final int SIT = AnimationID.EMOTE_SIT_LOOP;
-	/** Standing doing nothing this long, in game cycles (5 s), they sit down. */
-	static final int SIT_AFTER_CYCLES = 250;
+	/**
+	 * Standing doing nothing this long, in game cycles (30 s), they sit down: away from the keyboard,
+	 * not just between one thing and the next. (After 5 s, anyone pausing for a moment sat.)
+	 */
+	static final int SIT_AFTER_CYCLES = 1500;
 
 	private final Client client;
 	/** Each player sat down, and their own standing pose. */
@@ -97,8 +101,9 @@ final class IdleSitter
 	}
 
 	/**
-	 * This player is busy, though the game may not show it: their cast was restyled (Alchers
-	 * behavior). They stand up now, and stay up until they've been idle a while. Client thread.
+	 * This player is busy, though their body may not show it: they said something, or their cast
+	 * was restyled (Alchers behavior). They stand up now, and stay up until they've been idle a
+	 * while. Client thread.
 	 */
 	void busy(Player p, int cycle)
 	{

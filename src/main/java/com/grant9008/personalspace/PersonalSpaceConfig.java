@@ -192,8 +192,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_ARRANGEMENT,
-		name = "Arrangement",
-		description = "Smart: lines up at counters, anvils and fires, and makes a ring in the open. Circle: always a ring. Line: side by side. Arc: a curve.",
+		name = "Shape",
+		description = "The shape people spread into. Smart: picks one for the place (rows at banks and counters, one crowd round an anvil or fire, a ring in the open). Circle, Line and Arc: that shape everywhere.",
 		position = 1
 	)
 	default Arrangement arrangement()
@@ -205,7 +205,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_SPACING,
 		name = "Spacing",
-		description = "How far apart players stand. 128 is one tile. With Auto-space on, banks, walls and fires stay close.",
+		description = "How far apart spread-out people stand. With Auto spacing on, banks, counters and fires stay close anyway.",
 		position = 2
 	)
 	default int spacing()
@@ -217,7 +217,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_MAX_STACK,
 		name = "Players per tile",
-		description = "How many players on one tile get their own spot. 5 suits most places. Raise it if a busy bank leaves a heap in the middle.",
+		description = "How many people on one tile get spread out. 5 suits most places. Raise it if a busy bank still leaves a pile in the middle.",
 		position = 3
 	)
 	default int maxStack()
@@ -227,19 +227,19 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_INCLUDE_LOCAL,
-		name = "Move my character too",
-		description = "Off: you stay put and others step around you. On: you take a spot too, and people step out of your view where there's room.",
+		name = "Give me a spot",
+		description = "On (recommended): you're spread out too, taking a spot in the crowd like everyone else (the front one, at a bank counter). Off: you always stay exactly where you really stand, and the people on your tile spread out around you.",
 		position = 4
 	)
 	default boolean includeLocalPlayer()
 	{
-		return false;
+		return true;
 	}
 
 	@ConfigItem(
 		keyName = KEY_DRAW_ME_IN_FRONT,
 		name = "Draw me in front",
-		description = "Off: people are drawn front to back as they really stand, so someone between you and the camera covers you. On: you're drawn over everyone in your crowd, whichever way the camera faces. Either way nobody moves out of your way: crowds huddle as they would.",
+		description = "On: you're always drawn on top of your crowd, so you never lose sight of yourself. Off: people between you and the camera cover you, as they really would.",
 		position = 5
 	)
 	default boolean drawMeInFront()
@@ -250,7 +250,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_PAUSE_IN_COMBAT,
 		name = "Pause while I'm fighting",
-		description = "On: everyone goes back to where they really stand while you fight. Keep it on for raids and group bosses.",
+		description = "On (recommended): while you're fighting, everyone goes back to where they really stand, so you can see who's where. Keep it on for raids and bosses; turn it off for training spots like rock crabs.",
 		position = 11
 	)
 	default boolean pauseInCombat()
@@ -261,7 +261,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_NAMES,
 		name = "Names over players",
-		description = "Off by default. On: names follow the bodies. Who gets a name, the colours and the rank icons are Player Indicators' settings, so change them there. Turn off Player Indicators' name position (or the plugin) so names aren't doubled.",
+		description = "On: names float over where people are drawn, not over where they stand. Uses Player Indicators' settings (who, colours, icons). Turn off Player Indicators' own names so you don't see two.",
 		position = 8
 	)
 	default boolean namesFollowPlayers()
@@ -272,7 +272,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HOVER,
 		name = "Hover shows who",
-		description = "On: hover a body drawn away from its tile and a tooltip says who it is. Clicking is unchanged: you still click people where they really stand.",
+		description = "On: hover someone who's been moved to see their name and level. You still click people where they really stand.",
 		position = 9
 	)
 	default boolean hoverShowsWho()
@@ -283,19 +283,19 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HOVER_ARROW,
 		name = "Arrow to their tile",
-		description = "On: hover a body drawn away from its tile and a small arrow points to where they really stand. Works with or without the tooltip.",
+		description = "On: hover someone who's been moved and an arrow points to where they really stand.",
 		position = 10
 	)
 	default boolean hoverArrow()
 	{
-		return true;
+		return false;
 	}
 
 	@Range(min = MIN_HIDE_BELOW, max = MAX_HIDE_BELOW)
 	@ConfigItem(
 		keyName = KEY_HIDE_BELOW,
 		name = "Hide players below level",
-		description = "3 (the default) is off: nobody is below level 3. Set 4 to hide the level-3s, or higher: good for hiding bots at the Grand Exchange. It goes by combat level only; total level can't be used, as the game never tells you anyone else's. Anyone below this combat level isn't drawn or clickable, nor is their overhead chat, as with Entity Hider. Friends, friends chat and clan members always stay. Off in PvP areas and while you fight.",
+		description = "Hide anyone under this combat level, bodies and overhead chat, like Entity Hider. Set 4 to hide the level-3 bots at the Grand Exchange. Friends, friends chat and clan are never hidden. Off in PvP areas and while you fight.",
 		position = 12
 	)
 	default int hideBelowLevel()
@@ -306,7 +306,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HIDE_CHAT,
 		name = "Hide their chat too",
-		description = "On (the default): public chat from players hidden by 'Hide players below' is dropped from the chat box as well, and stays dropped for the session after they walk out of view. Does nothing while that filter is off.",
+		description = "On: the players hidden by 'Hide players below' are also taken out of your chat box. Does nothing while that's Off.",
 		position = 13
 	)
 	default boolean hideTheirChat()
@@ -318,7 +318,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_CHAT_RANGE,
 		name = "Hide chat further than",
-		description = "Off (the default), or a distance in tiles: public chat from anyone further from you than this isn't shown over their head or in the chat box, such as a busy bank across the road while you're at an anvil. Friends, friends chat and clan members always show. Changing it applies to chat already in the box too. 0 is off.",
+		description = "Hide public chat from anyone further away than this many tiles, over their heads and in the chat box. Handy at an anvil next to a noisy bank. Friends, friends chat and clan always show. 0 is off.",
 		position = 14
 	)
 	default int hideChatFurtherThan()
@@ -329,7 +329,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_OTHER_ALCHERS,
 		name = "Alchers behavior",
-		description = "How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer, jump for joy or the Party emote with its glowing floor, at random. Your own spells never change.",
+		description = "How other players' skilling spells look to you: alching, superheat, charge orb and enchanting. Normal: as the game shows them. Still: no spell animation or glow, so a crowd of alchers stops flashing. Party: each cast becomes a random dance. Your own spells never change.",
 		position = 14
 	)
 	default Alchers otherAlchers()
@@ -350,8 +350,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_SMALL_GROUPS_CLOSE,
-		name = "Auto-space",
-		description = "On: small groups, banks, walls and fires stay close whatever the slider says. Off: the slider decides everywhere.",
+		name = "Auto spacing",
+		description = "On (recommended): the gaps suit the place, staying close at banks, counters, walls and fires and for small groups. Off: the Spacing slider sets every gap, everywhere, which is handy for photos.",
 		position = 6
 	)
 	default boolean smallGroupsClose()
@@ -361,8 +361,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_POSE,
-		name = "Small group pose",
-		description = "How two or three players in the open are turned. Natural: as they really face. Angled: half towards each other. Facing: towards each other.",
+		name = "Pose for 2 or 3 players",
+		description = "How 2 or 3 people standing together are turned. Natural: the way they really face. Angled: half turned to each other. Facing: face to face.",
 		position = 7
 	)
 	default Pose pose()
@@ -400,7 +400,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_DEPTH,
 		name = "Depth between players",
-		description = "On (the default): crowds are drawn so each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front of and behind people as the camera turns. Each body's own gear is still drawn just as the game draws it. Only people overlapping someone are drawn this way; anyone else is drawn just as the game does. Off: each person is drawn whole, one over another, as the game does it. GPU plugin only: with 117 HD, people are always drawn as the game does it.",
+		description = "On (recommended): in a crowd, shields, capes and hats stay properly in front of or behind the people next to them as you turn the camera. Off: everyone is drawn whole, one over another, so gear pops between people. Only worth turning off if something looks wrong. GPU plugin only.",
 		position = 5
 	)
 	default boolean depthBetweenPlayers()
@@ -411,7 +411,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_WALK_WHILE_BUSY,
 		name = "Walk while busy",
-		description = "On (the default): anyone doing something as they walk, alching on the run say, is drawn walking. Off: as the game draws them, gliding along in the pose of what they're doing.",
+		description = "On (recommended): people moved while they're doing something (alching, cooking) are shown walking to their spot. Off: they glide there in the pose of what they're doing.",
 		position = 5
 	)
 	default boolean walkWhileBusy()
@@ -422,7 +422,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_IDLE_SIT,
 		name = "Idle players sit",
-		description = "Off (the default). On: other players who've stood doing nothing for 5 seconds sit down, in the game's Sit emote. They get up the moment they walk or do something; alching counts, even with Alchers behavior on Still. Only on your screen; off in PvP areas.",
+		description = "Off by default. On: other players who've done nothing for 30 seconds (AFK) sit down. They stand up as soon as they move, talk or do something. Only on your screen.",
 		position = 5
 	)
 	default boolean idlePlayersSit()
@@ -432,8 +432,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_CLICK_PAST,
-		name = "Click past moved players",
-		description = "On (the default): using an item or spell on what you see (a fire, a booth, the ground), someone drawn away from where they really stand, or hidden in a crowd, doesn't take the left-click. Right-click still lists them.",
+		name = "Use items through players",
+		description = "On (recommended): when you use an item or spell on something (a fire, a booth), moved or hidden people don't take the left-click. Right-click still lists them.",
 		position = 5
 	)
 	default boolean clickPastMoved()

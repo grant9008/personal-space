@@ -68,7 +68,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.23";
+	static final String VERSION = "1.9.27";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -114,6 +114,7 @@ public class PersonalSpacePlugin extends Plugin
 	private ChatHider chatHider;
 	private AlchStyler alchStyler;
 	private IdleSitter idleSitter;
+	private ChatRangeOverlay chatRangeOverlay;
 
 	private NamesOverlay namesOverlay;
 
@@ -301,6 +302,8 @@ public class PersonalSpacePlugin extends Plugin
 		overlayManager.add(namesOverlay);
 		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager, levelFilter);
 		overlayManager.add(hoverOverlay);
+		chatRangeOverlay = new ChatRangeOverlay(client);
+		overlayManager.add(chatRangeOverlay);
 
 		PersonalSpacePanel newPanel = new PersonalSpacePanel(configManager, config);
 		newPanel.onTurnOnGpu(this::turnOnGpu);
@@ -366,6 +369,11 @@ public class PersonalSpacePlugin extends Plugin
 			overlayManager.remove(hoverOverlay);
 			hoverOverlay = null;
 		}
+		if (chatRangeOverlay != null)
+		{
+			overlayManager.remove(chatRangeOverlay);
+			chatRangeOverlay = null;
+		}
 		panel = null;
 		if (navButton != null)
 		{
@@ -406,6 +414,12 @@ public class PersonalSpacePlugin extends Plugin
 	@Subscribe
 	public void onOverheadTextChanged(OverheadTextChanged event)
 	{
+		// Someone talking isn't away from the keyboard: they don't sit (Idle players sit).
+		IdleSitter sitter = idleSitter;
+		if (sitter != null && event.getActor() instanceof Player && event.getActor() != client.getLocalPlayer())
+		{
+			sitter.busy((Player) event.getActor(), client.getGameCycle());
+		}
 		ChatHider hider = chatHider;
 		int range = config.hideChatFurtherThan();
 		if (hider != null && range > 0 && event.getActor() instanceof Player
@@ -422,6 +436,12 @@ public class PersonalSpacePlugin extends Plugin
 		if (!PersonalSpaceConfig.GROUP.equals(event.getGroup()))
 		{
 			return;
+		}
+		ChatRangeOverlay range = chatRangeOverlay;
+		if (range != null && PersonalSpaceConfig.KEY_CHAT_RANGE.equals(event.getKey()))
+		{
+			// Show how far that is, on the ground round you, while the slider moves.
+			range.show(config.hideChatFurtherThan());
 		}
 		if (PersonalSpaceConfig.KEY_HIDE_CHAT.equals(event.getKey()) || PersonalSpaceConfig.KEY_HIDE_BELOW.equals(event.getKey())
 			|| PersonalSpaceConfig.KEY_CHAT_RANGE.equals(event.getKey()))
@@ -1230,7 +1250,7 @@ public class PersonalSpacePlugin extends Plugin
 		return yourTileLine(yours.shape, autoSpace && yours.spacing < slider);
 	}
 
-	/** The report's line about your tile, for a tile of this shape; {@code keptClose} if Auto-space closed it up. */
+	/** The report's line about your tile, for a tile of this shape; {@code keptClose} if Auto spacing closed it up. */
 	static String yourTileLine(String shape, boolean keptClose)
 	{
 		String what;
@@ -1265,7 +1285,7 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		else if (keptClose)
 		{
-			why = ", kept close by Auto-space";
+			why = ", kept close by Auto spacing";
 		}
 		return "You're in " + what + why;
 	}
