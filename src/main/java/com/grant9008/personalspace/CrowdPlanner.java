@@ -24,6 +24,9 @@ import java.util.function.IntPredicate;
  * and who stands where from {@link SlotBook}.</li>
  * <li>People standing on a fire, which a Forester's Campfire allows, stand round it instead, and
  * the last one left there keeps their spot beside it: see {@link #layOutOnFires}.</li>
+ * <li>With Smart, everyone using one thing nobody can stand on, such as an anvil, from the tiles
+ * round it is one crowd, laid out all round it like the people at a campfire: see
+ * {@link #layOutRoundObjects}.</li>
  * </ul>
  *
  * <p>Client thread only. Knows nothing about RuneLite; unit tested.
@@ -958,6 +961,1288 @@ final class CrowdPlanner
 			plan.tiles.put(tile, new TileReport(alone.contains(tile) ? "alone by the fire" : "crowd on the fire", FIRE_SIDE, seen,
 				given.size(), spots, FIRE_SPOTS.size() - spots));
 		}
+	}
+
+	/**
+	 * How far from the middle of an object the nearest ring of people round it stands: right up
+	 * against it, a body's half-width clear of its edge, as someone working at an anvil stands. Round
+	 * the middles of the tiles beside it (where the game draws someone using it) the crowd stood a
+	 * step back from it, and the rest further out still.
+	 */
+	static final int OBJECT_NEAR_RING = HALF_TILE + 40;
+	/** How much further out each ring round an object is than the one inside it. */
+	static final int OBJECT_RING_STEP = 28;
+	/**
+	 * Furthest from the middle of an object anyone using it is drawn: just short of two tiles, a body
+	 * behind the second row. Further out they're no longer at the anvil but across the room on their
+	 * own, the hover arrow pointing back: past this they wait out of sight until there's room.
+	 */
+	static final int OBJECT_REACH = 240;
+	/**
+	 * Nobody round an object is given a spot closer than this to anyone else drawn: as close as two
+	 * bodies stand without flickering through each other. A fire's wider gap left a busy anvil's
+	 * crowd standing a step back from it.
+	 */
+	static final int OBJECT_GAP = FIRE_KEEP;
+	/** ...a spot is kept while nobody is drawn closer than this, and with no spot a body's width clear, one this clear is taken. */
+	static final int OBJECT_KEEP = FIRE_KEEP;
+	/**
+	 * ...and nobody round an object is drawn closer than this to you: right beside you, with a little
+	 * more room than the rest have. Kept wider, so you could pick yourself out of a crowd of forty,
+	 * the places either side of you stood empty, as if nobody would work the anvil next to you.
+	 */
+	static final int OBJECT_YOUR_GAP = 56;
+	/** How far round a spot anyone drawn can crowd it, for any gap {@link Nearby#clear} is asked about. */
+	private static final int SPOT_NEIGHBOUR_REACH = 80;
+	/**
+	 * What a step nearer their own tile is worth to someone given a spot round an object, against a
+	 * step nearer the object: a quarter. Within a tile of their tile, the nearest ring with room comes
+	 * first, so a few at an anvil fan out round its corner right up against it, as round a fire,
+	 * rather than standing behind each other.
+	 */
+	static final double OBJECT_TILE_WEIGHT = 0.25;
+	/**
+	 * ...but each step of their walk there further than a tile from their own tile counts this many
+	 * times more. Taking the nearest ring with room wherever round the object it was sent a smith on
+	 * the side by the crates right round the anvil to a gap on the far side, the hover arrow pointing
+	 * back two tiles across the crowd, while there was room a ring further out on their own side. Now
+	 * they stand a ring or two further out on their own side, and walk round to another side only
+	 * once theirs is full.
+	 */
+	static final double OBJECT_FAR_WEIGHT = 2;
+	/** Spots along each ring round an object are about this far apart, so a crowd packs as close as the gap lets it. */
+	private static final int OBJECT_SPOT_STEP = 8;
+	/** What the troubleshooting report calls a tile laid out as part of a crowd round an object. */
+	static final String ROUND_OBJECT = "curved row, one crowd all round it";
+	private static final long NO_OBJECT = Long.MIN_VALUE;
+
+	/**
+	 * Where the people round an object may be drawn, as {east, north, ring} from its middle: rings
+	 * {@link #OBJECT_RING_STEP} apart from {@link #OBJECT_NEAR_RING} out to {@link #OBJECT_REACH},
+	 * each with a spot straight out from every tile round the object.
+	 */
+	static final List<int[]> OBJECT_SPOTS = objectSpots();
+	private static final int[] SPOT_X = new int[OBJECT_SPOTS.size()];
+	private static final int[] SPOT_Z = new int[OBJECT_SPOTS.size()];
+	private static final int[] SPOT_RING = new int[OBJECT_SPOTS.size()];
+	/** For someone on each tile round an object (see {@link #besideIndex}): every spot, nearest ring first, then nearest their tile. You choose by this. */
+	private static final int[][] OBJECT_ORDER = new int[9][];
+	/**
+	 * What each spot costs someone on each tile round an object (see {@link #besideIndex}): how much
+	 * further out than the nearest ring it is, plus {@link #OBJECT_TILE_WEIGHT} of how far it is from
+	 * the middle of their tile, plus {@link #OBJECT_FAR_WEIGHT} times however much of that is further
+	 * than a tile.
+	 */
+	private static final float[][] OBJECT_COST = new float[9][];
+	/** For someone on each tile round an object (see {@link #besideIndex}): every spot, cheapest first (see {@link #OBJECT_COST}). */
+	private static final int[][] OBJECT_CHEAPEST = new int[9][];
+	/** How many spots the nearest ring round an object has. */
+	private static final int NEAR_RING_SPOTS;
+	/**
+	 * For each of {@link #OBJECT_SPOTS}, the spots nearer to it than {@link #SPOT_NEIGHBOUR_REACH}: the
+	 * only ones someone standing there can make too crowded, so the only ones worth checking.
+	 */
+	private static final short[][] SPOT_NEIGHBOURS = new short[OBJECT_SPOTS.size()][];
+
+	static
+	{
+		int nearRing = 0;
+		for (int s = 0; s < OBJECT_SPOTS.size(); s++)
+		{
+			SPOT_X[s] = OBJECT_SPOTS.get(s)[0];
+			SPOT_Z[s] = OBJECT_SPOTS.get(s)[1];
+			SPOT_RING[s] = OBJECT_SPOTS.get(s)[2];
+			nearRing += SPOT_RING[s] == 0 ? 1 : 0;
+		}
+		NEAR_RING_SPOTS = nearRing;
+		for (int s = 0; s < SPOT_X.length; s++)
+		{
+			short[] near = new short[SPOT_X.length];
+			int count = 0;
+			for (int t = 0; t < SPOT_X.length; t++)
+			{
+				int x = SPOT_X[t] - SPOT_X[s];
+				int z = SPOT_Z[t] - SPOT_Z[s];
+				if (x * x + z * z < SPOT_NEIGHBOUR_REACH * SPOT_NEIGHBOUR_REACH)
+				{
+					near[count++] = (short) t;
+				}
+			}
+			SPOT_NEIGHBOURS[s] = java.util.Arrays.copyOf(near, count);
+		}
+		for (int beside = 0; beside < 9; beside++)
+		{
+			double east = (beside / 3 - 1) * 2.0 * HALF_TILE;
+			double north = (beside % 3 - 1) * 2.0 * HALF_TILE;
+			float[] from = new float[SPOT_X.length];
+			List<Integer> order = new ArrayList<>(SPOT_X.length);
+			for (int s = 0; s < SPOT_X.length; s++)
+			{
+				from[s] = (float) Math.hypot(SPOT_X[s] - east, SPOT_Z[s] - north);
+				order.add(s);
+			}
+			order.sort(Comparator.<Integer>comparingInt(s -> SPOT_RING[s]).thenComparingDouble(s -> from[s]).thenComparingInt(s -> s));
+			OBJECT_ORDER[beside] = order.stream().mapToInt(Integer::intValue).toArray();
+			float[] cost = new float[SPOT_X.length];
+			for (int s = 0; s < SPOT_X.length; s++)
+			{
+				cost[s] = (float) (SPOT_RING[s] * OBJECT_RING_STEP + OBJECT_TILE_WEIGHT * from[s]
+					+ OBJECT_FAR_WEIGHT * Math.max(0, from[s] - 2.0 * HALF_TILE));
+			}
+			order.sort(Comparator.<Integer>comparingDouble(s -> cost[s]).thenComparingInt(s -> SPOT_RING[s]).thenComparingDouble(s -> from[s]).thenComparingInt(s -> s));
+			OBJECT_CHEAPEST[beside] = order.stream().mapToInt(Integer::intValue).toArray();
+			OBJECT_COST[beside] = cost;
+		}
+	}
+
+	private static List<int[]> objectSpots()
+	{
+		List<int[]> out = new ArrayList<>();
+		for (int ring = 0; OBJECT_NEAR_RING + ring * OBJECT_RING_STEP <= OBJECT_REACH; ring++)
+		{
+			int radius = OBJECT_NEAR_RING + ring * OBJECT_RING_STEP;
+			// A multiple of eight, so every ring has a spot straight out from each tile round the object.
+			int count = 8 * (int) Math.round(2 * Math.PI * radius / (8.0 * OBJECT_SPOT_STEP));
+			for (int i = 0; i < count; i++)
+			{
+				double a = 2 * Math.PI * i / count;
+				out.add(new int[]{(int) Math.round(radius * Math.cos(a)), (int) Math.round(radius * Math.sin(a)), ring});
+			}
+		}
+		return out;
+	}
+
+	/** Which of the nine tiles centred on an object this tile is, 0 to 8, counting north then east from the south-west one. */
+	private static int besideIndex(long tile, long object)
+	{
+		return (StackRegistry.sceneX(tile) - StackRegistry.sceneX(object) + 1) * 3 + StackRegistry.sceneY(tile) - StackRegistry.sceneY(object) + 1;
+	}
+
+	/** Tiles nobody can stand on, such as an anvil's, as found this tick. */
+	private final Map<Long, Boolean> objectAt = new HashMap<>();
+	/** The object each tile's crowd stood round last tick, and this tick. */
+	private Map<Long, Long> previousObjectOf = new HashMap<>();
+	private Map<Long, Long> currentObjectOf = new HashMap<>();
+	/** Who stood at which of {@link #OBJECT_SPOTS} last tick: id to {object, their tile, spot}. */
+	private Map<Integer, long[]> objectSpotOf = new HashMap<>();
+	/** A spot round an object kept a while for someone who lost it, to go back to: id to {object, their tile, spot, until}. */
+	private final Map<Integer, long[]> objectSpotHeld = new HashMap<>();
+	/**
+	 * Whoever is on their way back to the middle of their tile, with nowhere round the object they
+	 * could walk to straight from where they stood: id to the last tick they're still on the way.
+	 * They're given no spot till then, so their next walk starts from the middle, not from halfway.
+	 */
+	private final Map<Integer, Integer> steppingBack = new HashMap<>();
+	/** This tick, for {@link #objectSpots}. */
+	private int objectTick;
+	/** The ground round each object a crowd stands round, kept while it stays the same. */
+	private Map<Long, Ground> grounds = new HashMap<>();
+	/** Most objects whose ground is kept: walks round each take a moment to work out. */
+	private static final int GROUNDS_KEPT = 32;
+	/** Diagnostics: times someone round an object stepped to another spot round it. */
+	private long objectMoves;
+
+	/** Most tiles an object a crowd stands all round may cover: a furnace's four. */
+	static final int OBJECT_MAX_TILES = 4;
+
+	/**
+	 * Whether this tile is a thing on its own that nobody can stand on, such as an anvil, range or
+	 * tree: it can't be stood on, and nor can at most {@link #OBJECT_MAX_TILES} tiles touching it
+	 * all told, all within two tiles of it. Not a wall, cliff or the sea, which run on: people facing
+	 * those stand along them, and no crowd could stand round them.
+	 */
+	private boolean isObject(long tile, Surroundings around)
+	{
+		return objectAt.computeIfAbsent(tile, k ->
+		{
+			if (around.canStand(k, 0, 0))
+			{
+				return false;
+			}
+			int size = 5;
+			boolean[] closed = new boolean[size * size];
+			for (int i = 0; i < size; i++)
+			{
+				for (int j = 0; j < size; j++)
+				{
+					closed[i * size + j] = (i != size / 2 || j != size / 2) && !around.canStand(
+						StackRegistry.key(StackRegistry.plane(k), StackRegistry.sceneX(k) + i - size / 2, StackRegistry.sceneY(k) + j - size / 2), 0, 0);
+				}
+			}
+			// Everything that can't be stood on joined to it, corner to corner too.
+			List<Integer> part = new ArrayList<>();
+			boolean[] seen = new boolean[size * size];
+			part.add(size * size / 2);
+			seen[size * size / 2] = true;
+			for (int p = 0; p < part.size(); p++)
+			{
+				int i = part.get(p) / size;
+				int j = part.get(p) % size;
+				if (i == 0 || j == 0 || i == size - 1 || j == size - 1 || part.size() > OBJECT_MAX_TILES)
+				{
+					return false;
+				}
+				for (int di = -1; di <= 1; di++)
+				{
+					for (int dj = -1; dj <= 1; dj++)
+					{
+						int q = (i + di) * size + j + dj;
+						if (closed[q] && !seen[q])
+						{
+							seen[q] = true;
+							part.add(q);
+						}
+					}
+				}
+			}
+			return part.size() <= OBJECT_MAX_TILES;
+		});
+	}
+
+	/**
+	 * Which of the objects with a crowd round them someone alone on {@code tile} joins, or
+	 * {@link #NO_OBJECT}: the one they stood round last tick while they still face it, else the one
+	 * they face most squarely. Between two anvils, someone facing one of them at a slant joined
+	 * the other, and walked across to it.
+	 */
+	private long objectForAlone(long tile, List<StackSpreader.Entry> there, Map<Long, List<Long>> crowds)
+	{
+		long[] had = objectSpotOf.get(there.get(0).id);
+		if (had != null && had[1] == tile && crowds.containsKey(had[0]) && isBeside(tile, had[0]) && facingCount(there, tile, had[0]) > 0)
+		{
+			return had[0];
+		}
+		long best = NO_OBJECT;
+		double squarest = Double.NEGATIVE_INFINITY;
+		for (long object : crowds.keySet())
+		{
+			if (!isBeside(tile, object) || facingCount(there, tile, object) == 0)
+			{
+				continue;
+			}
+			double a = StackSpreader.toRadians(there.get(0).orientation);
+			double east = StackRegistry.sceneX(object) - StackRegistry.sceneX(tile);
+			double north = StackRegistry.sceneY(object) - StackRegistry.sceneY(tile);
+			double facing = (-Math.sin(a) * east - Math.cos(a) * north) / Math.hypot(east, north);
+			if (facing > squarest + 1e-9 || Math.abs(facing - squarest) <= 1e-9 && object < best)
+			{
+				best = object;
+				squarest = facing;
+			}
+		}
+		return best;
+	}
+
+	/** Whether {@code tile} is one of the eight round {@code object}. */
+	private static boolean isBeside(long tile, long object)
+	{
+		return tile != object && StackRegistry.plane(tile) == StackRegistry.plane(object)
+			&& Math.abs(StackRegistry.sceneX(tile) - StackRegistry.sceneX(object)) <= 1
+			&& Math.abs(StackRegistry.sceneY(tile) - StackRegistry.sceneY(object)) <= 1;
+	}
+
+	/** How many of these people, on {@code tile}, face the middle of {@code object} next to it (within 45 degrees). */
+	private static int facingCount(List<StackSpreader.Entry> group, long tile, long object)
+	{
+		double east = StackRegistry.sceneX(object) - StackRegistry.sceneX(tile);
+		double north = StackRegistry.sceneY(object) - StackRegistry.sceneY(tile);
+		double length = Math.hypot(east, north);
+		int count = 0;
+		for (StackSpreader.Entry e : group)
+		{
+			if (e.orientation >= 0 && length > 0)
+			{
+				double a = StackSpreader.toRadians(e.orientation);
+				count += (-Math.sin(a) * east - Math.cos(a) * north) / length >= FACING_FIRE ? 1 : 0;
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * The object a tile's crowd is gathered round, if Smart lays them out as one crowd all round it:
+	 * the tile next to theirs that their row faces, if nobody can stand on it (an anvil, range or
+	 * tree; not a wall between tiles, nor water along a bank, which make a counter). Once round one, a
+	 * tile stays round it while anyone there still faces it, so someone turning to the door for a
+	 * moment doesn't break the crowd up and put it back.
+	 */
+	private long objectFaced(long tile, boolean row, double angle, List<StackSpreader.Entry> group, Surroundings around)
+	{
+		if (row)
+		{
+			long ahead = StackRegistry.key(StackRegistry.plane(tile), StackRegistry.sceneX(tile) + (int) Math.round(-Math.sin(angle)),
+				StackRegistry.sceneY(tile) + (int) Math.round(-Math.cos(angle)));
+			if (ahead != tile && isObject(ahead, around))
+			{
+				return ahead;
+			}
+		}
+		Long was = previousObjectOf.get(tile);
+		return was != null && isObject(was, around) && facingCount(group, tile, was) > 0 ? was : NO_OBJECT;
+	}
+
+	/**
+	 * The ground round an object: which of the five by five tiles centred on it can be stood on, and
+	 * which ways each can be stepped off, as {@link Surroundings#canStand} says. From that, which spots
+	 * round it someone on each tile beside it can walk to in a straight line, as their walk there is
+	 * drawn, without passing through the object, a wall or anything else in the way.
+	 */
+	private static final class Ground
+	{
+		private static final int SIZE = 5;
+		private static final int EAST = 0;
+		private static final int WEST = 1;
+		private static final int NORTH = 2;
+		private static final int SOUTH = 3;
+		private final boolean[] open = new boolean[SIZE * SIZE];
+		private final boolean[] step = new boolean[SIZE * SIZE * 4];
+		/** Worked out once while the ground stays the same: see {@link #walksFrom}. */
+		private final boolean[][] walks = new boolean[9][];
+
+		Ground(long object, Surroundings around)
+		{
+			int plane = StackRegistry.plane(object);
+			for (int i = 0; i < SIZE; i++)
+			{
+				for (int j = 0; j < SIZE; j++)
+				{
+					long tile = StackRegistry.key(plane, StackRegistry.sceneX(object) + i - SIZE / 2, StackRegistry.sceneY(object) + j - SIZE / 2);
+					int t = i * SIZE + j;
+					open[t] = around.canStand(tile, 0, 0);
+					if (open[t])
+					{
+						step[t * 4 + EAST] = around.canStand(tile, 2 * HALF_TILE, 0);
+						step[t * 4 + WEST] = around.canStand(tile, -2 * HALF_TILE, 0);
+						step[t * 4 + NORTH] = around.canStand(tile, 0, 2 * HALF_TILE);
+						step[t * 4 + SOUTH] = around.canStand(tile, 0, -2 * HALF_TILE);
+					}
+				}
+			}
+		}
+
+		boolean sameAs(Ground other)
+		{
+			return other != null && java.util.Arrays.equals(open, other.open) && java.util.Arrays.equals(step, other.step);
+		}
+
+		/**
+		 * Whether a body could be drawn at (east, north) from the object's middle: on ground that can be
+		 * stood on, not pressed up against the object or a wall (as {@link CollisionTerrain} keeps them).
+		 */
+		boolean clearAt(double east, double north)
+		{
+			double x = east + (SIZE / 2) * 2 * HALF_TILE + HALF_TILE;
+			double z = north + (SIZE / 2) * 2 * HALF_TILE + HALF_TILE;
+			int i = (int) Math.floor(x / (2 * HALF_TILE));
+			int j = (int) Math.floor(z / (2 * HALF_TILE));
+			if (i < 0 || j < 0 || i >= SIZE || j >= SIZE || !open[i * SIZE + j])
+			{
+				return false;
+			}
+			double ox = x - i * 2 * HALF_TILE;
+			double oz = z - j * 2 * HALF_TILE;
+			int t = (i * SIZE + j) * 4;
+			int margin = CollisionTerrain.EDGE_MARGIN;
+			int far = 2 * HALF_TILE - 1 - margin;
+			return !(ox < margin && !step[t + WEST] || ox > far && !step[t + EAST]
+				|| oz < margin && !step[t + SOUTH] || oz > far && !step[t + NORTH]);
+		}
+
+		/** Which of {@link #OBJECT_SPOTS} someone on the tile beside the object at {@code beside} can walk to straight from the middle of their tile. */
+		boolean[] walksFrom(int beside)
+		{
+			if (walks[beside] == null)
+			{
+				double fromX = (beside / 3 - 1) * 2.0 * HALF_TILE;
+				double fromZ = (beside % 3 - 1) * 2.0 * HALF_TILE;
+				boolean[] out = new boolean[SPOT_X.length];
+				for (int s = 0; s < out.length; s++)
+				{
+					out[s] = clearAt(SPOT_X[s], SPOT_Z[s]) && clearWalk(fromX, fromZ, SPOT_X[s], SPOT_Z[s]);
+				}
+				walks[beside] = out;
+			}
+			return walks[beside];
+		}
+
+		/** Whether someone standing at one of {@link #OBJECT_SPOTS} can walk straight to another without passing through anything. */
+		boolean walkBetween(int from, int to)
+		{
+			return from == to || clearWalk(SPOT_X[from], SPOT_Z[from], SPOT_X[to], SPOT_Z[to]);
+		}
+
+		/**
+		 * Whether a straight walk between two points (from the object's middle) never passes where a
+		 * body couldn't stand: through a tile that can't be stood on, or within
+		 * {@link CollisionTerrain#EDGE_MARGIN} of an edge that can't be stepped over.
+		 */
+		private boolean clearWalk(double ax, double az, double bx, double bz)
+		{
+			int margin = CollisionTerrain.EDGE_MARGIN;
+			int tile = 2 * HALF_TILE;
+			double westmost = Math.min(ax, bx);
+			double eastmost = Math.max(ax, bx);
+			double southmost = Math.min(az, bz);
+			double northmost = Math.max(az, bz);
+			for (int i = 0; i < SIZE; i++)
+			{
+				for (int j = 0; j < SIZE; j++)
+				{
+					int t = i * SIZE + j;
+					double x0 = (i - SIZE / 2) * tile - HALF_TILE;
+					double z0 = (j - SIZE / 2) * tile - HALF_TILE;
+					if (eastmost <= x0 || westmost >= x0 + tile || northmost <= z0 || southmost >= z0 + tile)
+					{
+						continue; // the walk never comes into this tile
+					}
+					if (!open[t] ? crosses(ax, az, bx, bz, x0, z0, x0 + tile, z0 + tile)
+						: !step[t * 4 + WEST] && crosses(ax, az, bx, bz, x0, z0, x0 + margin, z0 + tile)
+						|| !step[t * 4 + EAST] && crosses(ax, az, bx, bz, x0 + tile - 1 - margin, z0, x0 + tile, z0 + tile)
+						|| !step[t * 4 + SOUTH] && crosses(ax, az, bx, bz, x0, z0, x0 + tile, z0 + margin)
+						|| !step[t * 4 + NORTH] && crosses(ax, az, bx, bz, x0, z0 + tile - 1 - margin, x0 + tile, z0 + tile))
+					{
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+
+		/** Whether the segment from (ax, az) to (bx, bz) passes through the inside of the box from (x0, z0) to (x1, z1). */
+		private static boolean crosses(double ax, double az, double bx, double bz, double x0, double z0, double x1, double z1)
+		{
+			// The part of the segment (0 to 1 along it) inside the box across, then up.
+			double[] inside = {0, 1};
+			return within(ax, bx - ax, x0, x1, inside) && within(az, bz - az, z0, z1, inside) && inside[0] < inside[1] - 1e-9;
+		}
+
+		/** Narrows {@code inside} to where a + t * d lies strictly between lo and hi; false if nowhere. */
+		private static boolean within(double a, double d, double lo, double hi, double[] inside)
+		{
+			if (Math.abs(d) < 1e-9)
+			{
+				return a > lo && a < hi;
+			}
+			double t0 = (lo - a) / d;
+			double t1 = (hi - a) / d;
+			inside[0] = Math.max(inside[0], Math.min(t0, t1));
+			inside[1] = Math.min(inside[1], Math.max(t0, t1));
+			return true;
+		}
+	}
+
+	/** How near each spot round an object is to the people drawn so far, as one object's crowd is laid out. */
+	private static final class Nearby
+	{
+		/** Distance from each spot to the nearest body that isn't you, and to you, squared. */
+		final double[] others = new double[SPOT_X.length];
+		final double[] you = new double[SPOT_X.length];
+		final boolean[] used = new boolean[SPOT_X.length];
+
+		Nearby()
+		{
+			java.util.Arrays.fill(others, Double.MAX_VALUE);
+			java.util.Arrays.fill(you, Double.MAX_VALUE);
+		}
+
+		Nearby copy()
+		{
+			Nearby out = new Nearby();
+			System.arraycopy(others, 0, out.others, 0, others.length);
+			System.arraycopy(you, 0, out.you, 0, you.length);
+			System.arraycopy(used, 0, out.used, 0, used.length);
+			return out;
+		}
+
+		void add(double east, double north, boolean isYou)
+		{
+			double[] near = isYou ? you : others;
+			for (int s = 0; s < near.length; s++)
+			{
+				double x = SPOT_X[s] - east;
+				double z = SPOT_Z[s] - north;
+				near[s] = Math.min(near[s], x * x + z * z);
+			}
+		}
+
+		/**
+		 * {@link #add} for someone standing at spot {@code at}. Only the spots nearer it than
+		 * {@link #SPOT_NEIGHBOUR_REACH} are updated: no gap {@link #clear} asks about is wider, so for the rest
+		 * the answer is the same either way.
+		 */
+		void addSpot(int at, boolean isYou)
+		{
+			double[] near = isYou ? you : others;
+			for (short s : SPOT_NEIGHBOURS[at])
+			{
+				double x = SPOT_X[s] - SPOT_X[at];
+				double z = SPOT_Z[s] - SPOT_Z[at];
+				near[s] = Math.min(near[s], x * x + z * z);
+			}
+		}
+
+		/** Whether this spot is free and nobody is drawn closer to it than {@code gap}, or than {@link #OBJECT_YOUR_GAP} if it's you. */
+		boolean clear(int s, int gap)
+		{
+			int yourGap = Math.max(gap, OBJECT_YOUR_GAP);
+			return !used[s] && others[s] >= gap * gap && you[s] >= yourGap * yourGap;
+		}
+	}
+
+	/**
+	 * Which spots round an object someone on one tile beside it may be drawn at: reached by a straight
+	 * walk from the middle of their tile, on ground that can be stood on.
+	 */
+	private static final class Reach
+	{
+		private final boolean[] walk;
+		/** Whether each spot can be stood on, asked only when it's needed: 0 not yet, 1 yes, 2 no. Shared by every tile round the object. */
+		private final byte[] stand;
+		private final IntPredicate standable;
+
+		Reach(boolean[] walk, byte[] stand, IntPredicate standable)
+		{
+			this.walk = walk;
+			this.stand = stand;
+			this.standable = standable;
+		}
+
+		boolean ok(int s)
+		{
+			if (!walk[s])
+			{
+				return false;
+			}
+			if (stand[s] == 0)
+			{
+				stand[s] = (byte) (standable.test(s) ? 1 : 2);
+			}
+			return stand[s] == 1;
+		}
+	}
+
+	/** Who stands where round one object. */
+	private static final class AtObject
+	{
+		final int yourId;
+		/** Id to spot, in the order they were given. */
+		final Map<Integer, Integer> spotOf = new LinkedHashMap<>();
+		final Map<Integer, Long> tileOf = new HashMap<>();
+		final Map<Long, Integer> onTile = new HashMap<>();
+		/** Tiles where someone without a spot is drawn in the middle all the same: you, or someone alone. */
+		final Set<Long> middles = new HashSet<>();
+		Nearby near = new Nearby();
+
+		AtObject(int yourId)
+		{
+			this.yourId = yourId;
+		}
+
+		void give(int id, long tile, int spot)
+		{
+			spotOf.put(id, spot);
+			tileOf.put(id, tile);
+			onTile.merge(tile, 1, Integer::sum);
+			near.used[spot] = true;
+			near.addSpot(spot, id == yourId);
+		}
+
+		int on(long tile)
+		{
+			return onTile.getOrDefault(tile, 0);
+		}
+	}
+
+	/** The middle of a tile beside an object, from the object's middle. */
+	private static double[] middleOf(long tile, long object)
+	{
+		return new double[]{(StackRegistry.sceneX(tile) - StackRegistry.sceneX(object)) * 2.0 * HALF_TILE,
+			(StackRegistry.sceneY(tile) - StackRegistry.sceneY(object)) * 2.0 * HALF_TILE};
+	}
+
+	/** The first of these spots that can be reached and is clear by {@code gap}, or -1. */
+	private static int firstClear(int[] order, Reach reach, Nearby near, int gap)
+	{
+		for (int s : order)
+		{
+			if (near.clear(s, gap) && reach.ok(s))
+			{
+				return s;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Of the spots that can be reached and are clear by {@code gap}, the one nearest spot {@code from}
+	 * (nearer the object on a tie) that someone standing at {@code from} can walk to in a straight
+	 * line without passing through the object, a wall or anything else; or -1. Their walk there is
+	 * drawn straight from where they stand: the nearest clear spot was sometimes across the object,
+	 * and a smith made room for you by walking through the anvil.
+	 */
+	private static int nearestClear(int from, Reach reach, Nearby near, int gap, Ground ground)
+	{
+		List<Integer> clear = new ArrayList<>();
+		for (int s = 0; s < SPOT_X.length; s++)
+		{
+			if (near.clear(s, gap) && reach.ok(s))
+			{
+				clear.add(s);
+			}
+		}
+		clear.sort(Comparator.<Integer>comparingDouble(s -> Math.hypot(SPOT_X[s] - SPOT_X[from], SPOT_Z[s] - SPOT_Z[from]))
+			.thenComparingInt(s -> SPOT_RING[s]).thenComparingInt(s -> s));
+		for (int s : clear)
+		{
+			if (ground.walkBetween(from, s))
+			{
+				return s;
+			}
+		}
+		return -1;
+	}
+
+	/** Last tick someone at spot {@code s} round {@code object} is still walking back to the middle of {@code tile}, a tile a tick from now. */
+	private int backBy(int s, long object, long tile)
+	{
+		double east = SPOT_X[s] + (StackRegistry.sceneX(object) - StackRegistry.sceneX(tile)) * 2.0 * HALF_TILE;
+		double north = SPOT_Z[s] + (StackRegistry.sceneY(object) - StackRegistry.sceneY(tile)) * 2.0 * HALF_TILE;
+		return objectTick + Math.max(0, (int) Math.ceil(Math.hypot(east, north) / (2 * HALF_TILE)) - 1);
+	}
+
+	/** The spot someone on {@code tile} had round {@code object} last tick, or -1. */
+	private int remembered(int id, long object, long tile)
+	{
+		long[] had = objectSpotOf.get(id);
+		return had != null && had[0] == object && had[1] == tile ? (int) had[2] : -1;
+	}
+
+	/**
+	 * Lays out the crowds gathered round something nobody can stand on, such as an anvil, once
+	 * everyone else's spots are known. Each tile round an anvil used to be laid out on its own, with
+	 * an equal slice of the ring whether it had two people or twenty: the busy sides piled up rows
+	 * deep or squeezed into a heap while the open sides stood empty, and the overflow was sent out
+	 * backwards, a tile or two from anyone.
+	 *
+	 * <p>Instead, as on a campfire, everyone on the tiles round it (and anyone alone beside it, facing
+	 * it, once there's a crowd) stands at {@link #OBJECT_SPOTS}: the nearest ring with room within a
+	 * tile of their own tile, on whichever side that is, then a ring or two further out on their own
+	 * side rather than further round, and round on whichever side has room once theirs is full (see
+	 * {@link #OBJECT_COST}). So the crowd fills in all round it before anyone stands far out, each
+	 * near their own tile. A spot is only used where it can be stood on and reached by a
+	 * straight walk from their tile that passes nothing in the way, as that walk is how they're drawn
+	 * getting there. Nobody is drawn closer than {@link #OBJECT_GAP} to anyone else, or
+	 * {@link #OBJECT_YOUR_GAP} to you. You choose first: the spot nearest the object on your side.
+	 * Everyone keeps their spot while it stays clear, whoever loses it steps to the clear spot nearest
+	 * it, and anyone left over once the rings are full waits out of sight rather than being drawn out
+	 * on their own.
+	 *
+	 * @param crowds    for each object, the tiles round it laid out here
+	 * @param idsByTile the people on each of those tiles who may be moved, in the order they get spots
+	 * @param elsewhere tiles laid out some other way, which nobody alone on them joins from
+	 * @param placed    everyone given a spot so far; anyone given one here is added
+	 */
+	private void layOutRoundObjects(Plan plan, Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, List<Long>> crowds,
+		Map<Long, List<Integer>> idsByTile, Set<Long> elsewhere, Set<Integer> placed, IntPredicate shown, int capacity,
+		boolean includeLocal, int tick, Surroundings around)
+	{
+		objectSpotHeld.values().removeIf(h -> h[3] < tick);
+		steppingBack.values().removeIf(until -> until < tick);
+		objectTick = tick;
+		Map<Integer, long[]> now = new HashMap<>();
+		Map<Long, Ground> groundsNow = new HashMap<>();
+		if (!crowds.isEmpty())
+		{
+			int yourId = -1;
+			for (List<StackSpreader.Entry> there : byTile.values())
+			{
+				for (StackSpreader.Entry en : there)
+				{
+					yourId = en.local ? en.id : yourId;
+				}
+			}
+			List<Long> objects = new ArrayList<>(crowds.keySet());
+			objects.sort(Comparator.naturalOrder());
+			// Someone alone beside it, facing it, is one of the crowd too: they keep a spot clear of the
+			// others rather than being drawn in the middle of their tile, inside whoever has stepped
+			// round there, and keep it as others come and go, rather than walking back to the middle
+			// each time their tile is down to one and out again when someone joins them.
+			Set<Long> alone = new HashSet<>();
+			for (long object : objects)
+			{
+				List<Long> tiles = crowds.get(object);
+				for (int east = -1; east <= 1; east++)
+				{
+					for (int north = -1; north <= 1; north++)
+					{
+						long tile = StackRegistry.key(StackRegistry.plane(object), StackRegistry.sceneX(object) + east, StackRegistry.sceneY(object) + north);
+						List<StackSpreader.Entry> there = byTile.get(tile);
+						if (tile == object || there == null || there.size() != 1 || idsByTile.containsKey(tile) || elsewhere.contains(tile))
+						{
+							continue;
+						}
+						StackSpreader.Entry only = there.get(0);
+						if (!shown.test(only.id) || (only.local && !includeLocal) || placed.contains(only.id)
+							|| objectForAlone(tile, there, crowds) != object || fireUnderfoot(around.firesNear(tile)))
+						{
+							continue;
+						}
+						List<Integer> one = new ArrayList<>(1);
+						one.add(only.id);
+						idsByTile.put(tile, one);
+						tiles.add(tile);
+						alone.add(tile);
+						plan.curvedRows.add(tile);
+					}
+				}
+				tiles.sort(Comparator.naturalOrder());
+			}
+			// Everyone else drawn, as {plane, east, north, 1 if it's you}: at their spots, and one in the
+			// middle of any tile where someone without a spot is drawn. Fires are laid out after, clear of these.
+			List<double[]> bodies = new ArrayList<>();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				bodies.add(new double[]{StackRegistry.plane(p.tile), StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
+					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz, p.id == yourId ? 1 : 0});
+			}
+			for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
+			{
+				long tile = e.getKey();
+				if (elsewhere.contains(tile))
+				{
+					continue;
+				}
+				List<Integer> layingOut = idsByTile.get(tile);
+				boolean drawn = false;
+				boolean you = false;
+				for (StackSpreader.Entry en : e.getValue())
+				{
+					if (!placed.contains(en.id) && (layingOut == null || !layingOut.contains(en.id))
+						&& (en.local || shown.test(en.id) && (e.getValue().size() == 1 || !plan.middleOutOfSight.contains(tile))))
+					{
+						drawn = true;
+						you |= en.local;
+					}
+				}
+				if (drawn)
+				{
+					bodies.add(new double[]{StackRegistry.plane(tile), StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE,
+						StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE, you ? 1 : 0});
+				}
+			}
+			// The crowd you're in first, so the crowds round the rest keep clear of you as well: beside a
+			// furnace, which is one crowd for each of its tiles, someone stood right up against you.
+			int you = yourId;
+			List<Long> order = new ArrayList<>(objects);
+			order.sort(Comparator.comparingInt((Long object) -> yoursFirst(crowds.get(object), idsByTile, you)).thenComparing(Comparator.naturalOrder()));
+			// Where the people round each object stood last tick, while they're still there: each crowd
+			// keeps clear of those round the objects not laid out yet as well, so a newcomer at one
+			// anvil doesn't take the place of someone standing there from the anvil next to it.
+			Map<Long, List<double[]>> standing = new HashMap<>();
+			for (long object : order)
+			{
+				List<double[]> there = new ArrayList<>();
+				for (long tile : crowds.get(object))
+				{
+					for (int id : idsByTile.get(tile))
+					{
+						int s = remembered(id, object, tile);
+						if (s >= 0)
+						{
+							there.add(new double[]{StackRegistry.plane(object), StackRegistry.sceneX(object) * 2.0 * HALF_TILE + HALF_TILE + SPOT_X[s],
+								StackRegistry.sceneY(object) * 2.0 * HALF_TILE + HALF_TILE + SPOT_Z[s], id == yourId ? 1 : 0});
+						}
+					}
+				}
+				standing.put(object, there);
+			}
+			for (int k = 0; k < order.size(); k++)
+			{
+				List<double[]> yetToCome = new ArrayList<>();
+				for (int later = k + 1; later < order.size(); later++)
+				{
+					yetToCome.addAll(standing.get(order.get(later)));
+				}
+				layOutRoundObject(plan, order.get(k), crowds.get(order.get(k)), idsByTile, alone, byTile, bodies, yetToCome, placed, shown,
+					capacity, around, yourId, now, groundsNow);
+			}
+		}
+		// Whoever lost their spot round an object (waiting, gone, or the crowd broken up) has it kept for them a while.
+		for (Map.Entry<Integer, long[]> e : objectSpotOf.entrySet())
+		{
+			if (!now.containsKey(e.getKey()))
+			{
+				long[] had = e.getValue();
+				objectSpotHeld.put(e.getKey(), new long[]{had[0], had[1], had[2], tick + SlotBook.HOLD_TICKS});
+			}
+		}
+		objectSpotOf = now;
+		// The ground round objects nobody stands round this tick is kept a while too, so a crowd that
+		// breaks up and gathers again a moment later doesn't work out every walk round it afresh.
+		for (Map.Entry<Long, Ground> e : grounds.entrySet())
+		{
+			if (groundsNow.size() >= GROUNDS_KEPT)
+			{
+				break;
+			}
+			groundsNow.putIfAbsent(e.getKey(), e.getValue());
+		}
+		grounds = groundsNow;
+	}
+
+	/** 0 if you're one of the people on these tiles laid out round an object, else 1. */
+	private static int yoursFirst(List<Long> tiles, Map<Long, List<Integer>> idsByTile, int yourId)
+	{
+		for (long tile : tiles)
+		{
+			if (idsByTile.get(tile).contains(yourId))
+			{
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	/**
+	 * {@link #layOutRoundObjects} for one object: who stands where goes in {@code now}, and they're
+	 * added to {@code bodies}. They keep clear of {@code bodies} and of {@code yetToCome}, where
+	 * people round the objects laid out after this one stood last tick.
+	 */
+	private void layOutRoundObject(Plan plan, long object, List<Long> tiles, Map<Long, List<Integer>> idsByTile, Set<Long> alone,
+		Map<Long, List<StackSpreader.Entry>> byTile, List<double[]> bodies, List<double[]> yetToCome, Set<Integer> placed, IntPredicate shown,
+		int capacity, Surroundings around, int yourId, Map<Integer, long[]> now, Map<Long, Ground> groundsNow)
+	{
+		int plane = StackRegistry.plane(object);
+		int objectX = StackRegistry.sceneX(object);
+		int objectY = StackRegistry.sceneY(object);
+		int middleX = objectX * 2 * HALF_TILE + HALF_TILE;
+		int middleZ = objectY * 2 * HALF_TILE + HALF_TILE;
+		Ground ground = new Ground(object, around);
+		Ground was = grounds.get(object);
+		if (ground.sameAs(was))
+		{
+			ground = was;
+		}
+		groundsNow.put(object, ground);
+		int n = SPOT_X.length;
+		// Where the walk there is clear, the spot itself as the plugin judges it (which also keeps
+		// clear of fires): asked only of the spots someone is looking at.
+		byte[] stand = new byte[n];
+		IntPredicate standable = s ->
+		{
+			int x = middleX + SPOT_X[s];
+			int z = middleZ + SPOT_Z[s];
+			int tx = Math.floorDiv(x, 2 * HALF_TILE);
+			int tz = Math.floorDiv(z, 2 * HALF_TILE);
+			return around.canStand(StackRegistry.key(plane, tx, tz), x - tx * 2 * HALF_TILE - HALF_TILE, z - tz * 2 * HALF_TILE - HALF_TILE);
+		};
+		Map<Long, Reach> reach = new HashMap<>();
+		for (long tile : tiles)
+		{
+			reach.put(tile, new Reach(ground.walksFrom(besideIndex(tile, object)), stand, standable));
+		}
+		List<double[]> taken = new ArrayList<>();
+		List<double[]> near = new ArrayList<>(bodies);
+		near.addAll(yetToCome);
+		for (double[] b : near)
+		{
+			if (b[0] == plane && Math.hypot(b[1] - middleX, b[2] - middleZ) < OBJECT_REACH + OBJECT_YOUR_GAP)
+			{
+				taken.add(new double[]{b[1] - middleX, b[2] - middleZ, b[3]});
+			}
+		}
+		// Unlike a fire's few spots, these are close enough together that keeping everyone where they
+		// are wastes little room: laying the crowd out afresh to fit in someone waiting walked thirty
+		// people somewhere new for one more spot, and soon left more waiting, not fewer.
+		AtObject at = objectSpots(object, tiles, idsByTile, alone, reach, ground, taken, capacity, yourId);
+		for (Map.Entry<Integer, Integer> g : at.spotOf.entrySet())
+		{
+			int id = g.getKey();
+			int s = g.getValue();
+			long tile = at.tileOf.get(id);
+			plan.placements.add(new StackSpreader.Placement(id, tile, SPOT_X[s] + (objectX - StackRegistry.sceneX(tile)) * 2 * HALF_TILE,
+				SPOT_Z[s] + (objectY - StackRegistry.sceneY(tile)) * 2 * HALF_TILE));
+			placed.add(id);
+			long[] had = objectSpotOf.get(id);
+			objectMoves += had != null && had[0] == object && had[1] == tile && had[2] != s ? 1 : 0;
+			now.put(id, new long[]{object, tile, s});
+			objectSpotHeld.remove(id);
+			bodies.add(new double[]{plane, middleX + SPOT_X[s], middleZ + SPOT_Z[s], id == yourId ? 1 : 0});
+		}
+		for (long tile : tiles)
+		{
+			boolean youWait = false;
+			boolean someoneWaits = false;
+			for (int id : idsByTile.get(tile))
+			{
+				if (!at.spotOf.containsKey(id))
+				{
+					someoneWaits = true;
+					youWait |= id == yourId;
+				}
+			}
+			if (at.middles.contains(tile))
+			{
+				// Drawn in the middle of their tile all the same (you, or someone alone): the crowds
+				// round the objects after this one keep clear of them.
+				bodies.add(new double[]{plane, StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE,
+					StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE, youWait ? 1 : 0});
+			}
+			else if (someoneWaits && !alone.contains(tile))
+			{
+				// Whoever is still left without a spot waits out of sight, rather than drawn in the
+				// middle of their tile inside whoever is standing there now.
+				plan.middleOutOfSight.add(tile);
+			}
+			int seen = 0;
+			for (StackSpreader.Entry en : byTile.get(tile))
+			{
+				seen += shown.test(en.id) ? 1 : 0;
+			}
+			Reach r = reach.get(tile);
+			int mine = at.on(tile);
+			// Room for more from this tile right now, packed nearest first.
+			Nearby room = at.near.copy();
+			int more = 0;
+			for (int s : OBJECT_ORDER[besideIndex(tile, object)])
+			{
+				if (mine + more >= capacity)
+				{
+					break;
+				}
+				if (room.clear(s, OBJECT_GAP) && r.ok(s))
+				{
+					more++;
+					room.used[s] = true;
+					room.addSpot(s, false);
+				}
+			}
+			// The front-row places round the object this tile can't use: behind it, or past a wall.
+			int outOfReach = 0;
+			for (int s = 0; s < n; s++)
+			{
+				outOfReach += SPOT_RING[s] == 0 && !r.ok(s) ? 1 : 0;
+			}
+			int blocked = (int) Math.round(outOfReach * 2 * Math.PI * OBJECT_NEAR_RING / NEAR_RING_SPOTS / OBJECT_GAP);
+			plan.tiles.put(tile, new TileReport(ROUND_OBJECT, OBJECT_GAP, seen, mine, mine + more, blocked));
+		}
+	}
+
+	/**
+	 * Spots round one object for the people on the tiles round it, clear of everyone in {@code taken}
+	 * ({east, north, 1 if it's you} from the object's middle). Everyone keeps the spot they had while
+	 * it stays clear, and goes back to one kept for them if it's clear.
+	 */
+	private AtObject objectSpots(long object, List<Long> tiles, Map<Long, List<Integer>> idsByTile, Set<Long> alone,
+		Map<Long, Reach> reach, Ground ground, List<double[]> taken, int capacity, int yourId)
+	{
+		AtObject at = new AtObject(yourId);
+		for (double[] b : taken)
+		{
+			at.near.add(b[0], b[1], b[2] > 0);
+		}
+		// You first: the spot nearest the object on your side, or the one you have while no ring
+		// nearer it has room (that you can walk to straight from where you stand).
+		for (long tile : tiles)
+		{
+			if (!idsByTile.get(tile).contains(yourId))
+			{
+				continue;
+			}
+			Reach r = reach.get(tile);
+			int[] order = OBJECT_ORDER[besideIndex(tile, object)];
+			int best = firstClear(order, r, at.near, OBJECT_GAP);
+			int had = remembered(yourId, object, tile);
+			int pick;
+			if (steppingBack.containsKey(yourId))
+			{
+				pick = -1;
+			}
+			else if (had < 0)
+			{
+				pick = best >= 0 ? best : firstClear(order, r, at.near, OBJECT_KEEP);
+			}
+			else
+			{
+				boolean keep = r.ok(had) && at.near.clear(had, OBJECT_KEEP);
+				if (best >= 0 && (!keep || SPOT_RING[best] < SPOT_RING[had]) && ground.walkBetween(had, best))
+				{
+					pick = best;
+				}
+				else if (keep)
+				{
+					pick = had;
+				}
+				else
+				{
+					pick = nearestClear(had, r, at.near, OBJECT_GAP, ground);
+					pick = pick >= 0 ? pick : nearestClear(had, r, at.near, OBJECT_KEEP, ground);
+				}
+			}
+			if (pick >= 0)
+			{
+				at.give(yourId, tile, pick);
+			}
+			else
+			{
+				if (had >= 0)
+				{
+					steppingBack.put(yourId, backBy(had, object, tile));
+				}
+				double[] m = middleOf(tile, object);
+				at.middles.add(tile);
+				at.near.add(m[0], m[1], true);
+			}
+		}
+		// Everyone whose spot is still clear keeps it.
+		Map<Long, List<Integer>> waiting = new LinkedHashMap<>();
+		Map<Integer, Integer> lost = new LinkedHashMap<>();
+		Map<Integer, Long> tileOf = new HashMap<>();
+		Set<Integer> switched = new HashSet<>();
+		for (long tile : tiles)
+		{
+			List<Integer> left = new ArrayList<>();
+			Reach r = reach.get(tile);
+			for (int id : idsByTile.get(tile))
+			{
+				if (id == yourId)
+				{
+					continue;
+				}
+				tileOf.put(id, tile);
+				int had = remembered(id, object, tile);
+				if (had >= 0 && at.on(tile) < capacity && r.ok(had) && at.near.clear(had, OBJECT_KEEP))
+				{
+					at.give(id, tile, had);
+					continue;
+				}
+				long[] before = objectSpotOf.get(id);
+				if (had < 0 && before != null && before[1] == tile && before[0] != object)
+				{
+					// Standing round another object a moment ago (their tile has turned to this one): back
+					// to the middle of their tile first, rather than straight across from there.
+					steppingBack.put(id, backBy((int) before[2], before[0], tile));
+					switched.add(id);
+				}
+				if (steppingBack.containsKey(id))
+				{
+					switched.add(id);
+					if (!alone.contains(tile))
+					{
+						continue;
+					}
+				}
+				if (had >= 0)
+				{
+					lost.put(id, had);
+				}
+				left.add(id);
+			}
+			waiting.put(tile, left);
+		}
+		// Someone alone beside the object comes next: drawn where they stand if there's no spot for
+		// them, so whoever would be drawn inside them there steps aside.
+		for (long tile : tiles)
+		{
+			List<Integer> left = waiting.get(tile);
+			if (!alone.contains(tile) || left.isEmpty())
+			{
+				continue;
+			}
+			int id = left.get(0);
+			Reach r = reach.get(tile);
+			int[] order = OBJECT_CHEAPEST[besideIndex(tile, object)];
+			Integer had = lost.get(id);
+			int pick = switched.contains(id) ? -1 : had != null ? nearestClear(had, r, at.near, OBJECT_GAP, ground) : firstClear(order, r, at.near, OBJECT_GAP);
+			pick = pick >= 0 || switched.contains(id) ? pick
+				: had != null ? nearestClear(had, r, at.near, OBJECT_KEEP, ground) : firstClear(order, r, at.near, OBJECT_KEEP);
+			if (pick >= 0)
+			{
+				at.give(id, tile, pick);
+				left.clear();
+				continue;
+			}
+			if (had != null)
+			{
+				steppingBack.put(id, backBy(had, object, tile));
+			}
+			double[] m = middleOf(tile, object);
+			at.middles.add(tile);
+			left.clear();
+			List<Integer> inside = new ArrayList<>();
+			for (Map.Entry<Integer, Integer> g : at.spotOf.entrySet())
+			{
+				if (g.getKey() != yourId && !alone.contains(at.tileOf.get(g.getKey()))
+					&& Math.hypot(SPOT_X[g.getValue()] - m[0], SPOT_Z[g.getValue()] - m[1]) < OBJECT_KEEP)
+				{
+					inside.add(g.getKey());
+				}
+			}
+			if (!inside.isEmpty())
+			{
+				for (int other : inside)
+				{
+					long theirs = at.tileOf.get(other);
+					lost.put(other, at.spotOf.get(other));
+					at.spotOf.remove(other);
+					at.tileOf.remove(other);
+					at.onTile.merge(theirs, -1, Integer::sum);
+					waiting.get(theirs).add(other);
+				}
+				Nearby again = new Nearby();
+				for (double[] b : taken)
+				{
+					again.add(b[0], b[1], b[2] > 0);
+				}
+				for (Map.Entry<Integer, Integer> g : at.spotOf.entrySet())
+				{
+					again.used[g.getValue()] = true;
+					again.addSpot(g.getValue(), g.getKey() == yourId);
+				}
+				for (long middle : at.middles)
+				{
+					double[] mm = middleOf(middle, object);
+					again.add(mm[0], mm[1], idsByTile.get(middle).contains(yourId));
+				}
+				at.near = again;
+			}
+			else
+			{
+				at.near.add(m[0], m[1], false);
+			}
+		}
+		// Whoever had to leave their spot steps to the clear one nearest it that they can walk to
+		// straight from where they stand. With none, they step back into the middle of their tile the
+		// way they came, out of sight, rather than through the anvil to a spot across it.
+		for (Map.Entry<Integer, Integer> l : lost.entrySet())
+		{
+			int id = l.getKey();
+			long tile = tileOf.get(id);
+			if (alone.contains(tile) || at.spotOf.containsKey(id))
+			{
+				continue;
+			}
+			int pick = at.on(tile) < capacity ? nearestClear(l.getValue(), reach.get(tile), at.near, OBJECT_GAP, ground) : -1;
+			waiting.get(tile).remove((Integer) id);
+			if (pick >= 0)
+			{
+				at.give(id, tile, pick);
+			}
+			else
+			{
+				steppingBack.put(id, backBy(l.getValue(), object, tile));
+			}
+		}
+		// Whoever comes back goes back to the spot kept for them, if it's clear.
+		for (long tile : tiles)
+		{
+			for (java.util.Iterator<Integer> it = waiting.get(tile).iterator(); it.hasNext(); )
+			{
+				int id = it.next();
+				long[] held = objectSpotHeld.get(id);
+				if (held != null && held[0] == object && held[1] == tile && at.on(tile) < capacity
+					&& reach.get(tile).ok((int) held[2]) && at.near.clear((int) held[2], OBJECT_GAP))
+				{
+					at.give(id, tile, (int) held[2]);
+					it.remove();
+				}
+			}
+		}
+		// Everyone else, near the object and their own tile first and round it once their side is full, then a little closer together.
+		fillNearestFirst(at, object, tiles, waiting, reach, OBJECT_GAP, capacity);
+		fillNearestFirst(at, object, tiles, waiting, reach, OBJECT_KEEP, capacity);
+		return at;
+	}
+
+	/**
+	 * How much more a spot round an object costs someone (see {@link #OBJECT_COST}) for each other
+	 * tile round it whose people could stand there too: about as much as a ring further out, or a
+	 * tile's walk further round within a tile of their own. The people on the wall side of an anvil
+	 * can only stand on the wall side, and those on the side next to them took it, when the far side
+	 * of them was theirs alone.
+	 */
+	static final int SHARED_SPOT_COST = HALF_TILE / 2;
+
+	/**
+	 * Gives the people waiting on each tile spots clear by {@code gap}, one at a time: of each tile's
+	 * cheapest spot ({@link #OBJECT_COST}, plus {@link #SHARED_SPOT_COST} for each other tile round
+	 * the object that could stand there too), the cheapest of all goes first. So each side's own
+	 * places near the object go to its own people before anyone reaches round for them, and nobody
+	 * walks right round the object while there's room a ring or two further out on their own side.
+	 * Only those waiting are placed: nobody already standing round the object is moved for it.
+	 */
+	private static void fillNearestFirst(AtObject at, long object, List<Long> tiles, Map<Long, List<Integer>> waiting,
+		Map<Long, Reach> reach, int gap, int capacity)
+	{
+		// Spots only ever stop being clear as people are placed: each tile's cheapest is still its
+		// cheapest while it stays clear, and each tile's search carries on from where it got to.
+		Map<Long, double[]> cheapest = new HashMap<>();
+		Map<Long, Integer> next = new HashMap<>();
+		while (true)
+		{
+			long bestTile = NO_OBJECT;
+			double[] best = null;
+			for (long tile : tiles)
+			{
+				if (waiting.get(tile).isEmpty() || at.on(tile) >= capacity)
+				{
+					continue;
+				}
+				double[] mine = cheapest.get(tile);
+				if (mine == null || mine[0] >= 0 && !at.near.clear((int) mine[0], gap))
+				{
+					mine = cheapestFor(at, object, tile, tiles, reach, gap, next);
+					cheapest.put(tile, mine);
+				}
+				if (mine[0] >= 0 && (best == null || mine[1] < best[1]))
+				{
+					bestTile = tile;
+					best = mine;
+				}
+			}
+			if (best == null)
+			{
+				return;
+			}
+			at.give(waiting.get(bestTile).remove(0), bestTile, (int) best[0]);
+		}
+	}
+
+	/** The cheapest spot clear by {@code gap} for someone on {@code tile} (see {@link #fillNearestFirst}), as {spot, cost}, or {-1, MAX_VALUE}. */
+	private static double[] cheapestFor(AtObject at, long object, long tile, List<Long> tiles, Map<Long, Reach> reach, int gap, Map<Long, Integer> next)
+	{
+		int beside = besideIndex(tile, object);
+		int[] order = OBJECT_CHEAPEST[beside];
+		float[] cost = OBJECT_COST[beside];
+		Reach r = reach.get(tile);
+		int p = next.getOrDefault(tile, 0);
+		while (p < order.length && !(at.near.clear(order[p], gap) && r.ok(order[p])))
+		{
+			p++;
+		}
+		next.put(tile, p);
+		// Of the spots about as cheap, the one fewest others round the object can reach.
+		int pick = -1;
+		double pickCost = Double.MAX_VALUE;
+		for (int q = p; q < order.length && cost[order[q]] < pickCost; q++)
+		{
+			int s = order[q];
+			if (!at.near.clear(s, gap) || !r.ok(s))
+			{
+				continue;
+			}
+			double c = cost[s];
+			for (long other : tiles)
+			{
+				c += other != tile && reach.get(other).ok(s) ? SHARED_SPOT_COST : 0;
+			}
+			if (c < pickCost)
+			{
+				pick = s;
+				pickCost = c;
+			}
+		}
+		return new double[]{pick, pickCost};
 	}
 
 	/**
@@ -1922,6 +3207,12 @@ final class CrowdPlanner
 		Map<Long, Integer> blockedByTile = new HashMap<>();
 		List<Straight> pendingStraight = new ArrayList<>();
 		Map<Long, List<Integer>> onFires = new HashMap<>();
+		// Crowds round an object nobody can stand on: the tiles round each, and who on them may be moved.
+		Map<Long, List<Long>> objectCrowds = new HashMap<>();
+		Map<Long, List<Integer>> objectIds = new HashMap<>();
+		objectAt.clear();
+		previousObjectOf = currentObjectOf;
+		currentObjectOf = new HashMap<>();
 		for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
 		{
 			List<StackSpreader.Entry> everyone = e.getValue();
@@ -2027,6 +3318,7 @@ final class CrowdPlanner
 			double squareOn = Math.round(rowAngle / (Math.PI / 2)) * (Math.PI / 2);
 			boolean counter = row && !curve
 				&& (around.isCounter(tile, rowAngle) || around.isCounter(tile, squareOn));
+			boolean atFire = false;
 			if (counter || (row && lineUp))
 			{
 				if (counter && smallGroupsClose)
@@ -2047,6 +3339,7 @@ final class CrowdPlanner
 				// Gathered round a fire, in a row or not: stay close, whatever the slider says, and
 				// everyone faces the fire.
 				int[] fire = fireFaced(group, firesHere);
+				atFire = fire != null || around.facesFire(tile, rowAngle);
 				if (fire != null || (row && around.facesFire(tile, rowAngle)))
 				{
 					tileSpacing = smallGroupsClose
@@ -2067,6 +3360,18 @@ final class CrowdPlanner
 			if (row && !straight)
 			{
 				plan.curvedRows.add(tile);
+			}
+			// Smart, at something nobody can stand on, such as an anvil: one crowd all round it with
+			// everyone at it from the other tiles round it, laid out once everyone else's spots are known.
+			long object = !straight && !atFire && smart && arrangement == PersonalSpaceConfig.Arrangement.AUTO
+				? objectFaced(tile, row, angle, group, around) : NO_OBJECT;
+			if (object != NO_OBJECT)
+			{
+				plan.curvedRows.add(tile);
+				objectCrowds.computeIfAbsent(object, k -> new ArrayList<>()).add(tile);
+				objectIds.put(tile, movable);
+				currentObjectOf.put(tile, object);
+				continue;
 			}
 
 			// Neighbouring booth tiles each get their own row: a straight row stops short of a tile
@@ -2564,6 +3869,7 @@ final class CrowdPlanner
 			plan.tiles.put(tile, new TileReport(shapeByTile.get(tile), spacingByTile.get(tile), shownByTile.get(tile),
 				e.getValue().size(), spots.size(), blockedByTile.get(tile)));
 		}
+		layOutRoundObjects(plan, byTile, objectCrowds, objectIds, onFires.keySet(), placed, shown, capacity, includeLocal, tick, around);
 		layOutOnFires(plan, byTile, onFires, placed, shown, capacity, includeLocal, tick, around);
 		plan.placements.sort(Comparator.comparingInt(p -> p.id));
 
@@ -2685,7 +3991,7 @@ final class CrowdPlanner
 	/** Times a player with a spot was moved to a different spot to fill a gap; total. */
 	long spotMoves()
 	{
-		return slots.moves + lineBook.moves + fireMoves;
+		return slots.moves + lineBook.moves + fireMoves + objectMoves;
 	}
 
 	void clear()
@@ -2713,5 +4019,12 @@ final class CrowdPlanner
 		busyLineUntil.clear();
 		fireSpotOf.clear();
 		fireSpotHeld.clear();
+		objectAt.clear();
+		previousObjectOf.clear();
+		currentObjectOf.clear();
+		objectSpotOf.clear();
+		objectSpotHeld.clear();
+		steppingBack.clear();
+		grounds.clear();
 	}
 }

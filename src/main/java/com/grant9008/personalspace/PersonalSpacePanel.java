@@ -75,7 +75,20 @@ final class PersonalSpacePanel extends PluginPanel
 	/** One line under the title saying what the plugin is doing right now, e.g. "Spreading 7 players on 3 tiles". */
 	private final JLabel liveLine = new JLabel();
 	/** A second line saying what shape you're standing in, e.g. "You're in a row along the counter or wall". */
-	private final JLabel shapeLine = new JLabel();
+	/**
+	 * Always two lines high, whatever it says, and always shown: it came and went (and changed
+	 * from one line to two) as you walked in and out of crowds, and the whole page jumped.
+	 */
+	private final JLabel shapeLine = new JLabel()
+	{
+		@Override
+		public Dimension getPreferredSize()
+		{
+			Dimension d = super.getPreferredSize();
+			return new Dimension(d.width, Math.max(d.height, shapeLineHeight));
+		}
+	};
+	private int shapeLineHeight;
 	private final JLabel liveDot = new JLabel();
 	private final JLabel statusDetail = new JLabel();
 
@@ -92,12 +105,16 @@ final class PersonalSpacePanel extends PluginPanel
 		PersonalSpaceConfig.Arrangement.values(), labels(PersonalSpaceConfig.Arrangement.values()));
 	private final PillGroup<PersonalSpaceConfig.Pose> posePills = new PillGroup<>(
 		PersonalSpaceConfig.Pose.values(), labels(PersonalSpaceConfig.Pose.values()));
+	private final PillGroup<PersonalSpaceConfig.Alchers> alcherPills = new PillGroup<>(
+		PersonalSpaceConfig.Alchers.values(), labels(PersonalSpaceConfig.Alchers.values()));
 
 	private final ToggleSwitch includeMeSwitch = new ToggleSwitch();
 	private final ToggleSwitch inFrontSwitch = new ToggleSwitch();
 	private final ToggleSwitch namesSwitch = new ToggleSwitch();
 	private final ToggleSwitch hoverSwitch = new ToggleSwitch();
 	private final ToggleSwitch hideChatSwitch = new ToggleSwitch();
+	private final JSlider chatRangeSlider = new JSlider(0, PersonalSpaceConfig.MAX_CHAT_RANGE, 0);
+	private final JLabel chatRangeValue = new JLabel();
 	private final ToggleSwitch arrowSwitch = new ToggleSwitch();
 	private final ToggleSwitch smallGroupsSwitch = new ToggleSwitch();
 	private final ToggleSwitch combatSwitch = new ToggleSwitch();
@@ -172,8 +189,8 @@ final class PersonalSpacePanel extends PluginPanel
 		StatusSummary.Headline h = StatusSummary.headline(s);
 		liveDot.setIcon(new Dot(colorFor(h.level), 7));
 		liveLine.setText(h.title);
-		shapeLine.setText(s.yourShape == null ? "" : wrap(s.yourShape));
-		shapeLine.setVisible(s.yourShape != null);
+		shapeLine.setText(wrap(s.yourShape != null ? s.yourShape
+			: s.active && s.gate == Snapshot.Gate.SAFE ? "Nobody else is on your tile." : " "));
 		gpuButton.setVisible(s.renderer == null && !s.hdEnabled && s.gate != Snapshot.Gate.NOT_LOGGED_IN);
 		if (!troubleshootingBody.isVisible())
 		{
@@ -211,9 +228,12 @@ final class PersonalSpacePanel extends PluginPanel
 		showSpacing(spacingSlider.getValue());
 		arrangementPills.select(config.arrangement());
 		posePills.select(config.pose());
+		alcherPills.select(config.otherAlchers());
 		namesSwitch.setOn(config.namesFollowPlayers());
 		hoverSwitch.setOn(config.hoverShowsWho());
 		hideChatSwitch.setOn(config.hideTheirChat());
+		setSliderQuietly(chatRangeSlider, clamp(config.hideChatFurtherThan(), 0, PersonalSpaceConfig.MAX_CHAT_RANGE));
+		chatRangeValue.setText(chatRangeText(chatRangeSlider.getValue()));
 		arrowSwitch.setOn(config.hoverArrow());
 		includeMeSwitch.setOn(config.includeLocalPlayer());
 		inFrontSwitch.setOn(config.drawMeInFront());
@@ -278,7 +298,12 @@ final class PersonalSpacePanel extends PluginPanel
 		shapeLine.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
 		shapeLine.setBorder(new EmptyBorder(3, 13, 0, 0));
 		shapeLine.setToolTipText(tip("The shape your own tile is using right now."));
-		shapeLine.setVisible(false);
+		JLabel twoLines = new JLabel("<html><div style='width:" + TEXT_WIDTH_PX + "px'>A<br>A</div></html>");
+		twoLines.setFont(shapeLine.getFont());
+		twoLines.setBorder(shapeLine.getBorder());
+		shapeLineHeight = twoLines.getPreferredSize().height;
+		shapeLine.setVerticalAlignment(javax.swing.SwingConstants.TOP);
+		shapeLine.setText(wrap(" "));
 
 		// Offered only while no GPU renderer is running and 117 HD isn't switched on: Personal Space
 		// can't do anything without one, and finding the GPU plugin in RuneLite's list is a hunt.
@@ -395,6 +420,25 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 4, 0);
+		JPanel chatRangeLabel = labelWithValue("Hide chat further than", chatRangeValue);
+		card.add(chatRangeLabel, c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		String chatRangeTip = tip("Off (the default), or a distance in tiles: public chat from anyone further from you than this isn't shown over their head or in the chat box, such as a busy bank across the road while you're at an anvil. Friends, friends chat and clan members always show. Changing it applies to chat already in the box too.");
+		chatRangeLabel.setToolTipText(chatRangeTip);
+		chatRangeSlider.setToolTipText(chatRangeTip);
+		card.add(slider(chatRangeSlider), c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 4, 0);
+		card.add(fieldLabel("Alchers behavior"), c);
+		c.gridy++;
+		c.insets = new Insets(0, 0, 0, 0);
+		alcherPills.setToolTipText(tip("How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer or jump for joy, at random. Your own spells never change."));
+		card.add(alcherPills, c);
+
+		c.gridy++;
+		c.insets = new Insets(8, 0, 4, 0);
 		card.add(labelWithValue("Spacing", spacingValue), c);
 		c.gridy++;
 		c.insets = new Insets(0, 0, 0, 0);
@@ -438,7 +482,7 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Depth between players", depthTestSwitch,
-			"On (the default): each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front and behind as you turn the camera. Off: each person is drawn whole, one over another, as the game does it. GPU plugin and 117 HD."), c);
+			"On (the default): each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front and behind as you turn the camera. Each body's own gear still looks just as the game draws it. Only people overlapping someone are drawn this way. Off: each person is drawn whole, one over another, as the game does it. GPU plugin only; with 117 HD everyone is drawn as the game does it."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -632,9 +676,18 @@ final class PersonalSpacePanel extends PluginPanel
 		});
 		arrangementPills.onSelect(v -> write(PersonalSpaceConfig.KEY_ARRANGEMENT, v));
 		posePills.onSelect(v -> write(PersonalSpaceConfig.KEY_POSE, v));
+		alcherPills.onSelect(v -> write(PersonalSpaceConfig.KEY_OTHER_ALCHERS, v));
 		namesSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_NAMES, on));
 		hoverSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HOVER, on));
 		hideChatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HIDE_CHAT, on));
+		chatRangeSlider.addChangeListener(e ->
+		{
+			chatRangeValue.setText(chatRangeText(chatRangeSlider.getValue()));
+			if (chatRangeSlider.getValue() != config.hideChatFurtherThan())
+			{
+				write(PersonalSpaceConfig.KEY_CHAT_RANGE, chatRangeSlider.getValue());
+			}
+		});
 		arrowSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_HOVER_ARROW, on));
 		includeMeSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_INCLUDE_LOCAL, on));
 		inFrontSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DRAW_ME_IN_FRONT, on));
@@ -682,10 +735,12 @@ final class PersonalSpacePanel extends PluginPanel
 		perTileSlider.setEnabled(enabled);
 		hideBelowSlider.setEnabled(enabled);
 		hideChatSwitch.setEnabled(enabled);
+		chatRangeSlider.setEnabled(enabled);
 		spacingPills.setEnabled(enabled);
 		spacingSlider.setEnabled(enabled);
 		arrangementPills.setEnabled(enabled);
 		posePills.setEnabled(enabled);
+		alcherPills.setEnabled(enabled);
 		includeMeSwitch.setEnabled(enabled);
 		inFrontSwitch.setEnabled(enabled);
 		depthTestSwitch.setEnabled(enabled);
@@ -784,6 +839,11 @@ final class PersonalSpacePanel extends PluginPanel
 		l.setFont(FontManager.getRunescapeSmallFont());
 		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		return l;
+	}
+
+	private static String chatRangeText(int tiles)
+	{
+		return tiles <= 0 ? "Off" : tiles == 1 ? "1 tile" : tiles + " tiles";
 	}
 
 	private static String hideBelowText(int level)

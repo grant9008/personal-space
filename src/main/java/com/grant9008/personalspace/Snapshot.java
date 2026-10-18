@@ -43,6 +43,10 @@ final class Snapshot
 	boolean hoverArrow;
 	int hideBelow;
 	boolean hideChat;
+	int chatRange;
+	PersonalSpaceConfig.Alchers alchers = PersonalSpaceConfig.Alchers.NORMAL;
+	/** Other players' alch casts drawn still or as an emote, this session. */
+	long alchersRestyled;
 	boolean smallGroupsClose = true;
 	boolean pauseInCombat = true;
 	PersonalSpaceConfig.Pose pose = PersonalSpaceConfig.Pose.NATURAL;
@@ -52,6 +56,9 @@ final class Snapshot
 	long walkDraws;
 	/** Players and NPCs drawn farthest from the camera first, so whoever is nearer is in front; total. */
 	long orderedDraws;
+	long depthDraws;
+	/** Drawn without depth although they overlapped someone, because no depth spacer could be made; expected 0. */
+	long depthNoSpacer;
 	long keptDips;
 	long probeBlackouts;
 	long droppedUndrawn;
@@ -118,6 +125,11 @@ final class Snapshot
 	boolean busyWalksOff;
 	String busyAnimations = "";
 	long driftFrames;
+	/** Frames someone walking off was kept off a wall: their offset ran out faster, they waited at it, they followed their way round it, or it was cut back at once. */
+	long wallHurries;
+	long wallHolds;
+	long wallFollows;
+	long wallShrinks;
 	long slideBusy;
 	long slideWalkingOff;
 	long slideOther;

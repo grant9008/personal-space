@@ -30,6 +30,10 @@ public interface PersonalSpaceConfig extends Config
 	String KEY_HOVER_ARROW = "hoverArrow";
 	String KEY_HIDE_BELOW = "hideBelowLevel";
 	String KEY_HIDE_CHAT = "hideTheirChat";
+	String KEY_CHAT_RANGE = "hideChatFurtherThan";
+	String KEY_OTHER_ALCHERS = "otherAlchers";
+	/** Public chat reaches you from about this far at most. */
+	int MAX_CHAT_RANGE = 15;
 	/** Nobody is below level 3, where everyone starts, so up to 3 the filter hides nobody: it's off. */
 	int MIN_HIDE_BELOW = 3;
 	int MAX_HIDE_BELOW = 126;
@@ -92,6 +96,27 @@ public interface PersonalSpaceConfig extends Config
 		private final String label;
 
 		Mode(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
+	/** How other players casting skilling spells (alching, superheating, charging orbs, enchanting) are shown. */
+	enum Alchers
+	{
+		NORMAL("Normal"),
+		STILL("Still"),
+		PARTY("Party");
+
+		private final String label;
+
+		Alchers(String label)
 		{
 			this.label = label;
 		}
@@ -288,11 +313,34 @@ public interface PersonalSpaceConfig extends Config
 		return true;
 	}
 
+	@Range(min = 0, max = MAX_CHAT_RANGE)
+	@ConfigItem(
+		keyName = KEY_CHAT_RANGE,
+		name = "Hide chat further than",
+		description = "Off (the default), or a distance in tiles: public chat from anyone further from you than this isn't shown over their head or in the chat box, such as a busy bank across the road while you're at an anvil. Friends, friends chat and clan members always show. Changing it applies to chat already in the box too. 0 is off.",
+		position = 14
+	)
+	default int hideChatFurtherThan()
+	{
+		return 0;
+	}
+
+	@ConfigItem(
+		keyName = KEY_OTHER_ALCHERS,
+		name = "Alchers behavior",
+		description = "How other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell look to you. Normal: as the game shows them. Still: just standing, with no spell effect, so a crowd of alchers stops flashing. Party: each cast becomes a dance, jig, spin, cheer or jump for joy, at random. Your own spells never change.",
+		position = 14
+	)
+	default Alchers otherAlchers()
+	{
+		return Alchers.NORMAL;
+	}
+
 	@ConfigItem(
 		keyName = KEY_SHOW_SIDEBAR,
 		name = "Show sidebar button",
 		description = "Off: no Personal Space button in the sidebar. Every setting is still here.",
-		position = 14
+		position = 15
 	)
 	default boolean showSidebarButton()
 	{
@@ -351,7 +399,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_DEPTH,
 		name = "Depth between players",
-		description = "On (the default): crowds are drawn so each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front of and behind people as the camera turns. Off: each person is drawn whole, one over another, as the game does it.",
+		description = "On (the default): crowds are drawn so each part of each body is hidden only where someone is really in front of it, so shields, capes and hats don't pop in front of and behind people as the camera turns. Each body's own gear is still drawn just as the game draws it. Only people overlapping someone are drawn this way; anyone else is drawn just as the game does. Off: each person is drawn whole, one over another, as the game does it. GPU plugin only: with 117 HD, people are always drawn as the game does it.",
 		position = 5
 	)
 	default boolean depthBetweenPlayers()

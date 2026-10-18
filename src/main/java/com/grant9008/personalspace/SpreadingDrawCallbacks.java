@@ -93,6 +93,23 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	long walkDraws;
 	/** Players and NPCs drawn farthest first, once the renderer asked for its opaque pass. */
 	long orderedDraws;
+	/** ...of which drawn with depth, overlapping someone on screen (Depth between players). */
+	long depthDraws;
+	/** ...and of those, drawn without it because no {@link DepthSpacer} could be made. Expected to stay 0. */
+	long depthNoSpacer;
+
+	/**
+	 * Someone stays drawn with depth until they've overlapped nobody for this long, in game cycles
+	 * (5 s), so whether they are doesn't flip from frame to frame while they stand at the edge of
+	 * someone's box.
+	 */
+	static final int DEPTH_HOLD_CYCLES = 250;
+	/** The game cycle each one last overlapped someone on screen, by {@link Kept#who}. */
+	private final int[] overlapFrame = new int[OffsetTable.CAPACITY + 65536];
+
+	{
+		Arrays.fill(overlapFrame, Integer.MIN_VALUE / 2);
+	}
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass. Expected to stay 0. */
 	long passMissedFrames;
 	/** Moving players drawn without walk frames because they were busy and busy walks were off. */
@@ -148,7 +165,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		this.probe = probe;
 		this.renderCallbacks = renderCallbacks;
 		this.delegate = delegate;
-		this.depthKnown = delegate.getClass().getSimpleName().equals("GpuPlugin") || delegate.getClass().getName().startsWith("rs117.");
+		this.spacersWork = delegate.getClass().getName().equals(GPU_PLUGIN);
 	}
 
 	DrawCallbacks getDelegate()
@@ -159,7 +176,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	// ---- the call players are drawn through --------------------------------------------
 
 	/** A player or NPC kept back to be drawn in depth order: where, facing which way, and how. */
-	private static final class Kept
+	static final class Kept
 	{
 		Projection projection;
 		Scene scene;
@@ -180,6 +197,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		double distance;
 		/** Who this is, to carry last frame's order over: a player's id, or past those, an NPC's index. */
 		int who;
+		/** Drawn with depth this frame: they overlap someone on screen, or did a moment ago. */
+		boolean depth;
 	}
 
 	/**
@@ -477,13 +496,29 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * The "Depth between players" setting; kept up to date by the plugin. The game draws its people
 	 * with no depth between them, each a whole layer over the one drawn before, so no order is right
 	 * from every side: a shield reaching into a neighbour popped in front and behind as the camera
-	 * turned, and someone's hat vanished behind the head in front. Drawn with depth (see
-	 * {@link DepthTestedObject}), each part is hidden only where someone really is in front of it.
+	 * turned, and someone's hat vanished behind the head in front. Drawn with depth (a
+	 * {@link DepthSpacer} drawn before them), each part is hidden only where someone really is in
+	 * front of it, and each body is still layered the way the game layers it.
 	 */
 	volatile boolean depthBetweenPlayers = true;
 	private final DepthTestedObject depthTested = new DepthTestedObject();
-	/** Renderers this is known to work with: RuneLite's GPU plugin, and 117 HD. */
-	private final boolean depthKnown;
+	/** RuneLite's GPU plugin, the renderer spacers are known to work in (read from its code). */
+	static final String GPU_PLUGIN = "net.runelite.client.plugins.gpu.GpuPlugin";
+	/**
+	 * Whether the renderer is the GPU plugin. 117 HD draws all its people in one batch with nothing
+	 * a draw in between can change, so a spacer does nothing there; anything else is unknown. There,
+	 * everyone is drawn just as the game does it.
+	 */
+	private final boolean spacersWork;
+	/**
+	 * The spacer, once made; how many frames making it has been tried in (the cache may not have
+	 * it yet), and the last of them.
+	 */
+	private Model spacer;
+	private int spacerTries;
+	private int spacerFrame = Integer.MIN_VALUE;
+	/** Frames spent trying to make a spacer before giving up on it for the session. */
+	static final int SPACER_TRIES = 500;
 
 	/**
 	 * Actors are kept back when they are drawn no farther from the camera than the farthest
@@ -1226,6 +1261,25 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			fresh[i] = !seen;
 			boxFor(k, i);
 		}
+		int depthCycle = client.getGameCycle();
+		// Depth only for people who overlap someone on screen: for anyone else it can't be seen, and
+		// each spacer is another draw. (Before 1.9.18 depth also changed how a body's own parts were
+		// layered, so this kept skill capes drawn right on everyone standing alone.)
+		for (int i = 0; i < keptCount; i++)
+		{
+			Kept k = kept[i];
+			boolean overlapping = false;
+			for (int j = 0; j < keptCount && !overlapping; j++)
+			{
+				overlapping = j != i && overlaps(boxes, i, j);
+			}
+			boolean known = k.who >= 0 && k.who < overlapFrame.length;
+			if (overlapping && known)
+			{
+				overlapFrame[k.who] = depthCycle;
+			}
+			k.depth = overlapping || known && depthCycle - overlapFrame[k.who] <= DEPTH_HOLD_CYCLES;
+		}
 		for (int i = 1; i < keptCount; i++)
 		{
 			int k = order[i];
@@ -1313,6 +1367,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				rankFrame[kept[i].who] = frame;
 			}
 		}
+		// With "Draw me in front", you and your crowd are drawn in one run, you last: nobody in it has
+		// depth against anyone else in it, so you are drawn over all of them, as that setting says.
+		// The first of them still starts the run with depth against everyone drawn before.
+		int runTo = drawMeInFront ? indexOf(kept, keptCount, you) : -1;
+		int runFrom = runTo >= 0 ? frontRunStart(kept, runTo) : Integer.MAX_VALUE;
 		for (int i = 0; i < keptCount; i++)
 		{
 			Kept k = kept[i];
@@ -1340,9 +1399,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				}
 				if (model != null)
 				{
-					GameObject object = k.lent ? depthTested.lend(k.gameObject, k.actor, k.x, k.z, k.plane, depthBetweenPlayers && depthKnown)
-						: depthBetweenPlayers && depthKnown ? depthTested.wrap(k.gameObject) : k.gameObject;
-					delegate.drawTemp(k.projection, k.scene, object, model, orientation, k.x, k.y, k.z);
+					handOver(k.projection, k.scene, k.gameObject, k.lent ? k.actor : null, k.plane, model, orientation, k.x, k.y, k.z,
+						k.depth && !(i > runFrom && i <= runTo));
 					orderedDraws++;
 				}
 				else
@@ -1363,6 +1421,106 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		lentProjection = null;
 		lentScene = null;
 		lentObject = null;
+	}
+
+	/** Where {@code who} is in {@code kept[0..n)}, or -1. */
+	static int indexOf(Kept[] kept, int n, Kept who)
+	{
+		for (int i = 0; who != null && i < n; i++)
+		{
+			if (kept[i] == who)
+			{
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * With "Draw me in front", you being {@code kept[you]}: the first of your crowd (anyone drawn
+	 * within {@link #NEAR_YOU} of you) drawn before you, or you if none is. From there to you,
+	 * everyone is drawn with no depth between them, so you are drawn over them all.
+	 */
+	static int frontRunStart(Kept[] kept, int you)
+	{
+		Kept y = kept[you];
+		for (int i = 0; i < you; i++)
+		{
+			if (Math.abs(kept[i].x - y.x) <= NEAR_YOU && Math.abs(kept[i].z - y.z) <= NEAR_YOU)
+			{
+				return i;
+			}
+		}
+		return you;
+	}
+
+	/**
+	 * Hand one kept person to the renderer: {@code lentFor} non-null when they are drawn with
+	 * another player's {@code gameObject} (see {@link #drawRefused}), on {@code plane}. With
+	 * {@code depth} (they overlap someone) and "Depth between players" on, in the GPU plugin, a
+	 * {@link DepthSpacer} goes first, so they are drawn hidden wherever someone drawn before them is
+	 * really nearer. The person themselves is always handed over just as the game hands them over:
+	 * drawn as anything else, their own faces weren't layered the way the game layers them, and a
+	 * Smithing cape lost its anvil, legs poked through skill capes and capes showed their lining.
+	 */
+	void handOver(Projection projection, Scene scene, GameObject gameObject, Renderable lentFor, int plane, Model model, int orientation, int x, int y, int z, boolean depth)
+	{
+		if (depth && depthBetweenPlayers && spacersWork)
+		{
+			Model spacer = spacer();
+			boolean drawn = false;
+			if (spacer != null)
+			{
+				try
+				{
+					GameObject standIn = lentFor != null ? depthTested.lendAsOther(gameObject, lentFor, x, z, plane) : depthTested.wrap(gameObject);
+					delegate.drawTemp(projection, scene, standIn, spacer, 0, x, y, z);
+					drawn = true;
+				}
+				catch (RuntimeException e)
+				{
+					// Never again this session; the person is still drawn, as the game does it.
+					this.spacer = null;
+					spacerTries = SPACER_TRIES;
+				}
+			}
+			if (drawn)
+			{
+				depthDraws++;
+			}
+			else
+			{
+				depthNoSpacer++;
+			}
+		}
+		GameObject object = lentFor != null ? depthTested.lend(gameObject, lentFor, x, z, plane) : gameObject;
+		delegate.drawTemp(projection, scene, object, model, orientation, x, y, z);
+	}
+
+	/**
+	 * The {@link DepthSpacer}, made the first time it's needed, or null if it can't be made (yet).
+	 * Client thread: the game's cache is read here.
+	 */
+	private Model spacer()
+	{
+		int frame = offsets.frame();
+		if (spacer == null && spacerTries < SPACER_TRIES && frame != spacerFrame)
+		{
+			spacerFrame = frame;
+			spacerTries++;
+			for (int i = 0; i < DepthSpacer.CANDIDATES.length && spacer == null; i++)
+			{
+				try
+				{
+					spacer = DepthSpacer.build(client.loadModelData(DepthSpacer.CANDIDATES[i]));
+				}
+				catch (RuntimeException e)
+				{
+					spacer = null;
+				}
+			}
+		}
+		return spacer;
 	}
 
 	/** Forget everyone kept back, drawing nobody: the frame they belonged to is over. */
@@ -1957,7 +2115,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	}
 
 	/** Whether the game has this player walking or running for real, rather than standing. */
-	private static boolean reallyMoving(Player player)
+	static boolean reallyMoving(Player player)
 	{
 		int pose = player.getPoseAnimation();
 		return pose != -1 && pose != player.getIdlePoseAnimation()

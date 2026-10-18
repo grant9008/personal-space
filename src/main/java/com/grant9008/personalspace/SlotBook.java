@@ -384,7 +384,9 @@ final class SlotBook
 						free = s;
 					}
 				}
-				if (mine != yours && tick - localSince >= LOCAL_SWAP_DELAY)
+				// Your spot is only yours while it exists: picked when the tile had more spots, it
+				// pointed past the end of a smaller one, and the planner failed reading it.
+				if (mine != yours && yours < capacity && tick - localSince >= LOCAL_SWAP_DELAY)
 				{
 					// Straight to your spot in one step. Whoever was there takes the best free spot if
 					// there is one, else yours, so neither of you is moved again next tick.

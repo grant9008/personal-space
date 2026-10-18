@@ -3688,4 +3688,839 @@ public class CrowdPlannerTest
 			}
 		}
 	}
+
+	private static final long AT_NORTH = StackRegistry.key(0, 50, 52);
+	private static final long AT_WEST = StackRegistry.key(0, 49, 51);
+	private static final long AT_EAST = StackRegistry.key(0, 51, 51);
+	private static final long AT_SOUTH = StackRegistry.key(0, 50, 50);
+	private static final int YOU = 999;
+
+	/**
+	 * A smithy like Varrock's, with the game's own collision rules: a walled room from (45, 45) to
+	 * (54, 52), an anvil at (50, 51) a tile out from the north wall, and crates at (53, 51) and
+	 * (53, 52). Open floor to the south and east.
+	 */
+	private static int[][][] smithyFlags()
+	{
+		int[][][] flags = new int[4][][];
+		flags[0] = new int[104][104];
+		for (int x = 0; x < 104; x++)
+		{
+			for (int y = 0; y < 104; y++)
+			{
+				if (x < 45 || x > 54 || y < 45 || y > 52)
+				{
+					flags[0][x][y] = CollisionTerrain.BLOCK_FULL;
+				}
+			}
+		}
+		flags[0][50][51] = CollisionTerrain.BLOCK_FULL;
+		flags[0][53][51] = CollisionTerrain.BLOCK_FULL;
+		flags[0][53][52] = CollisionTerrain.BLOCK_FULL;
+		return flags;
+	}
+
+	/** {@link #smithyFlags} as the plugin sees it. */
+	private static CrowdPlanner.Surroundings smithy()
+	{
+		CollisionTerrain terrain = new CollisionTerrain(smithyFlags());
+		return new CrowdPlanner.Surroundings()
+		{
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + 64;
+				int z = StackRegistry.sceneY(t) * 128 + 64;
+				return terrain.canStand(0, x, z, x + dx, z + dz);
+			}
+			public boolean facesObstacle(long t, double a) { return terrain.facesObstacle(0, StackRegistry.sceneX(t), StackRegistry.sceneY(t), a); }
+			public boolean isCounter(long t, double a) { return terrain.isCounter(0, StackRegistry.sceneX(t), StackRegistry.sceneY(t), a); }
+			public boolean facesFire(long t, double a) { return false; }
+			public List<int[]> firesNear(long t) { return new ArrayList<>(); }
+		};
+	}
+
+	private static int facingTheAnvil(long tile)
+	{
+		return OffsetTable.facing(50 - StackRegistry.sceneX(tile), 51 - StackRegistry.sceneY(tile));
+	}
+
+	/** Smithing at the anvil: this many on its north, west, east and south sides (ids from 1 up), and you on the east side. */
+	private static List<StackSpreader.Entry> smithing(int north, int west, int east, int south, boolean you)
+	{
+		List<StackSpreader.Entry> out = new ArrayList<>();
+		long[] sides = {AT_NORTH, AT_WEST, AT_EAST, AT_SOUTH};
+		int[] counts = {north, west, east, south};
+		int id = 1;
+		for (int k = 0; k < 4; k++)
+		{
+			for (int i = 0; i < counts[k]; i++)
+			{
+				out.add(new StackSpreader.Entry(id++, sides[k], false, facingTheAnvil(sides[k]), true));
+			}
+		}
+		if (you)
+		{
+			out.add(new StackSpreader.Entry(YOU, AT_EAST, true, facingTheAnvil(AT_EAST), true));
+		}
+		return out;
+	}
+
+	private static CrowdPlanner.Plan atTheAnvil(CrowdPlanner planner, List<StackSpreader.Entry> still, int tick)
+	{
+		return planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, tick, smithy());
+	}
+
+	/** How far from the middle of the anvil someone drawn at {@code at} (as {@link #drawnAt(CrowdPlanner.Plan, List)} gives it) is. */
+	private static double fromTheAnvil(double[] at)
+	{
+		return Math.hypot(at[0] - 50 * 128, at[1] - 51 * 128);
+	}
+
+	/**
+	 * Checks what everyone at the anvil should always be able to count on: nobody drawn inside anyone
+	 * else, nor near you, nor walking through the anvil, a crate or a wall to their spot, nor out on
+	 * their own across the room; everyone turned to face the anvil.
+	 */
+	private static void assertStandingRoundTheAnvil(String when, CrowdPlanner.Plan plan, List<StackSpreader.Entry> still)
+	{
+		Map<Integer, double[]> at = drawnAt(plan, still);
+		// Nobody waiting in the middle of a tile kept out of sight is drawn there (you always are).
+		Set<Integer> placed = spots(plan).keySet();
+		for (StackSpreader.Entry e : still)
+		{
+			if (!placed.contains(e.id) && !e.local && plan.middleOutOfSight.contains(e.tile))
+			{
+				at.remove(e.id);
+			}
+		}
+		CollisionTerrain terrain = new CollisionTerrain(smithyFlags());
+		Map<Integer, StackSpreader.Entry> who = new HashMap<>();
+		for (StackSpreader.Entry e : still)
+		{
+			who.put(e.id, e);
+		}
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			double[] a = at.get(p.id);
+			Assert.assertTrue(when + ": player " + p.id + " is drawn " + Math.round(fromTheAnvil(a)) + " from the anvil",
+				fromTheAnvil(a) <= CrowdPlanner.OBJECT_REACH + 1);
+			Assert.assertTrue(when + ": player " + p.id + " doesn't face the anvil", plan.curvedRows.contains(p.tile));
+			// Their walk there, straight from the middle of their tile, as it's drawn: every step of it
+			// somewhere a body could stand.
+			int fromX = StackRegistry.sceneX(p.tile) * 128 + 64;
+			int fromZ = StackRegistry.sceneY(p.tile) * 128 + 64;
+			for (int k = 0; k <= 64; k++)
+			{
+				int x = fromX + (int) Math.round(p.dx * k / 64.0);
+				int z = fromZ + (int) Math.round(p.dz * k / 64.0);
+				int tileX = Math.floorDiv(x, 128) * 128 + 64;
+				int tileZ = Math.floorDiv(z, 128) * 128 + 64;
+				Assert.assertTrue(when + ": player " + p.id + " walks through something to (" + p.dx + ", " + p.dz + ")",
+					terrain.canStand(0, tileX, tileZ, x, z));
+			}
+			for (Map.Entry<Integer, double[]> other : at.entrySet())
+			{
+				if (other.getKey() == p.id)
+				{
+					continue;
+				}
+				double d = Math.hypot(other.getValue()[0] - a[0], other.getValue()[1] - a[1]);
+				int least = other.getKey() == YOU || p.id == YOU ? CrowdPlanner.OBJECT_YOUR_GAP : CrowdPlanner.OBJECT_KEEP;
+				Assert.assertTrue(when + ": players " + p.id + " and " + other.getKey() + " are drawn " + Math.round(d) + " apart",
+					d >= least - 0.5);
+			}
+		}
+	}
+
+	@Test
+	public void aBusyAnvilIsStoodRoundOnEverySideWithRoomBeforeAnyoneStandsFarOut()
+	{
+		// Forty smithing at one anvil, most on its wall side and its west side: they piled up there,
+		// two rows deep and squeezed into a heap, while the open floor to the south and east stood
+		// empty and the overflow was drawn out on its own a tile or two away.
+		List<StackSpreader.Entry> still = smithing(15, 12, 2, 0, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheAnvil(planner, still, t);
+		}
+		assertStandingRoundTheAnvil("a busy anvil", plan, still);
+		Map<Integer, double[]> at = drawnAt(plan, still);
+		int east = 0;
+		int south = 0;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			double[] a = at.get(p.id);
+			east += a[0] > 50 * 128 + 64 ? 1 : 0;
+			south += a[1] < 51 * 128 - 64 ? 1 : 0;
+		}
+		Assert.assertTrue("only " + east + " stand on the open east side", east >= 8);
+		// (With people right beside you on the east side, one fewer spills round to the south.)
+		Assert.assertTrue("only " + south + " stand on the open south side", south >= 3);
+		Assert.assertEquals("everyone is given a spot", still.size(), plan.placements.size());
+		Assert.assertEquals(CrowdPlanner.ROUND_OBJECT, plan.tiles.get(AT_WEST).shape);
+	}
+
+	@Test
+	public void aFewAtAnAnvilAllStandRightAtItWhileThereIsRoom()
+	{
+		// Four on the wall side and four on the west side: with room at the anvil itself round its
+		// corner, a second row was started behind each side instead, nearly two tiles out.
+		List<StackSpreader.Entry> still = smithing(4, 4, 0, 0, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheAnvil(planner, still, t);
+		}
+		assertStandingRoundTheAnvil("a few at the anvil", plan, still);
+		Map<Integer, double[]> at = drawnAt(plan, still);
+		Assert.assertEquals(still.size(), plan.placements.size());
+		// Right up against it, but for a couple a step behind: each side's stretch at the anvil holds three.
+		int atIt = 0;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			double d = fromTheAnvil(at.get(p.id));
+			Assert.assertTrue("player " + p.id + " stands back from the anvil: " + (int) d,
+				d <= CrowdPlanner.OBJECT_NEAR_RING + CrowdPlanner.OBJECT_RING_STEP + 1.5);
+			atIt += Math.abs(d - CrowdPlanner.OBJECT_NEAR_RING) <= 1.5 ? 1 : 0;
+		}
+		Assert.assertTrue("only " + atIt + " of " + still.size() + " right at the anvil", atIt >= still.size() - 2);
+	}
+
+	@Test
+	public void peopleRoundABusyAnvilKeepTheirSpotsAsOthersComeAndGo()
+	{
+		// Smithers come and go all the time. Every time a side gained or lost someone, the whole of it
+		// was laid out afresh (a closer spacing, a row turned into a ring, a share of the anvil given
+		// up to the side next door) and everyone on it walked somewhere new.
+		java.util.Random rnd = new java.util.Random(5);
+		CrowdPlanner planner = new CrowdPlanner();
+		long[] sides = {AT_NORTH, AT_WEST, AT_EAST, AT_SOUTH};
+		int[] least = {8, 6, 1, 0};
+		int[] most = {16, 14, 4, 3};
+		Map<Long, List<Integer>> there = new HashMap<>();
+		int nextId = 1;
+		for (int k = 0; k < 4; k++)
+		{
+			List<Integer> ids = new ArrayList<>();
+			for (int i = 0; i < (least[k] + most[k]) / 2; i++)
+			{
+				ids.add(nextId++);
+			}
+			there.put(sides[k], ids);
+		}
+		Map<Integer, int[]> last = new HashMap<>();
+		Map<Integer, Long> lastTile = new HashMap<>();
+		int moves = 0;
+		int stays = 0;
+		for (int t = 1; t <= 300; t++)
+		{
+			for (int k = 0; k < 4; k++)
+			{
+				List<Integer> ids = there.get(sides[k]);
+				if (t > 10 && rnd.nextInt(100) < 8)
+				{
+					if (ids.size() > least[k] && (ids.size() >= most[k] || rnd.nextBoolean()))
+					{
+						ids.remove(rnd.nextInt(ids.size()));
+					}
+					else if (ids.size() < most[k])
+					{
+						ids.add(nextId++);
+					}
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (long side : sides)
+			{
+				for (int id : there.get(side))
+				{
+					still.add(new StackSpreader.Entry(id, side, false, facingTheAnvil(side), true));
+				}
+			}
+			still.add(new StackSpreader.Entry(YOU, AT_EAST, true, facingTheAnvil(AT_EAST), true));
+			CrowdPlanner.Plan plan = atTheAnvil(planner, still, t);
+			assertStandingRoundTheAnvil("tick " + t, plan, still);
+			Map<Integer, int[]> now = spots(plan);
+			Map<Integer, Long> nowTile = new HashMap<>();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				nowTile.put(p.id, p.tile);
+			}
+			for (Map.Entry<Integer, int[]> e : now.entrySet())
+			{
+				int[] was = last.get(e.getKey());
+				if (t > 10 && was != null && nowTile.get(e.getKey()).equals(lastTile.get(e.getKey())))
+				{
+					stays++;
+					moves += was[0] != e.getValue()[0] || was[1] != e.getValue()[1] ? 1 : 0;
+				}
+			}
+			last = now;
+			lastTile = nowTile;
+		}
+		Assert.assertTrue("people who stayed at the anvil moved " + moves + " times in " + stays, moves <= 3);
+	}
+
+	@Test
+	public void youStandAtTheAnvilOnYourSideWithRoomRoundYou()
+	{
+		// Packed in round the anvil you could lose yourself: you take the front place on your side,
+		// and nobody stands right beside you.
+		List<StackSpreader.Entry> still = smithing(12, 10, 4, 3, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheAnvil(planner, still, t);
+		}
+		assertStandingRoundTheAnvil("with you on the east side", plan, still);
+		int[] yours = spots(plan).get(YOU);
+		Assert.assertNotNull("you have a spot", yours);
+		// The anvil is west of you: you step up to it, off your tile's middle.
+		Assert.assertArrayEquals("you're at the front of your side of the anvil", new int[]{CrowdPlanner.OBJECT_NEAR_RING - 128, 0}, yours);
+		// ...and people work it right beside you: kept a wide berth, the places either side stood empty.
+		Map<Integer, double[]> at = drawnAt(plan, still);
+		double nearest = Double.MAX_VALUE;
+		for (Map.Entry<Integer, double[]> o : at.entrySet())
+		{
+			if (o.getKey() != YOU)
+			{
+				nearest = Math.min(nearest, Math.hypot(o.getValue()[0] - at.get(YOU)[0], o.getValue()[1] - at.get(YOU)[1]));
+			}
+		}
+		Assert.assertTrue("nobody right beside you: the nearest is " + (int) nearest + " away", nearest < 72);
+		// With "Move me" off you stay where you are, and the crowd keeps its distance all the same.
+		CrowdPlanner stayPut = new CrowdPlanner();
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = stayPut.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, false, t, smithy());
+		}
+		Assert.assertNull("you were moved", spots(plan).get(YOU));
+		assertStandingRoundTheAnvil("with you staying put", plan, still);
+	}
+
+	@Test
+	public void someoneLeftAloneBesideABusyAnvilKeepsTheirSpot()
+	{
+		// When the side of the anvil they're on is down to them alone, they kept their place rather
+		// than walking back to the middle of their tile, inside whoever had stepped round there.
+		List<StackSpreader.Entry> pair = smithing(10, 8, 0, 2, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> before = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			before = spots(atTheAnvil(planner, pair, t));
+		}
+		int last = pair.get(pair.size() - 1).id;
+		List<StackSpreader.Entry> alone = new ArrayList<>(pair);
+		alone.remove(pair.size() - 2);
+		for (int t = 6; t <= 20; t++)
+		{
+			CrowdPlanner.Plan plan = atTheAnvil(planner, alone, t);
+			assertStandingRoundTheAnvil("tick " + t, plan, alone);
+			Assert.assertArrayEquals("tick " + t + ": the one left on the south side moved", before.get(last), spots(plan).get(last));
+		}
+		// With nobody else at the anvil, there's no crowd: they're left to stand where they are.
+		List<StackSpreader.Entry> nobodyElse = new ArrayList<>();
+		nobodyElse.add(pair.get(pair.size() - 1));
+		CrowdPlanner.Plan plan = atTheAnvil(planner, nobodyElse, 21);
+		Assert.assertTrue(plan.placements.isEmpty());
+	}
+
+	@Test
+	public void whenEveryPlaceRoundTheAnvilIsTakenTheRestWaitOutOfSight()
+	{
+		// Better out of sight than drawn inside each other, or out across the room.
+		List<StackSpreader.Entry> still = smithing(16, 16, 16, 16, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheAnvil(planner, still, t);
+		}
+		assertStandingRoundTheAnvil("a packed anvil", plan, still);
+		Assert.assertTrue("only " + plan.placements.size() + " of 64 given a spot", plan.placements.size() >= 30);
+		Assert.assertTrue(plan.placements.size() < still.size());
+		Set<Long> waiting = new HashSet<>();
+		for (StackSpreader.Placement p : plan.unplaced)
+		{
+			waiting.add(p.tile);
+		}
+		for (long tile : waiting)
+		{
+			Assert.assertTrue("those waiting are drawn in the middle of their tile", plan.middleOutOfSight.contains(tile));
+		}
+	}
+
+	@Test
+	public void onlySmartStandsACrowdAllRoundTheAnvil()
+	{
+		List<StackSpreader.Entry> still = smithing(6, 5, 0, 0, false);
+		for (PersonalSpaceConfig.Arrangement arrangement : PersonalSpaceConfig.Arrangement.values())
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			planner.arrangement = arrangement;
+			boolean smart = arrangement != PersonalSpaceConfig.Arrangement.CIRCLE;
+			CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK,
+				smart, false, 1, smithy());
+			Assert.assertEquals(arrangement.toString(), arrangement == PersonalSpaceConfig.Arrangement.AUTO,
+				CrowdPlanner.ROUND_OBJECT.equals(plan.tiles.get(AT_WEST).shape));
+		}
+	}
+
+	@Test
+	public void peopleFacingAWallAreNotStoodRoundIt()
+	{
+		// The wall is something nobody can stand on too, but it runs on: there's no standing round it.
+		long byTheWall = StackRegistry.key(0, 47, 52);
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (int id = 1; id <= 4; id++)
+		{
+			still.add(new StackSpreader.Entry(id, byTheWall, false, NORTH, true));
+		}
+		CrowdPlanner.Plan plan = atTheAnvil(new CrowdPlanner(), still, 1);
+		Assert.assertNotEquals(CrowdPlanner.ROUND_OBJECT, plan.tiles.get(byTheWall).shape);
+	}
+
+	@Test
+	public void youArrivingAtABusyAnvilSendsNobodyWalkingThroughIt()
+	{
+		// Whoever stood where you arrived made room by walking to the nearest free place, and with
+		// the near side full that was across the anvil: they walked straight through it.
+		List<StackSpreader.Entry> still = smithing(12, 10, 0, 0, false);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> before = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			before = spots(atTheAnvil(planner, still, t));
+		}
+		still.add(new StackSpreader.Entry(YOU, AT_EAST, true, facingTheAnvil(AT_EAST), true));
+		CollisionTerrain terrain = new CollisionTerrain(smithyFlags());
+		for (int t = 6; t <= 12; t++)
+		{
+			CrowdPlanner.Plan plan = atTheAnvil(planner, still, t);
+			assertStandingRoundTheAnvil("tick " + t, plan, still);
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				int[] was = before.get(p.id);
+				if (was == null || was[0] == p.dx && was[1] == p.dz)
+				{
+					continue;
+				}
+				int fromX = StackRegistry.sceneX(p.tile) * 128 + 64;
+				int fromZ = StackRegistry.sceneY(p.tile) * 128 + 64;
+				for (int k = 0; k <= 64; k++)
+				{
+					int x = fromX + was[0] + (int) Math.round((p.dx - was[0]) * k / 64.0);
+					int z = fromZ + was[1] + (int) Math.round((p.dz - was[1]) * k / 64.0);
+					Assert.assertTrue("tick " + t + ": player " + p.id + " walks through something from (" + was[0] + ", " + was[1] + ") to ("
+						+ p.dx + ", " + p.dz + ")", terrain.canStand(0, Math.floorDiv(x, 128) * 128 + 64, Math.floorDiv(z, 128) * 128 + 64, x, z));
+				}
+			}
+			before = spots(plan);
+		}
+	}
+
+	/**
+	 * Checks that nobody round the object at ({@code objectX}, {@code objectY}) is drawn more than a
+	 * tile from their own tile, the hover arrow reaching back across the crowd, while a spot within a
+	 * tile of it, no more than a ring further out than theirs, stands free: clear of everyone drawn,
+	 * and of you, and reached by a straight walk from the middle of their tile.
+	 */
+	private static void assertNobodyDrawnRoundWhileTheirSideHasRoom(String when, CrowdPlanner.Plan plan, List<StackSpreader.Entry> still,
+		int objectX, int objectY, CollisionTerrain terrain)
+	{
+		Map<Integer, double[]> at = drawnAt(plan, still);
+		Set<Integer> placed = spots(plan).keySet();
+		for (StackSpreader.Entry e : still)
+		{
+			if (!placed.contains(e.id) && !e.local && plan.middleOutOfSight.contains(e.tile))
+			{
+				at.remove(e.id);
+			}
+		}
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (p.id == YOU || Math.hypot(p.dx, p.dz) <= 128)
+			{
+				continue;
+			}
+			double[] a = at.get(p.id);
+			long ring = Math.round((Math.hypot(a[0] - objectX * 128, a[1] - objectY * 128) - CrowdPlanner.OBJECT_NEAR_RING) / (double) CrowdPlanner.OBJECT_RING_STEP);
+			double tileX = StackRegistry.sceneX(p.tile) * 128;
+			double tileZ = StackRegistry.sceneY(p.tile) * 128;
+			for (int[] s : CrowdPlanner.OBJECT_SPOTS)
+			{
+				double x = objectX * 128 + s[0];
+				double z = objectY * 128 + s[1];
+				if (s[2] > ring + 1 || Math.hypot(x - tileX, z - tileZ) > 128 || !walksClear(terrain, p.tile, x - tileX, z - tileZ))
+				{
+					continue;
+				}
+				boolean free = true;
+				for (Map.Entry<Integer, double[]> other : at.entrySet())
+				{
+					int gap = other.getKey() == YOU ? CrowdPlanner.OBJECT_YOUR_GAP : CrowdPlanner.OBJECT_GAP;
+					free &= other.getKey() == p.id || Math.hypot(other.getValue()[0] - x, other.getValue()[1] - z) >= gap;
+				}
+				Assert.assertFalse(when + ": player " + p.id + " is drawn " + Math.round(Math.hypot(p.dx, p.dz)) + " from their tile while ("
+					+ s[0] + ", " + s[1] + ") from the anvil, " + Math.round(Math.hypot(x - tileX, z - tileZ)) + " from it, is free", free);
+			}
+		}
+	}
+
+	/** Whether someone on {@code tile} can walk straight from its middle to (dx, dz) from it, every step somewhere a body could stand. */
+	private static boolean walksClear(CollisionTerrain terrain, long tile, double dx, double dz)
+	{
+		int fromX = StackRegistry.sceneX(tile) * 128 + 64;
+		int fromZ = StackRegistry.sceneY(tile) * 128 + 64;
+		for (int k = 0; k <= 64; k++)
+		{
+			int x = fromX + (int) Math.round(dx * k / 64.0);
+			int z = fromZ + (int) Math.round(dz * k / 64.0);
+			if (!terrain.canStand(0, Math.floorDiv(x, 128) * 128 + 64, Math.floorDiv(z, 128) * 128 + 64, x, z))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@Test
+	public void aSmithByTheCratesIsNotDrawnRoundTheAnvilWhileTheirSideHasRoom()
+	{
+		// A smith on the corner tile by the crates was drawn right round the anvil, nearly two tiles
+		// from their own tile, the hover arrow reaching back across the crowd: the nearest ring with
+		// room came first wherever round the anvil it was, though there was room a ring further out
+		// on their own side.
+		List<StackSpreader.Entry> still = smithing(8, 6, 2, 2, false);
+		long byTheCrates = StackRegistry.key(0, 51, 52);
+		for (int id = 19; id <= 21; id++)
+		{
+			still.add(new StackSpreader.Entry(id, byTheCrates, false, facingTheAnvil(byTheCrates), true));
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = atTheAnvil(planner, still, t);
+		}
+		assertStandingRoundTheAnvil("smiths by the crates", plan, still);
+		Assert.assertEquals("everyone is given a spot", still.size(), plan.placements.size());
+		assertNobodyDrawnRoundWhileTheirSideHasRoom("smiths by the crates", plan, still, 50, 51, new CollisionTerrain(smithyFlags()));
+	}
+
+	@Test
+	public void aBusySideOfAnAnvilStandsFurtherOutOnItsOwnSideBeforeGoingRoundIt()
+	{
+		// Twelve on one side of an anvil in the open, two on each side of them: once their front was
+		// full, the last of them were sent round to the gaps left nearest the anvil on the sides next
+		// to them, a tile and a half from their own tile, while there was room behind their own side.
+		CrowdPlanner.Surroundings anvil = openGroundWith(new int[]{50, 50});
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		busyAt(still, id, 50, 51, 12, 50, 50);
+		busyAt(still, id, 49, 50, 2, 50, 50);
+		busyAt(still, id, 51, 50, 2, 50, 50);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, t, anvil);
+		}
+		Assert.assertEquals("everyone is given a spot", still.size(), plan.placements.size());
+		int[][][] flags = new int[4][][];
+		flags[0] = new int[104][104];
+		flags[0][50][50] = CollisionTerrain.BLOCK_FULL;
+		assertNobodyDrawnRoundWhileTheirSideHasRoom("a busy side", plan, still, 50, 50, new CollisionTerrain(flags));
+	}
+
+	@Test
+	public void roomOpeningOnTheirSideWalksNobodyRoundTheAnvilBack()
+	{
+		// Whoever stands round the anvil keeps their place while it stays clear, however far round
+		// it is: walking them back each time someone on their side left would set the crowd
+		// sliding. The room goes to whoever comes next.
+		CrowdPlanner.Surroundings anvil = openGroundWith(new int[]{50, 50});
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		busyAt(still, id, 50, 51, 12, 50, 50);
+		busyAt(still, id, 49, 50, 2, 50, 50);
+		busyAt(still, id, 51, 50, 2, 50, 50);
+		long busy = StackRegistry.key(0, 50, 51);
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, t, anvil);
+		}
+		Map<Integer, int[]> before = spots(plan);
+		int front = -1;
+		double farthest = 0;
+		for (StackSpreader.Placement p : plan.placements)
+		{
+			if (p.tile != busy)
+			{
+				continue;
+			}
+			if (front < 0 || Math.hypot(p.dx, p.dz) < Math.hypot(before.get(front)[0], before.get(front)[1]))
+			{
+				front = p.id;
+			}
+			farthest = Math.max(farthest, Math.hypot(p.dx, p.dz));
+		}
+		Assert.assertTrue("someone on the busy side stands round the anvil, " + Math.round(farthest) + " from their tile", farthest > 128);
+		// The one at the front of the busy side leaves.
+		int gone = front;
+		still.removeIf(e -> e.id == gone);
+		for (int t = 6; t <= 15; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, t, anvil);
+			Map<Integer, int[]> now = spots(plan);
+			Assert.assertEquals("tick " + t + ": everyone left keeps a spot", still.size(), now.size());
+			for (Map.Entry<Integer, int[]> e : now.entrySet())
+			{
+				Assert.assertArrayEquals("tick " + t + ": player " + e.getKey() + " moved", before.get(e.getKey()), e.getValue());
+			}
+		}
+		// Someone new on the busy side takes the place at the front, and still nobody else moves.
+		still.add(new StackSpreader.Entry(100, busy, false, OffsetTable.facing(0, -1), true));
+		for (int t = 16; t <= 20; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, t, anvil);
+			for (Map.Entry<Integer, int[]> e : spots(plan).entrySet())
+			{
+				if (e.getKey() != 100)
+				{
+					Assert.assertArrayEquals("tick " + t + ": player " + e.getKey() + " moved", before.get(e.getKey()), e.getValue());
+				}
+			}
+		}
+		Assert.assertArrayEquals("the newcomer takes the place at the front", before.get(gone), spots(plan).get(100));
+	}
+
+	/** Open ground with these tiles blocked, as the plugin sees it. */
+	private static CrowdPlanner.Surroundings openGroundWith(int[]... blocked)
+	{
+		int[][][] flags = new int[4][][];
+		flags[0] = new int[104][104];
+		for (int[] b : blocked)
+		{
+			flags[0][b[0]][b[1]] = CollisionTerrain.BLOCK_FULL;
+		}
+		CollisionTerrain terrain = new CollisionTerrain(flags);
+		return new CrowdPlanner.Surroundings()
+		{
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + 64;
+				int z = StackRegistry.sceneY(t) * 128 + 64;
+				return terrain.canStand(0, x, z, x + dx, z + dz);
+			}
+			public boolean facesObstacle(long t, double a) { return terrain.facesObstacle(0, StackRegistry.sceneX(t), StackRegistry.sceneY(t), a); }
+			public boolean isCounter(long t, double a) { return terrain.isCounter(0, StackRegistry.sceneX(t), StackRegistry.sceneY(t), a); }
+			public boolean facesFire(long t, double a) { return false; }
+			public List<int[]> firesNear(long t) { return new ArrayList<>(); }
+		};
+	}
+
+	/** This many on tile (x, y), busy at the middle of tile (ox, oy) next to it, ids from {@code id[0]} up. */
+	private static void busyAt(List<StackSpreader.Entry> out, int[] id, int x, int y, int count, int ox, int oy)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			out.add(new StackSpreader.Entry(id[0]++, StackRegistry.key(0, x, y), false, OffsetTable.facing(ox - x, oy - y), true));
+		}
+	}
+
+	@Test
+	public void aCrowdRoundAFurnaceKeepsItsDistanceFromYou()
+	{
+		// A furnace covers four tiles, and the people facing each of them are a crowd of their own.
+		// The crowds laid out before yours didn't know where you'd be, and stood right up against you.
+		CrowdPlanner.Surroundings furnace = openGroundWith(new int[]{50, 50}, new int[]{51, 50}, new int[]{50, 51}, new int[]{51, 51});
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		int[] id = {1};
+		busyAt(still, id, 50, 52, 6, 50, 51);
+		busyAt(still, id, 51, 52, 6, 51, 51);
+		busyAt(still, id, 52, 51, 6, 51, 51);
+		busyAt(still, id, 50, 49, 6, 50, 50);
+		busyAt(still, id, 49, 50, 6, 50, 50);
+		long yours = StackRegistry.key(0, 49, 51);
+		still.add(new StackSpreader.Entry(YOU, yours, true, OffsetTable.facing(1, 0), true));
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 5; t++)
+		{
+			plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, t, furnace);
+		}
+		Map<Integer, double[]> at = drawnAt(plan, still);
+		double[] you = at.get(YOU);
+		for (Map.Entry<Integer, double[]> e : at.entrySet())
+		{
+			double d = Math.hypot(e.getValue()[0] - you[0], e.getValue()[1] - you[1]);
+			Assert.assertTrue("player " + e.getKey() + " is drawn " + Math.round(d) + " from you",
+				e.getKey() == YOU || d >= CrowdPlanner.OBJECT_YOUR_GAP - 0.5);
+		}
+	}
+
+	@Test
+	public void peopleAtTwoAnvilsSideBySideKeepTheirSpotsAsOthersComeAndGo()
+	{
+		// Two anvils side by side, as in Varrock's west smithy. Someone new at one of them took the
+		// place of someone standing there from the other, who then walked somewhere else.
+		CrowdPlanner.Surroundings twin = openGroundWith(new int[]{50, 50}, new int[]{51, 50});
+		java.util.Random rnd = new java.util.Random(5);
+		int[][] sides = {{50, 51, 50, 50}, {51, 51, 51, 50}, {50, 49, 50, 50}, {51, 49, 51, 50}, {49, 50, 50, 50}, {52, 50, 51, 50}};
+		int[] least = {5, 5, 3, 3, 4, 4};
+		int[] most = {12, 12, 7, 7, 9, 9};
+		Map<Integer, List<Integer>> there = new HashMap<>();
+		int nextId = 1;
+		for (int k = 0; k < sides.length; k++)
+		{
+			List<Integer> ids = new ArrayList<>();
+			for (int i = 0; i < (least[k] + most[k]) / 2; i++)
+			{
+				ids.add(nextId++);
+			}
+			there.put(k, ids);
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> last = new HashMap<>();
+		Map<Integer, Long> lastTile = new HashMap<>();
+		int moves = 0;
+		int stays = 0;
+		for (int t = 1; t <= 300; t++)
+		{
+			for (int k = 0; k < sides.length; k++)
+			{
+				List<Integer> ids = there.get(k);
+				if (t > 10 && rnd.nextInt(100) < 8)
+				{
+					if (ids.size() > least[k] && (ids.size() >= most[k] || rnd.nextBoolean()))
+					{
+						ids.remove(rnd.nextInt(ids.size()));
+					}
+					else if (ids.size() < most[k])
+					{
+						ids.add(nextId++);
+					}
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int k = 0; k < sides.length; k++)
+			{
+				for (int i : there.get(k))
+				{
+					still.add(new StackSpreader.Entry(i, StackRegistry.key(0, sides[k][0], sides[k][1]), false,
+						OffsetTable.facing(sides[k][2] - sides[k][0], sides[k][3] - sides[k][1]), true));
+				}
+			}
+			still.add(new StackSpreader.Entry(YOU, StackRegistry.key(0, 52, 50), true, OffsetTable.facing(-1, 0), true));
+			CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, true, t, twin);
+			Map<Integer, int[]> now = spots(plan);
+			Map<Integer, Long> nowTile = new HashMap<>();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				nowTile.put(p.id, p.tile);
+			}
+			for (Map.Entry<Integer, int[]> e : now.entrySet())
+			{
+				int[] was = last.get(e.getKey());
+				if (t > 10 && was != null && nowTile.get(e.getKey()).equals(lastTile.get(e.getKey())))
+				{
+					stays++;
+					moves += was[0] != e.getValue()[0] || was[1] != e.getValue()[1] ? 1 : 0;
+				}
+			}
+			last = now;
+			lastTile = nowTile;
+		}
+		Assert.assertTrue("people who stayed at the anvils moved " + moves + " times in " + stays, moves <= 2);
+	}
+
+	@Test
+	public void nobodyAtABusyAnvilIsEverDrawnWalkingThroughItAsPeopleAndYouComeAndGo()
+	{
+		// Every walk as the plugin draws it, frame by frame, from wherever each person is at the time:
+		// someone with nowhere near to go who walked back towards their tile, then turned halfway
+		// for a spot across the anvil, cut its corner.
+		java.util.Random rnd = new java.util.Random(5);
+		long[] sides = {AT_NORTH, AT_WEST, AT_EAST, AT_SOUTH};
+		int[] roster = {24, 18, 2, 2};
+		List<int[]> people = new ArrayList<>();
+		int nextId = 1;
+		for (int k = 0; k < sides.length; k++)
+		{
+			for (int i = 0; i < roster[k]; i++)
+			{
+				// {id, side, back at (0 while here)}
+				people.add(new int[]{nextId++, k, rnd.nextInt(4) == 0 ? 1 + rnd.nextInt(60) : 0});
+			}
+		}
+		CollisionTerrain terrain = new CollisionTerrain(smithyFlags());
+		CrowdPlanner planner = new CrowdPlanner();
+		OffsetTable offsets = new OffsetTable();
+		for (int t = 1; t <= 400; t++)
+		{
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (int[] p : people)
+			{
+				if (p[2] == 0 && rnd.nextInt(1000) < 12)
+				{
+					p[2] = t + 10 + rnd.nextInt(50);
+				}
+				else if (p[2] != 0 && t >= p[2])
+				{
+					p[2] = 0;
+				}
+				if (p[2] == 0)
+				{
+					still.add(new StackSpreader.Entry(p[0], sides[p[1]], false, facingTheAnvil(sides[p[1]]), true));
+				}
+			}
+			if (t % 50 < 35)
+			{
+				still.add(new StackSpreader.Entry(YOU, AT_EAST, true, facingTheAnvil(AT_EAST), true));
+			}
+			CrowdPlanner.Plan plan = atTheAnvil(planner, still, t);
+			Map<Integer, Long> tileOf = new HashMap<>();
+			for (StackSpreader.Entry e : still)
+			{
+				tileOf.put(e.id, e.tile);
+			}
+			offsets.clearTargets();
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				offsets.setTarget(p.id, p.dx, p.dz);
+			}
+			for (int frame = 0; frame < 30; frame++)
+			{
+				offsets.advance(0.02f);
+				for (Map.Entry<Integer, Long> e : tileOf.entrySet())
+				{
+					int id = e.getKey();
+					if (!offsets.isOffset(id))
+					{
+						continue;
+					}
+					int x = StackRegistry.sceneX(e.getValue()) * 128 + 64 + offsets.dx(id);
+					int z = StackRegistry.sceneY(e.getValue()) * 128 + 64 + offsets.dz(id);
+					Assert.assertTrue("tick " + t + ": player " + id + " is drawn at (" + offsets.dx(id) + ", " + offsets.dz(id) + ") from their tile, in something",
+						terrain.canStand(0, Math.floorDiv(x, 128) * 128 + 64, Math.floorDiv(z, 128) * 128 + 64, x, z));
+				}
+			}
+			// Anyone who walked off for real starts from the middle of wherever they come back to.
+			for (int[] p : people)
+			{
+				if (p[2] != 0)
+				{
+					offsets.setTarget(p[0], 0, 0);
+				}
+			}
+		}
+	}
 }

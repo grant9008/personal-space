@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v197.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1919.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -89,6 +89,8 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | --- | --- |
 | On/off switch | Spread out crowds, or show the game as normal. The line under it says what's happening right now. |
 | Players per tile | How many on one tile get their own spot: 2 to 16, and 5 is the sweet spot. Higher fits more people, packed tighter. |
+| Hide chat further than | Off, or a distance in tiles: public chat from anyone further away isn't shown over their head or in the chat box, so a busy bank across the road stays quiet while you smith. Friends, friends chat and clan always show. |
+| Alchers behavior | **Normal**, **Still** (other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell just stand, with no spell effect) or **Party** (each cast becomes a dance, jig, spin, cheer or jump for joy, at random). Only how they look to you; your own spells never change. |
 | Hide players below | Off, or a combat level: anyone below it is hidden, like Entity Hider. **Hide their chat too** drops their chat as well. Friends, friends chat and clan always stay. |
 | Spacing | Close, Normal or Wide (the default), or drag the slider. **Use recommended** puts the crowd settings back to the defaults. |
 | Arrangement | **Smart** lines people up at counters, anvils and fires and makes a ring in the open. **Circle**, **Line** and **Arc** use that shape everywhere. |
@@ -98,7 +100,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Hover shows who / Arrow to their tile | Hover someone drawn away from their tile to see their name and level, and an arrow to where they really stand. |
 | Click past moved players | Using an item or spell on what you see (a fire, a booth), people drawn away from their tile or hidden in a crowd don't take the left-click. Right-click still lists them. |
 | Draw me in front | Always draw yourself over the people in your crowd. |
-| Depth between players | On: each part of each body is hidden only where someone is really in front of it, so nothing pops as the camera turns. Off: each person is drawn whole, as the game does, which some prefer for photos. |
+| Depth between players | On: where people overlap, each part of each body is hidden only where someone is really in front of it, so nothing pops as the camera turns. Anyone not overlapping someone is drawn just as the game does. Off: each person is drawn whole, as the game does, which some prefer for photos. |
 | Walk while busy | Someone busy with something (alching, tending a fire) is shown taking the steps when they're moved to a spot, instead of gliding there. |
 | Move my character too | You take a spot as well, at the front at a counter or fishing spot. |
 | Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |

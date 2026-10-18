@@ -28,9 +28,12 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.BeforeRender;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GraphicChanged;
 import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.events.OverheadTextChanged;
 import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.VarbitID;
@@ -65,7 +68,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.7";
+	static final String VERSION = "1.9.19";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -109,6 +112,7 @@ public class PersonalSpacePlugin extends Plugin
 	private LevelFilter levelFilter;
 
 	private ChatHider chatHider;
+	private AlchStyler alchStyler;
 
 	private NamesOverlay namesOverlay;
 
@@ -289,6 +293,7 @@ public class PersonalSpacePlugin extends Plugin
 		levelFilter = new LevelFilter(client);
 		renderCallbackManager.register(levelFilter);
 		chatHider = new ChatHider(client, levelFilter);
+		alchStyler = new AlchStyler(client);
 		namesOverlay = new NamesOverlay(client, config, configManager, offsets, partyService, chatIconManager, levelFilter);
 		overlayManager.add(namesOverlay);
 		hoverOverlay = new HoverOverlay(client, config, offsets, stacks, tooltipManager, levelFilter);
@@ -334,6 +339,7 @@ public class PersonalSpacePlugin extends Plugin
 			levelFilter = null;
 		}
 		chatHider = null;
+		alchStyler = null;
 		clientThread.invoke(() ->
 		{
 			if (client.getGameState() == GameState.LOGGED_IN)
@@ -364,14 +370,40 @@ public class PersonalSpacePlugin extends Plugin
 		});
 	}
 
-	/** As each chat line is built: drop it if it's from someone the level filter hides. */
+	/** As each chat line is built: drop it if it's from someone the level filter hides, or said too far away. */
 	@Subscribe
 	public void onScriptCallbackEvent(ScriptCallbackEvent event)
 	{
 		ChatHider hider = chatHider;
-		if (hider != null && "chatFilterCheck".equals(event.getEventName()) && config.hideTheirChat())
+		int range = config.hideChatFurtherThan();
+		if (hider != null && "chatFilterCheck".equals(event.getEventName()) && (config.hideTheirChat() || range > 0))
 		{
-			hider.check();
+			hider.check(config.hideTheirChat(), range);
+		}
+	}
+
+	/** As each chat line arrives: note how far away its speaker is (Hide chat further than). */
+	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		ChatHider hider = chatHider;
+		if (hider != null && event.getMessageNode() != null)
+		{
+			hider.heard(event.getType(), event.getMessageNode().getId(), event.getName());
+		}
+	}
+
+	/** Someone further away than "Hide chat further than" says nothing over their head either. */
+	@Subscribe
+	public void onOverheadTextChanged(OverheadTextChanged event)
+	{
+		ChatHider hider = chatHider;
+		int range = config.hideChatFurtherThan();
+		if (hider != null && range > 0 && event.getActor() instanceof Player
+			&& hider.overheadTooFar((Player) event.getActor(), range))
+		{
+			// As RuneLite's Chat Filter does: a blank, not nothing.
+			event.getActor().setOverheadText(" ");
 		}
 	}
 
@@ -382,7 +414,8 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			return;
 		}
-		if (PersonalSpaceConfig.KEY_HIDE_CHAT.equals(event.getKey()) || PersonalSpaceConfig.KEY_HIDE_BELOW.equals(event.getKey()))
+		if (PersonalSpaceConfig.KEY_HIDE_CHAT.equals(event.getKey()) || PersonalSpaceConfig.KEY_HIDE_BELOW.equals(event.getKey())
+			|| PersonalSpaceConfig.KEY_CHAT_RANGE.equals(event.getKey()))
 		{
 			// Rebuild the chat box, so lines appear or go as the setting changes. The new level
 			// goes in first (the tick would only set it later), and who was remembered as hidden
@@ -441,6 +474,14 @@ public class PersonalSpacePlugin extends Plugin
 	@Subscribe
 	public void onBeforeRender(BeforeRender event)
 	{
+		AlchStyler styler = alchStyler;
+		LevelFilter filter = levelFilter;
+		if (styler != null)
+		{
+			// Before the scene is drawn: an alch cast never shows for a frame. Only while the
+			// effect is on, and not in PvP areas, like the level filter.
+			styler.apply(config.otherAlchers(), filter != null && filter.enabled);
+		}
 		ensureInstalled();
 		if (wrapper != null)
 		{
@@ -453,10 +494,58 @@ public class PersonalSpacePlugin extends Plugin
 		float dt = lastFrameNanos == 0 ? 0f : (now - lastFrameNanos) / 1_000_000_000f;
 		lastFrameNanos = now;
 		offsets.advance(Math.min(dt, 0.25f));
+		keepOffWalls(Math.min(dt, 0.25f));
 
 		if (lastPanelNanos == 0 || now - lastPanelNanos >= PANEL_REFRESH_NANOS)
 		{
 			pushSnapshot(now);
+		}
+	}
+
+	/**
+	 * Client thread, once a frame, after the offsets have moved: nobody whose offset is running out
+	 * is drawn through a wall (see {@link OffsetTable#keepClear}). Only players drawn away from
+	 * where they are get looked at, and the walls are only read when someone is.
+	 */
+	private void keepOffWalls(float dt)
+	{
+		WorldView top = offsets.anyActive() ? client.getTopLevelWorldView() : null;
+		if (top == null)
+		{
+			return;
+		}
+		keepOffWalls(top, dt);
+		for (WorldView boat : top.worldViews())
+		{
+			if (boat != null)
+			{
+				keepOffWalls(boat, dt);
+			}
+		}
+	}
+
+	private void keepOffWalls(WorldView wv, float dt)
+	{
+		CollisionTerrain terrain = null;
+		for (Player p : wv.players())
+		{
+			int id = p == null ? -1 : p.getId();
+			if (!offsets.isOffset(id))
+			{
+				continue;
+			}
+			LocalPoint lp = p.getLocalLocation();
+			WorldPoint wp = p.getWorldLocation();
+			if (lp == null || wp == null)
+			{
+				continue;
+			}
+			if (terrain == null)
+			{
+				terrain = terrain(wv);
+			}
+			boolean runningOut = offsets.targetIsMiddle(id) || !StillnessTracker.isCentred(lp.getX(), lp.getY());
+			offsets.keepClear(id, lp.getX(), lp.getY(), SpreadingDrawCallbacks.reallyMoving(p), dt, runningOut, terrain.walls(wp.getPlane()));
 		}
 	}
 
@@ -525,12 +614,28 @@ public class PersonalSpacePlugin extends Plugin
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
 	{
+		AlchStyler styler = alchStyler;
+		if (styler != null)
+		{
+			styler.noticed(event.getActor());
+		}
 		SpreadingDrawCallbacks w = wrapper;
 		if (w != null && w.fromBusySwap(event.getActor()))
 		{
 			busyWalksOff = true;
 			w.busyWalks = false;
 			log.warn("Animation change reported while showing a player walking; busy players glide again, and crowds may, until restart");
+		}
+	}
+
+	/** An alch's spell effect is taken off before the next frame too (Alchers behavior). */
+	@Subscribe
+	public void onGraphicChanged(GraphicChanged event)
+	{
+		AlchStyler styler = alchStyler;
+		if (styler != null)
+		{
+			styler.noticed(event.getActor());
 		}
 	}
 
@@ -1118,6 +1223,10 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			what = "a ring round the fire";
 		}
+		else if (shape.startsWith(CrowdPlanner.ROUND_OBJECT))
+		{
+			what = "a crowd all round what you're facing";
+		}
 		else if (shape.startsWith("curved row"))
 		{
 			what = "a curve round what you're facing";
@@ -1261,6 +1370,9 @@ public class PersonalSpacePlugin extends Plugin
 		s.hoverArrow = config.hoverArrow();
 		s.hideBelow = config.hideBelowLevel();
 		s.hideChat = config.hideTheirChat();
+		s.chatRange = config.hideChatFurtherThan();
+		s.alchers = config.otherAlchers();
+		s.alchersRestyled = alchStyler == null ? 0 : alchStyler.restyled;
 		s.smallGroupsClose = config.smallGroupsClose();
 		s.pauseInCombat = config.pauseInCombat();
 		s.pose = config.pose();
@@ -1287,6 +1399,10 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		s.resets = resets;
 		s.driftFrames = offsets.driftFrames;
+		s.wallHurries = offsets.wallHurries;
+		s.wallHolds = offsets.wallHolds;
+		s.wallFollows = offsets.wallFollows;
+		s.wallShrinks = offsets.wallShrinks;
 		s.insideYouHidden = planner.insideYouHidden;
 		s.spotLosses = spotLosses;
 		s.longestHidden = hideLog.longest(offsets.frame(), client.getGameCycle());
@@ -1304,6 +1420,8 @@ public class PersonalSpacePlugin extends Plugin
 			s.revealErrors = w.revealErrors;
 			s.walkDraws = w.walkDraws;
 			s.orderedDraws = w.orderedDraws;
+			s.depthDraws = w.depthDraws;
+			s.depthNoSpacer = w.depthNoSpacer;
 			s.keptDips = w.keptDips;
 			s.probeBlackouts = w.probeBlackouts;
 			s.droppedUndrawn = w.droppedUndrawn;

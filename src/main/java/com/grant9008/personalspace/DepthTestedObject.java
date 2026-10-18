@@ -13,34 +13,44 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 
 /**
- * A player or NPC handed to the renderer as drawn with depth against everyone else.
+ * A stand-in for a player's or NPC's object, handed to the renderer until the next call. Two uses:
  *
- * <p>The game draws all its people with {@link Renderable#RENDERMODE_SORTED_NO_DEPTH}: they don't
- * hide each other by depth, so whoever is drawn later is on top, whole. In a packed crowd that
- * means a shield or a cape reaching into a neighbour is either all in front of them or all
- * behind, and pops from one to the other as the camera turns. Drawn with depth, each part of each
- * body is hidden only where it really is behind another. Everything is passed straight through but
- * the render mode. One instance, reused for each draw: the renderer copies what it needs during
- * the call. Client thread only.
+ * <ul>
+ * <li>{@link #wrap}: carrying a {@link DepthSpacer} in place of a person, between two people drawn
+ * with depth against each other. The game draws its people with
+ * {@link Renderable#RENDERMODE_SORTED_NO_DEPTH}; handed over as that, the spacer would be put
+ * with them. Handed over with this object's render mode, the GPU plugin draws it as a plain opaque
+ * model, which is what ends their run (see {@link DepthSpacer}). The people themselves are always
+ * handed over just as the game hands them over: drawn as an opaque model themselves, their own
+ * faces hid each other by depth instead of in the game's layering, and gear was drawn wrong.</li>
+ * <li>{@link #lend}: drawing someone the game had no room for with another player's object.</li>
+ * </ul>
+ *
+ * <p>Everything else is passed straight through. One instance, reused for each draw: the renderer
+ * copies what it needs during the call. Client thread only.
  */
 final class DepthTestedObject implements GameObject
 {
 	private GameObject inner;
 	private final DepthTestedRenderable renderable = new DepthTestedRenderable();
-	/** Lent (see {@link #lend}): where the one it's lent for is drawn, and whether with depth. */
+	/** Lent (see {@link #lend}): where the one it's lent for is drawn. */
 	private boolean lent;
 	private int lentX;
 	private int lentY;
 	private int lentPlane;
-	private boolean depth = true;
+	/** Handed over as something other than a person ({@link #wrap}, {@link #lendAsOther}), or as the person lent for. */
+	private boolean asOther = true;
 
-	/** This object, standing in for {@code object} until the next call. */
+	/**
+	 * This object, standing in for {@code object} until the next call, as something other than a
+	 * person: for drawing a {@link DepthSpacer} where {@code object}'s person is.
+	 */
 	DepthTestedObject wrap(GameObject object)
 	{
 		inner = object;
 		renderable.inner = object.getRenderable();
 		lent = false;
-		depth = true;
+		asOther = true;
 		return this;
 	}
 
@@ -48,9 +58,9 @@ final class DepthTestedObject implements GameObject
 	 * This object, standing in until the next call for {@code object}, another player's, lent to draw
 	 * {@code who} at (x, y) on {@code plane}: the renderer files a body by the object it's handed,
 	 * and filed by the lender's, its see-through parts were sorted as if it stood where they do.
-	 * With depth, as {@link #wrap}; without, {@code who} as they are.
+	 * {@code who} is handed over just as they are.
 	 */
-	DepthTestedObject lend(GameObject object, Renderable who, int x, int y, int plane, boolean withDepth)
+	DepthTestedObject lend(GameObject object, Renderable who, int x, int y, int plane)
 	{
 		inner = object;
 		renderable.inner = who;
@@ -58,7 +68,19 @@ final class DepthTestedObject implements GameObject
 		lentX = x;
 		lentY = y;
 		lentPlane = plane;
-		depth = withDepth;
+		asOther = false;
+		return this;
+	}
+
+	/**
+	 * As {@link #lend}, but handed over as something other than a person, as {@link #wrap}: for
+	 * drawing a {@link DepthSpacer} where {@code who} is drawn with {@code object} lent. Wrapped round
+	 * the lender's object, it showed other plugins the lender, standing where the lender stands.
+	 */
+	DepthTestedObject lendAsOther(GameObject object, Renderable who, int x, int y, int plane)
+	{
+		lend(object, who, x, y, plane);
+		asOther = true;
 		return this;
 	}
 
@@ -69,7 +91,7 @@ final class DepthTestedObject implements GameObject
 		{
 			return null;
 		}
-		return depth ? renderable : renderable.inner;
+		return asOther ? renderable : renderable.inner;
 	}
 
 	@Override
@@ -222,7 +244,11 @@ final class DepthTestedObject implements GameObject
 		return inner.isOpShown(index);
 	}
 
-	/** The body, passed straight through but for its render mode. */
+	/**
+	 * The person, passed straight through but for its render mode: not
+	 * {@link Renderable#RENDERMODE_SORTED_NO_DEPTH}, so the GPU plugin draws what's handed over with
+	 * it as a plain opaque model. Only ever handed over with a {@link DepthSpacer}.
+	 */
 	private static final class DepthTestedRenderable implements Renderable
 	{
 		private Renderable inner;

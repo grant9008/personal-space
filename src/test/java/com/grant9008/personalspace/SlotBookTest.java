@@ -122,6 +122,30 @@ public class SlotBookTest
 	}
 
 	@Test
+	public void yourSpotNeverPointsPastTheEndOfATileThatGotSmaller()
+	{
+		// Your spot was picked while your tile had five spots; then it had three. You were swapped
+		// into the spot picked before, past the end, and the planner failed reading it.
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		book.pairSideForYou.put(TILE, 3);
+		Map<Long, List<Integer>> five = new HashMap<>();
+		five.put(TILE, Arrays.asList(10, 20, 30, 40, 99));
+		Map<Integer, Integer> first = book.update(five, tile -> 5, 1).get(TILE);
+		Assert.assertEquals("you take the spot picked for you", 3, (int) first.get(99));
+		Map<Long, List<Integer>> three = new HashMap<>();
+		three.put(TILE, Arrays.asList(10, 20, 99));
+		for (int t = 2; t <= 2 + SlotBook.LOCAL_SWAP_DELAY + 5; t++)
+		{
+			Map<Integer, Integer> now = book.update(three, tile -> 3, t).get(TILE);
+			for (Map.Entry<Integer, Integer> e : now.entrySet())
+			{
+				Assert.assertTrue("tick " + t + ": player " + e.getKey() + " given spot " + e.getValue() + " of 3", e.getValue() < 3);
+			}
+		}
+	}
+
+	@Test
 	public void stoppingNowAndThenMovesOnePersonAtATime()
 	{
 		// (Walking past never reaches here: nobody is given a spot until they've stood still.)

@@ -65,6 +65,11 @@ public class RenderSidebar
 			set(s, "hooked", false);
 			set(s, "yourShape", null);
 		}
+		if (args.length > 2 && args[2].equals("alone"))
+		{
+			// Nobody else on your tile: the line under the status says so, at the same height.
+			set(s, "yourShape", null);
+		}
 		for (Method m : PersonalSpacePanel.class.getDeclaredMethods())
 		{
 			if (m.getName().equals("update") && m.getParameterCount() == 1)

@@ -26,6 +26,8 @@ final class CollisionTerrain
 
 	/** How close to a blocked edge a player may be drawn, in local units. */
 	static final int EDGE_MARGIN = 26;
+	/** A line passing this close to a tile's corner goes through the corner (see {@link #clearLine}), in local units. */
+	static final int NEAR_CORNER = 3;
 
 	private static final int TILE = 128;
 
@@ -75,8 +77,119 @@ final class CollisionTerrain
 		{
 			return false;
 		}
+		return clearOfEdges(f, tx, tz, x, z);
+	}
 
-		// Keep clear of blocked edges so overhanging models don't swallow the player.
+	/** Whether a body could be drawn standing at (x, z): on ground that can be stood on, clear of blocked edges. */
+	boolean roomAt(int plane, int x, int z)
+	{
+		int[][] f = plane >= 0 && plane < flags.length ? flags[plane] : null;
+		if (f == null)
+		{
+			return true;
+		}
+		int tx = floorDiv(x);
+		int tz = floorDiv(z);
+		return inside(f, tx, tz) && (f[tx][tz] & BLOCK_FULL) == 0 && clearOfEdges(f, tx, tz, x, z);
+	}
+
+	/**
+	 * Whether a body carried in a straight line from (fromX, fromZ) to (x, z) would cross no wall and
+	 * no tile that can't be stood on: tile to tile, the line only goes where the game lets a player
+	 * step. Through a tile's corner, or within {@link #NEAR_CORNER} of it, it needs both ways round
+	 * that corner open, as a diagonal step does: a line that only just missed an anvil's corner
+	 * was drawn clipping it once rounded to whole units.
+	 */
+	boolean clearLine(int plane, int fromX, int fromZ, int x, int z)
+	{
+		int[][] f = plane >= 0 && plane < flags.length ? flags[plane] : null;
+		if (f == null)
+		{
+			return true;
+		}
+		int cx = floorDiv(fromX);
+		int cz = floorDiv(fromZ);
+		int tx = floorDiv(x);
+		int tz = floorDiv(z);
+		if (!inside(f, cx, cz) || (f[cx][cz] & BLOCK_FULL) != 0)
+		{
+			return false;
+		}
+		int sx = Integer.signum(x - fromX);
+		int sz = Integer.signum(z - fromZ);
+		long spanX = Math.abs((long) x - fromX);
+		long spanZ = Math.abs((long) z - fromZ);
+		// How far along each axis to the next tile edge the line crosses, compared exactly: the edge
+		// crossed first is the one whose distance, over the line's span on that axis, is smaller.
+		long toX = sx > 0 ? (long) (cx + 1) * TILE - fromX : fromX - (long) cx * TILE;
+		long toZ = sz > 0 ? (long) (cz + 1) * TILE - fromZ : fromZ - (long) cz * TILE;
+		double nearCorner = NEAR_CORNER * (double) spanX * spanZ / Math.max(1.0, Math.hypot(spanX, spanZ));
+		int steps = Math.abs(tx - cx) + Math.abs(tz - cz);
+		for (int i = 0; i < steps && (cx != tx || cz != tz); i++)
+		{
+			boolean wantX = cx != tx;
+			boolean wantZ = cz != tz;
+			int stepX = 0;
+			int stepZ = 0;
+			long ahead = toX * spanZ - toZ * spanX;
+			if (wantX && wantZ && Math.abs(ahead) <= nearCorner)
+			{
+				stepX = sx;
+				stepZ = sz;
+			}
+			else if (wantX && (!wantZ || ahead < 0))
+			{
+				stepX = sx;
+			}
+			else
+			{
+				stepZ = sz;
+			}
+			if (!canStep(f, cx, cz, stepX, stepZ))
+			{
+				return false;
+			}
+			cx += stepX;
+			cz += stepZ;
+			toX += stepX != 0 ? TILE : 0;
+			toZ += stepZ != 0 ? TILE : 0;
+		}
+		return cx == tx && cz == tz;
+	}
+
+	private final OffsetTable.Walls[] views = new OffsetTable.Walls[4];
+
+	/** A view of one plane, for {@link OffsetTable#keepClear}. */
+	OffsetTable.Walls walls(int plane)
+	{
+		if (plane >= 0 && plane < views.length && views[plane] != null)
+		{
+			return views[plane];
+		}
+		OffsetTable.Walls view = new OffsetTable.Walls()
+		{
+			@Override
+			public boolean clear(int fromX, int fromZ, int toX, int toZ)
+			{
+				return clearLine(plane, fromX, fromZ, toX, toZ);
+			}
+
+			@Override
+			public boolean roomAt(int x, int z)
+			{
+				return CollisionTerrain.this.roomAt(plane, x, z);
+			}
+		};
+		if (plane >= 0 && plane < views.length)
+		{
+			views[plane] = view;
+		}
+		return view;
+	}
+
+	/** Not pressed up against a blocked edge of its tile, so overhanging models don't swallow the player. */
+	private static boolean clearOfEdges(int[][] f, int tx, int tz, int x, int z)
+	{
 		int ox = x - tx * TILE;
 		int oz = z - tz * TILE;
 		if (ox < EDGE_MARGIN && !canStep(f, tx, tz, -1, 0))
