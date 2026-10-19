@@ -11,6 +11,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.Model;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
 import net.runelite.api.Projection;
@@ -141,6 +142,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	/** Frame each player id was last drawn by the game itself, and by us, so nobody is drawn twice in a frame. */
 	private final int[] nativeFrame = new int[OffsetTable.CAPACITY];
 	private final int[] revealedFrame = new int[OffsetTable.CAPACITY];
+	/** The frame the game last handed each NPC over in the main world, by index, so no pet is drawn twice (see {@link #drawRefusedFollowers}). */
+	private final int[] npcFrame = longAgo(65536);
 	/** The frame each player was last really drawn (or kept back to be drawn) by this shim. */
 	private final int[] drawnFrame = longAgo(OffsetTable.CAPACITY);
 	/**
@@ -188,7 +191,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int y;
 		int z;
 		boolean walk;
-		/** For someone walking for real: the walk to draw them with and its frame (see {@link #movingLegs}); -1 for the game's own. */
+		/** For someone walking for real, or a pet on its way to or from its spot: the walk to draw them with and its frame (see {@link #movingLegs}, {@link #petLegs}); -1 for the game's own. */
 		int legAnim = -1;
 		int legFrame;
 		/** Drawn with another player's object lent (see {@link #drawRefused}), on this plane. */
@@ -522,9 +525,9 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 
 	/**
 	 * Actors are kept back when they are drawn no farther from the camera than the farthest
-	 * stacked tile, plus the farthest anyone is drawn from their tile, plus this to spare: a tile
-	 * and a half. Everyone drawn farther is drawn as they come, and so ends up under the kept set,
-	 * which is right: every kept actor is drawn nearer than them.
+	 * stacked tile or pet drawn beside someone, plus the farthest anyone is drawn from their tile,
+	 * plus this to spare: a tile and a half. Everyone drawn farther is drawn as they come, and so
+	 * ends up under the kept set, which is right: every kept actor is drawn nearer than them.
 	 */
 	static final int KEEP_SLACK = 192;
 
@@ -560,6 +563,13 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				double north = z - cameraZ;
 				farthest = Math.max(farthest, Math.sqrt(east * east + north * north));
 			}
+			for (PetSpot s : petSpots.values())
+			{
+				// A pet drawn beside whoever stands on it is drawn in order with them, as a crowd is.
+				double east = s.realX - cameraX;
+				double north = s.realZ - cameraZ;
+				farthest = Math.max(farthest, Math.sqrt(east * east + north * north));
+			}
 			keepWithin = farthest < 0 ? -1 : farthest + offsets.maxOffset() + KEEP_SLACK;
 		}
 		return keepWithin;
@@ -581,7 +591,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	/** Whether an NPC standing at (x, y, z) on this scene is kept back for the opaque pass. */
 	private boolean keeping(Scene scene, int x, int y, int z)
 	{
-		if (!opaquePassSeen || passMissed || stacks.isEmpty() || !client.isClientThread())
+		if (!opaquePassSeen || passMissed || stacks.isEmpty() && petSpots.isEmpty() || !client.isClientThread())
 		{
 			return false;
 		}
@@ -813,6 +823,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// Someone alone on a full tile (a lone campfire tender) blinked whenever no stack was in view.
 		if (wv == null || stacks.isEmpty() && !probe.enabled)
 		{
+			petSpots.clear();
 			return;
 		}
 		int left = client.getViewportXOffset();
@@ -904,6 +915,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			}
 		}
 		drawRefusedAlone(wv, frame, cycle, left, top, right, bottom);
+		drawRefusedFollowers(wv, frame, left, top, right, bottom);
 	}
 
 	/**
@@ -948,6 +960,618 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 
 	/** Diagnostics: frames someone alone on their tile was drawn though the game had no room for them. */
 	long aloneRefusedDrawn;
+
+	/**
+	 * Pets and other followers standing in the middle of a tile, whom the game didn't hand over. The
+	 * game adds one actor to the middle of a tile each frame, and it adds every player before NPCs
+	 * like these (every pet in the game's cache has the default draw priority, which comes after
+	 * players), so a pet standing where someone stands was left out: under them, in the game, and
+	 * stepping onto someone's pet made it vanish until you stepped off. Drawn here instead:
+	 * <ul>
+	 * <li>beside whoever is shown in the middle of its tile (you, someone standing on it alone, or
+	 * whoever {@link #middleOf} gives a crowd's middle to). It walks out from under them to a spot of
+	 * its own ({@link #besideSpot}), stays there while they do, and walks back into the middle once
+	 * they step off and the game hands it over again ({@link #drawPetAside});</li>
+	 * <li>where it stands, when nobody is shown in the middle of its tile: a crowd spread round it
+	 * (it vanished from an empty middle, and came back whenever nobody stood there or the stack probe
+	 * held everyone back: on a busy campfire a pet on the fire flickered in and out), a tile with no
+	 * room left (a campfire's, full of flames), or someone only walking across it.</li>
+	 * </ul>
+	 * With no room round them (a campfire's flames all round), or them left undrawn there (see
+	 * {@link #undrawnInTheMiddle}), it stays under them, as in the game.
+	 */
+	private void drawRefusedFollowers(WorldView wv, int frame, int left, int top, int right, int bottom)
+	{
+		if (lentFrame != frame || lentObject == null)
+		{
+			petSpots.clear();
+			return;
+		}
+		int plane = wv.getPlane();
+		// Those left out first, so whoever stands over any on a tile of their own is found in one look round.
+		int count = 0;
+		boolean alone = false;
+		for (NPC npc : wv.npcs())
+		{
+			int index = npc == null ? -1 : npc.getIndex();
+			NPCComposition composition = index < 0 || index >= npcFrame.length || npcFrame[index] == frame ? null : npc.getComposition();
+			LocalPoint lp = composition == null ? null : npc.getLocalLocation();
+			// Only one the game would draw: a follower it shows (not one turned invisible), of one tile,
+			// standing in the middle of it. One walking is handed over as it comes.
+			if (lp == null || !composition.isFollower() || composition.getSize() != 1 || npc.getTransformedComposition() == null
+				|| !StillnessTracker.isCentred(lp.getX(), lp.getY()))
+			{
+				continue;
+			}
+			if (count == leftOut.length)
+			{
+				leftOut = Arrays.copyOf(leftOut, count * 2);
+				leftAt = Arrays.copyOf(leftAt, count * 2);
+				overLeftOut = Arrays.copyOf(overLeftOut, count * 2);
+				passingLeftOut = Arrays.copyOf(passingLeftOut, count * 2);
+			}
+			leftOut[count] = npc;
+			leftAt[count] = lp;
+			overLeftOut[count] = null;
+			passingLeftOut[count] = false;
+			alone |= stacks.membersAt(StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY())).length == 0;
+			count++;
+		}
+		if (alone && probe.enabled)
+		{
+			for (Player p : wv.players())
+			{
+				LocalPoint lp = p == null ? null : p.getLocalLocation();
+				for (int i = 0; lp != null && StillnessTracker.isCentred(lp.getX(), lp.getY()) && i < count; i++)
+				{
+					if (leftAt[i].getX() == lp.getX() && leftAt[i].getY() == lp.getY())
+					{
+						passingLeftOut[i] = true;
+						if (overLeftOut[i] == null && standsOver(p, plane))
+						{
+							overLeftOut[i] = p;
+						}
+					}
+				}
+			}
+		}
+		for (int i = 0; i < count; i++)
+		{
+			NPC npc = leftOut[i];
+			LocalPoint lp = leftAt[i];
+			leftOut[i] = null;
+			leftAt[i] = null;
+			int index = npc.getIndex();
+			int x = lp.getX();
+			int z = lp.getY();
+			long tile = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY());
+			boolean crowded = stacks.membersAt(tile).length > 0;
+			Player over = crowded ? playerOver(wv, tile, plane, x, z) : overLeftOut[i];
+			overLeftOut[i] = null;
+			boolean beside = over != null && probe.enabled && !undrawnInTheMiddle(over, tile) && probe.othersAllow(renderCallbacks, over);
+			// Where it stands: a crowd spread round it, or with no room on its tile, or someone only walking across it.
+			boolean inPlace = over == null && (crowded || probe.enabled && (passingLeftOut[i] || tileFull(wv, plane, lp.getSceneX(), lp.getSceneY())));
+			PetSpot s = petSpots.isEmpty() ? null : petSpots.get(index);
+			if (s != null && s.npc != npc)
+			{
+				// The game gave a pet's index, once it had gone, to someone new.
+				petSpots.remove(index);
+				s = null;
+			}
+			if (!(beside || inPlace) || !probe.othersAllow(renderCallbacks, npc))
+			{
+				// Under someone, as in the game; left out for a reason of the game's own; or hidden by another plugin.
+				if (s != null)
+				{
+					petSpots.remove(index);
+				}
+				continue;
+			}
+			boolean under = false;
+			if (beside)
+			{
+				if (s == null)
+				{
+					// It sets off next frame: it may have only just walked in under them, and its first
+					// step out drawn on top of its last step in was two strides in one frame.
+					s = new PetSpot(npc, tile, x, z, npc.getCurrentOrientation());
+					s.frame = frame;
+				}
+				if (!besideSpot(s, npc, wv, tile, x, z))
+				{
+					if (s.x == 0f && s.z == 0f)
+					{
+						// No room round them: under them, as in the game.
+						petSpots.remove(index);
+						continue;
+					}
+					// No room left round them (the crowd laid out afresh all round it, say): it walks
+					// back in under them, rather than vanish from where it stood.
+					under = true;
+				}
+				petSpots.put(index, s);
+			}
+			else if (s != null)
+			{
+				s.toX = 0;
+				s.toZ = 0;
+			}
+			if (s != null && (movePet(s, x, z, false, npc.getCurrentOrientation()) || under && s.x == 0f && s.z == 0f))
+			{
+				petSpots.remove(index);
+				s = null;
+				if (under)
+				{
+					// Back under them: hidden there, as in the game.
+					continue;
+				}
+			}
+			int dx = s == null ? 0 : Math.round(s.x);
+			int dz = s == null ? 0 : Math.round(s.z);
+			if (!zoneDrawn(x, z, frame) || !onScreen(wv, x + dx, z + dz, plane, left, top, right, bottom))
+			{
+				continue;
+			}
+			int y = Perspective.getTileHeight(client, lp, plane) - npc.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + dx, z + dz);
+			int facing = s == null ? npc.getCurrentOrientation() : s.facing;
+			keep(lentProjection, lentScene, lentObject, npc, facing, facing, x + dx, y, z + dz, false);
+			Kept k = kept[keptCount - 1];
+			k.lent = true;
+			k.plane = plane;
+			if (s != null)
+			{
+				petLegs(k, npc, s);
+			}
+			if (dx != 0 || dz != 0)
+			{
+				followersBesideDrawn++;
+			}
+			else
+			{
+				followersRefusedDrawn++;
+			}
+		}
+		// Gone, or no longer a follower in the middle of a tile: neither this nor the game's own hand-over moved them.
+		for (java.util.Iterator<PetSpot> it = petSpots.values().iterator(); it.hasNext(); )
+		{
+			if (it.next().frame != frame)
+			{
+				it.remove();
+			}
+		}
+		if (!petRetry.isEmpty())
+		{
+			petRetry.values().removeIf(after -> after <= frame);
+		}
+	}
+
+	/** Scratch for {@link #drawRefusedFollowers}: the pets left out this frame, where, who stands still over each, and whether anyone at all does. */
+	private NPC[] leftOut = new NPC[16];
+	private LocalPoint[] leftAt = new LocalPoint[16];
+	private Player[] overLeftOut = new Player[16];
+	private boolean[] passingLeftOut = new boolean[16];
+
+	/**
+	 * Who is shown standing in the middle of this tile, over a pet there: on a crowded tile whoever
+	 * {@link #middleOf} gives the middle to, else anyone standing there (see {@link #standsOver}).
+	 * Null if nobody is.
+	 */
+	private Player playerOver(WorldView wv, long tile, int plane, int x, int z)
+	{
+		if (stacks.membersAt(tile).length > 0)
+		{
+			int chosen = middleOf(tile, wv, x, z);
+			return chosen < 0 ? null : wv.players().byIndex(chosen);
+		}
+		for (Player p : wv.players())
+		{
+			LocalPoint lp = p == null ? null : p.getLocalLocation();
+			if (lp != null && lp.getX() == x && lp.getY() == z && standsOver(p, plane))
+			{
+				return p;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Whether whoever is shown in the middle of a pet's tile is left undrawn there, as {@link #drawTemp}
+	 * leaves them, so the pet stays under them too: someone waiting without a spot in a middle out of
+	 * sight (see {@link StackRegistry#middleOutOfSight}). Never you: the game draws you where you
+	 * stand, and the middle of the tile you stand in is out of sight only for anyone else waiting
+	 * there, inside you. Going by the middle alone, a pet stepped out beside you and was gone under
+	 * you again as soon as you had stood there two ticks running.
+	 */
+	private boolean undrawnInTheMiddle(Player over, long tile)
+	{
+		return !isLocal(over) && stacks.isUnplaced(over.getId()) && stacks.middleOutOfSight(tile);
+	}
+
+	/** Whether this player, right in the middle of a pet's tile, stands over it there: still, drawn where they are, on its plane. Someone walking across it is only passing. */
+	private boolean standsOver(Player p, int plane)
+	{
+		net.runelite.api.coords.WorldPoint wp = reallyMoving(p) || offsets.isOffset(p.getId()) ? null : p.getWorldLocation();
+		return wp != null && wp.getPlane() == plane;
+	}
+
+	/** Diagnostics: frames a pet or other follower was drawn though the game left it out of a crowded or full tile. */
+	long followersRefusedDrawn;
+	/** ...and frames one was drawn beside whoever stands on it, or on its way there or back. */
+	long followersBesideDrawn;
+
+	/**
+	 * Where the plugin's planner finds room to stand (walls, objects and fires), as of the last game
+	 * tick; null while the effect is off. A pet is only drawn beside someone where this says a body
+	 * could stand.
+	 */
+	volatile CrowdPlanner.Surroundings ground;
+
+	/** A pet drawn beside whoever stands on it, or on its way back into the middle of its tile (see {@link #drawRefusedFollowers}). */
+	private static final class PetSpot
+	{
+		/** Whose it is: the game gives a gone pet's index to someone new. */
+		final NPC npc;
+		/** The tile its spot was chosen round, and where it really is. */
+		long tile;
+		int realX;
+		int realZ;
+		/** Where it's drawn from where it really is, and where it's going: its spot, or (0, 0), back into the middle. */
+		float x;
+		float z;
+		int toX;
+		int toZ;
+		/** On its way with its walk, and for how long. */
+		boolean walking;
+		float walkSeconds;
+		/** It walked off for real: what's left of its step is eased away rather than walked, even once it stops. */
+		boolean easing;
+		/** Which way it's drawn facing. */
+		int facing;
+		/** The frame it was last moved, or found under them. */
+		int frame = Integer.MIN_VALUE / 2;
+
+		PetSpot(NPC npc, long tile, int realX, int realZ, int facing)
+		{
+			this.npc = npc;
+			this.tile = tile;
+			this.realX = realX;
+			this.realZ = realZ;
+			this.facing = facing & 2047;
+		}
+	}
+
+	/** Pets drawn beside whoever stands on them, or on their way back, by NPC index. Nearly always empty. */
+	private final Map<Integer, PetSpot> petSpots = new HashMap<>();
+
+	/**
+	 * How far from the middle of its tile a pet is drawn beside whoever stands on it: just clear of
+	 * them, a body's width out, or a little further if that's taken.
+	 */
+	private static final int[] PET_REACH = {60, 70};
+	/** How many ways round them a spot is looked for, from the way it would go anyway. */
+	static final int PET_DIRECTIONS = 16;
+	/**
+	 * Nobody standing, or going to stand, nearer a pet's spot than this when it's chosen: as close as
+	 * anyone is drawn to the people round them ({@link CrowdPlanner#NEIGHBOUR_GAP}). Nor you nearer
+	 * than anyone is drawn to you ({@link CrowdPlanner#OBJECT_YOUR_GAP}).
+	 */
+	static final int PET_GAP = CrowdPlanner.NEIGHBOUR_GAP;
+	/** ...and it keeps its spot while nobody comes nearer than this (you, {@link #PET_GAP}), so it isn't given up and back. */
+	static final int PET_KEEP = CrowdPlanner.YOUR_SPACE;
+	/** An owner this far from the middle of the tile is elsewhere, and it goes their way; nearer, they're the one standing on it. */
+	private static final int PET_OWNER_APART = 32;
+	/**
+	 * With no room round them, a pet's spot isn't looked for again for this many frames (about half
+	 * a second). Looked for every frame, a pet under someone in a packed crowd cost every way round
+	 * them, against everyone about, every frame.
+	 */
+	static final int PET_RETRY_FRAMES = 25;
+	/** Pets with no room round whoever stands on them: the frame their spot may be looked for again, by NPC index. */
+	private final Map<Integer, Integer> petRetry = new HashMap<>();
+	/**
+	 * How far a pet on its way turns a frame to face where it's going: round in a few frames, then it
+	 * walks forwards. At {@link #TURN_PER_FRAME}, as the game turns people, a half turn outlasted the
+	 * step back into the middle, and it walked backwards most of the way with its legs stepping
+	 * forwards. Once there it turns back to its own way at that pace.
+	 */
+	static final int PET_WALK_TURN = 4 * SpreadingDrawCallbacks.TURN_PER_FRAME;
+
+	/**
+	 * This pet's spot beside whoever stands in the middle of its tile, into {@link PetSpot#toX}: the one
+	 * it has while nobody comes too near it ({@link #PET_KEEP}), else the first with room going round
+	 * from the way it would go anyway. That's towards its owner, or straight ahead when its owner is
+	 * the one standing on it: the way it goes next, whatever the camera does, and the way it already
+	 * faces (followers face their owner), so it walks out forwards and stands by its owner's side.
+	 * (Away from the camera it was hidden behind the person's legs, and it would have moved round
+	 * them as the camera turned.) Room is ground a body could stand on, reached from the middle
+	 * without going through anything (no wall, object or fire's flames: see
+	 * {@link CrowdPlanner.Surroundings#canStand}), with nobody drawn there or going to be (see
+	 * {@link #clearFor}). False if there's no room anywhere round them, or the ground isn't known.
+	 */
+	private boolean besideSpot(PetSpot s, NPC npc, WorldView wv, long tile, int x, int z)
+	{
+		if (s.tile == tile && (s.toX != 0 || s.toZ != 0) && clearFor(npc, wv, x + s.toX, z + s.toZ, PET_KEEP, PET_GAP, false))
+		{
+			return true;
+		}
+		s.tile = tile;
+		s.toX = 0;
+		s.toZ = 0;
+		CrowdPlanner.Surroundings around = ground;
+		if (around == null)
+		{
+			return false;
+		}
+		Integer retry = petRetry.isEmpty() ? null : petRetry.get(npc.getIndex());
+		if (retry != null && offsets.frame() < retry)
+		{
+			// No room a moment ago: not looked for again yet.
+			return false;
+		}
+		int ahead = npc.getCurrentOrientation();
+		Actor owner = npc.getInteracting();
+		LocalPoint at = owner == null || owner.getWorldView() != wv ? null : owner.getLocalLocation();
+		if (at != null)
+		{
+			int ownerX = at.getX();
+			int ownerZ = at.getY();
+			if (owner instanceof Player)
+			{
+				// Drawn at a spot: towards where they're drawn.
+				ownerX += offsets.dx(((Player) owner).getId());
+				ownerZ += offsets.dz(((Player) owner).getId());
+			}
+			if (Math.hypot(ownerX - x, ownerZ - z) >= PET_OWNER_APART)
+			{
+				ahead = OffsetTable.facing(ownerX - x, ownerZ - z);
+			}
+		}
+		for (int i = 0; i < PET_DIRECTIONS; i++)
+		{
+			// Straight that way first, then a little to either side of it, and so on round.
+			int turn = (i + 1) / 2 * (i % 2 == 1 ? 1 : -1);
+			double angle = (ahead + turn * 2048.0 / PET_DIRECTIONS) * Math.PI / 1024;
+			for (int reach : PET_REACH)
+			{
+				int dx = (int) Math.round(-Math.sin(angle) * reach);
+				int dz = (int) Math.round(-Math.cos(angle) * reach);
+				if (around.canStand(tile, dx, dz) && clearFor(npc, wv, x + dx, z + dz, PET_GAP, CrowdPlanner.OBJECT_YOUR_GAP, true))
+				{
+					s.toX = dx;
+					s.toZ = dz;
+					return true;
+				}
+			}
+		}
+		petRetry.put(npc.getIndex(), offsets.frame() + PET_RETRY_FRAMES);
+		return false;
+	}
+
+	/**
+	 * Whether a pet drawn at (x, z) would be clear of everyone else: no player standing nearer than
+	 * {@code gap} ({@code yourGap} for you), where they're drawn or where they're going (anyone
+	 * walking for real is only passing), and no other pet's spot nearer than {@code gap}; with
+	 * {@code everyNpc}, no other NPC at all, by its size.
+	 */
+	private boolean clearFor(NPC pet, WorldView wv, int x, int z, int gap, int yourGap, boolean everyNpc)
+	{
+		Player local = client.getLocalPlayer();
+		int plane = wv.getPlane();
+		for (Player p : wv.players())
+		{
+			LocalPoint lp = p == null || reallyMoving(p) ? null : p.getLocalLocation();
+			if (lp == null)
+			{
+				continue;
+			}
+			int id = p.getId();
+			int need = p == local ? yourGap : gap;
+			boolean near = within(lp.getX() + offsets.targetX(id), lp.getY() + offsets.targetZ(id), x, z, need)
+				|| !offsets.isWalking(id) && within(lp.getX() + offsets.dx(id), lp.getY() + offsets.dz(id), x, z, need);
+			if (near && p.getWorldLocation() != null && p.getWorldLocation().getPlane() == plane)
+			{
+				return false;
+			}
+		}
+		if (!everyNpc)
+		{
+			for (Map.Entry<Integer, PetSpot> e : petSpots.entrySet())
+			{
+				PetSpot o = e.getValue();
+				if (e.getKey() != pet.getIndex() && within(o.realX + o.toX, o.realZ + o.toZ, x, z, gap))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		for (NPC n : wv.npcs())
+		{
+			LocalPoint lp = n == null || n == pet ? null : n.getLocalLocation();
+			NPCComposition c = lp == null ? null : n.getComposition();
+			if (c == null)
+			{
+				continue;
+			}
+			// Another pet drawn beside someone: where it's going.
+			PetSpot o = petSpots.isEmpty() ? null : petSpots.get(n.getIndex());
+			int nx = lp.getX() + (o == null ? 0 : o.toX);
+			int nz = lp.getY() + (o == null ? 0 : o.toZ);
+			if (within(nx, nz, x, z, gap + (Math.max(1, c.getSize()) - 1) * Perspective.LOCAL_HALF_TILE_SIZE))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean within(int ax, int az, int bx, int bz, int reach)
+	{
+		long east = ax - bx;
+		long north = az - bz;
+		return east * east + north * north < (long) reach * reach;
+	}
+
+	/**
+	 * One frame of a pet's way to where it's going ({@link PetSpot#toX}), as players go to their spots
+	 * (see {@link OffsetTable}): at the game's walking pace, with its own walk unless the step is too
+	 * short to be one, turning round the way it walks in a few frames ({@link #PET_WALK_TURN}), and
+	 * back to its own facing once there a little at a time ({@link #TURN_PER_FRAME}, as the game
+	 * turns people). Walking off for real
+	 * ({@code walkingOff}), what's left of it is eased away gently
+	 * ({@link OffsetTable#WALKING_OFF_PACE}) with the game's own walk and facing, as a player's is,
+	 * and still once it stops: walked, the last few units of it turned it round and back. A teleport
+	 * puts it straight back. Once a frame. True once it's back in the middle of its tile, facing its
+	 * own way: the game's to draw again.
+	 */
+	private boolean movePet(PetSpot s, int realX, int realZ, boolean walkingOff, int orientation)
+	{
+		int frame = offsets.frame();
+		int own = orientation & 2047;
+		if (s.frame != frame)
+		{
+			if (Math.abs(realX - s.realX) + Math.abs(realZ - s.realZ) > OffsetTable.JUMP)
+			{
+				s.x = 0f;
+				s.z = 0f;
+				s.toX = 0;
+				s.toZ = 0;
+				s.walking = false;
+				s.facing = own;
+			}
+			s.frame = frame;
+			s.realX = realX;
+			s.realZ = realZ;
+			s.easing = walkingOff || s.easing && s.toX == 0 && s.toZ == 0;
+			float dt = offsets.frameSeconds();
+			float ex = s.toX - s.x;
+			float ez = s.toZ - s.z;
+			float dist = (float) Math.hypot(ex, ez);
+			float stride = OffsetTable.WALK_SPEED * dt * (s.easing ? OffsetTable.WALKING_OFF_PACE : 1f);
+			// Out of the middle of the tile or back into it, rather than from one spot to another.
+			boolean stepInOrOut = s.toX == 0 && s.toZ == 0 || s.x == 0f && s.z == 0f;
+			int heading = own;
+			if (dist <= Math.max(stride, 0.5f))
+			{
+				s.x = s.toX;
+				s.z = s.toZ;
+				s.walking = false;
+			}
+			else
+			{
+				s.x += ex / dist * stride;
+				s.z += ez / dist * stride;
+				if (s.easing)
+				{
+					s.walking = false;
+				}
+				else if (!s.walking && dist >= (stepInOrOut ? OffsetTable.MIN_STEP_DISTANCE : OffsetTable.MIN_WALK_DISTANCE))
+				{
+					s.walking = true;
+					s.walkSeconds = 0f;
+				}
+				if (s.walking)
+				{
+					s.walkSeconds += dt;
+					heading = OffsetTable.facing(ex, ez);
+				}
+			}
+			s.facing = s.easing ? own : turnTowards(s.facing, heading, s.walking ? PET_WALK_TURN : TURN_PER_FRAME);
+		}
+		return s.toX == 0 && s.toZ == 0 && s.x == 0f && s.z == 0f && s.facing == own;
+	}
+
+	/** A pet on its way to or from its spot is drawn with its own walk, at how far along it is (see {@link #petWalkModel}). */
+	private void petLegs(Kept k, NPC npc, PetSpot s)
+	{
+		int walk = s.walking ? npc.getWalkAnimation() : -1;
+		int at = walk < 0 ? -1 : walkTiming(walk).frameAt(s.walkSeconds);
+		if (at >= 0)
+		{
+			k.legAnim = walk;
+			k.legFrame = at;
+		}
+		else if (s.walking)
+		{
+			walkSkippedNoAnimation++;
+		}
+	}
+
+	/** This pet's model mid-step, with its walk at this frame, as {@link #walkModel} builds a player's; null (drawn as the game has it) if it can't be. */
+	private Model petWalkModel(NPC npc, int walk, int frame)
+	{
+		try
+		{
+			return stepping(npc, walk, frame);
+		}
+		catch (RuntimeException e)
+		{
+			revealErrors++;
+			return null;
+		}
+	}
+
+	/**
+	 * A pet the game handed over that is drawn beside someone, or on its way back from there (see
+	 * {@link #drawRefusedFollowers}). Still beside them while they're shown there (the stack probe let
+	 * it in for a frame, say). Otherwise it walks back into the middle of its tile from where it's
+	 * drawn, rather than jumping there as they step off, and is then left to the game. Its click box
+	 * stays where the game puts it, on its own tile. False if it's the game's to draw as it is.
+	 */
+	private boolean drawPetAside(Projection projection, Scene scene, GameObject gameObject, NPC npc, Model model, int x, int y, int z)
+	{
+		int index = npc.getIndex();
+		PetSpot s = petSpots.get(index);
+		if (s == null || s.npc != npc)
+		{
+			if (s != null)
+			{
+				// The game gave a pet's index, once it had gone, to someone new.
+				petSpots.remove(index);
+			}
+			return false;
+		}
+		WorldView wv = client.getTopLevelWorldView();
+		LocalPoint lp = npc.getLocalLocation();
+		if (!probe.enabled || wv == null || lp == null)
+		{
+			petSpots.remove(index);
+			return false;
+		}
+		int plane = wv.getPlane();
+		boolean centred = StillnessTracker.isCentred(lp.getX(), lp.getY());
+		long tile = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY());
+		Player over = centred ? playerOver(wv, tile, plane, lp.getX(), lp.getY()) : null;
+		if (over == null || undrawnInTheMiddle(over, tile) || !probe.othersAllow(renderCallbacks, over)
+			|| !besideSpot(s, npc, wv, tile, lp.getX(), lp.getY()))
+		{
+			s.toX = 0;
+			s.toZ = 0;
+		}
+		int orientation = npc.getCurrentOrientation();
+		if (movePet(s, lp.getX(), lp.getY(), !centred, orientation))
+		{
+			petSpots.remove(index);
+			return false;
+		}
+		int dx = Math.round(s.x);
+		int dz = Math.round(s.z);
+		int drawY = y + groundDelta(wv, plane, x, z, x + dx, z + dz);
+		if (keeping(scene, x + dx, drawY, z + dz))
+		{
+			keep(projection, scene, gameObject, npc, s.facing, s.facing, x + dx, drawY, z + dz, false);
+			petLegs(kept[keptCount - 1], npc, s);
+		}
+		else
+		{
+			delegate.drawTemp(projection, scene, gameObject, model, s.facing, x + dx, drawY, z + dz);
+		}
+		if (dx != 0 || dz != 0)
+		{
+			followersBesideDrawn++;
+		}
+		return true;
+	}
 
 	/**
 	 * Someone walking or running across a tile the game has no room on (a campfire's, crowded with
@@ -1383,6 +2007,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 				{
 					model = modelWithLegs((Player) k.actor, new int[]{k.legAnim, k.legFrame});
 				}
+				else if (k.legAnim >= 0 && k.actor instanceof NPC)
+				{
+					model = petWalkModel((NPC) k.actor, k.legAnim, k.legFrame);
+				}
 				else if (k.walk && k.actor instanceof Player)
 				{
 					Player player = (Player) k.actor;
@@ -1604,6 +2232,18 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		Renderable renderable = gameObject == null ? null : gameObject.getRenderable();
 		if (!(renderable instanceof Player))
 		{
+			if (renderable instanceof NPC && client.isClientThread() && isMainScene(scene))
+			{
+				int index = ((NPC) renderable).getIndex();
+				if (index >= 0 && index < npcFrame.length)
+				{
+					npcFrame[index] = offsets.frame();
+				}
+				if (!petSpots.isEmpty() && drawPetAside(projection, scene, gameObject, (NPC) renderable, model, x, y, z))
+				{
+					return;
+				}
+			}
 			if (renderable instanceof NPC && keeping(scene, x, y, z))
 			{
 				keep(projection, scene, gameObject, renderable, orientation, orientation, x, y, z, false);
@@ -1650,7 +2290,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		// by where they are drawn, not where they stand: someone easing back from a spot is drawn
 		// past where they stand, and it's the drawn spot that has to be inside the cut-off for the
 		// order across it to be right. Only on the main scene: a boat's deck is drawn as it comes.
-		boolean mayKeep = wv.getId() == WorldView.TOPLEVEL && opaquePassSeen && !passMissed && !stacks.isEmpty();
+		boolean mayKeep = wv.getId() == WorldView.TOPLEVEL && opaquePassSeen && !passMissed && (!stacks.isEmpty() || !petSpots.isEmpty());
 		int dx = offsets.dx(drawnId);
 		int dz = offsets.dz(drawnId);
 		boolean touchedSharedModel = false;
@@ -2156,15 +2796,9 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			walkSkippedNoAnimation++;
 			return null;
 		}
-		busySwap = busyWalks ? player : null;
-		IntPredicate smoothing = client.getAnimationInterpolationFilter();
 		try
 		{
-			if (smoothing != null)
-			{
-				client.setAnimationInterpolationFilter(null);
-			}
-			Model model = busyWalks ? modelStepping(player, walk, frame) : modelMidStep(player, walk, frame);
+			Model model = stepping(player, walk, frame);
 			checkWalkShown(player, id, model, action != -1, WALK_TO_SPOT, walk);
 			if (action != -1)
 			{
@@ -2180,6 +2814,25 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			revealErrors++;
 			return null;
+		}
+	}
+
+	/**
+	 * Client thread only. This player's or pet's model taking a step: {@link #modelStepping}, or
+	 * {@link #modelMidStep} once busy walks are off, with animation smoothing held off for the step
+	 * (see {@link #walkModel}).
+	 */
+	private Model stepping(Actor actor, int walk, int frame)
+	{
+		busySwap = busyWalks ? actor : null;
+		IntPredicate smoothing = client.getAnimationInterpolationFilter();
+		try
+		{
+			if (smoothing != null)
+			{
+				client.setAnimationInterpolationFilter(null);
+			}
+			return busyWalks ? modelStepping(actor, walk, frame) : modelMidStep(actor, walk, frame);
 		}
 		finally
 		{
@@ -2206,7 +2859,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * that walk. A walk can still freeze when the server has frozen the player's animation (it then
 	 * draws copies the API can't reach); {@link #checkWalkShown} still counts that.
 	 */
-	static Model modelStepping(Player player, int walk, int walkFrame)
+	static Model modelStepping(Actor player, int walk, int walkFrame)
 	{
 		int action = player.getAnimation();
 		int actionFrame = player.getAnimationFrame();
@@ -2243,7 +2896,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * 1.13.2), and the pose has no hook at all. If one ever is, the plugin switches busy walks off
 	 * ({@link #fromBusySwap}).
 	 */
-	static Model modelMidStep(Player player, int walk, int walkFrame)
+	static Model modelMidStep(Actor player, int walk, int walkFrame)
 	{
 		int action = player.getAnimation();
 		int actionFrame = player.getAnimationFrame();
@@ -2277,7 +2930,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	}
 
 	/** The action back, then its frame: choosing an action starts it from its first frame. */
-	private static void restoreAction(Player player, int action, int frame)
+	private static void restoreAction(Actor player, int action, int frame)
 	{
 		try
 		{

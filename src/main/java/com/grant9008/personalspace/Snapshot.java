@@ -105,6 +105,10 @@ final class Snapshot
 	long aloneRefusedDrawn;
 	/** ...and walking across a full tile (a campfire's). */
 	long movingRefusedDrawn;
+	/** Pets and other followers drawn though the game left them out of a crowded or full tile; frames, total. */
+	long followersRefusedDrawn;
+	/** Pets and other followers drawn beside whoever stands on them, or on their way there or back; frames, total. */
+	long followersBesideDrawn;
 	/** Walks drawn whose body kept the same shape too long to be walking: all, and of busy people. */
 	long walksLegsStill;
 	long walksLegsStillBusy;

@@ -80,6 +80,11 @@ final class CrowdPlanner
 		final Map<Long, int[]> fires = new HashMap<>();
 		/** Small groups in the open that are posed (angled or facing each other). */
 		final Map<Long, PersonalSpaceConfig.Pose> poses = new HashMap<>();
+		/**
+		 * Casters given the middle of their tile, where they really stand (see {@link CrowdPlanner#casterFor}):
+		 * placed there, and anyone stepping in from a spot only does so between casts, or as one ends.
+		 */
+		final Set<Integer> castersInTheMiddle = new HashSet<>();
 		/** What was decided for each spread tile, for the troubleshooting report. */
 		final Map<Long, TileReport> tiles = new HashMap<>();
 		/** Players standing still on a tile with company whom the game isn't showing. */
@@ -170,6 +175,27 @@ final class CrowdPlanner
 
 	/** Largest group the pose applies to. */
 	static final int POSED_GROUP = 3;
+
+	/**
+	 * Who has cast a skilling spell lately (alching, enchanting, charging orbs, superheating: see
+	 * {@link AlchStyler#CASTS}), by id, however Alchers behavior shows it. Set by the plugin each tick.
+	 */
+	IntPredicate casting = id -> false;
+	/**
+	 * Who has an action playing this tick that goes on past it (mid-cast, mid-emote), by id: a cast
+	 * about to end counts as a break. Set by the plugin each tick.
+	 */
+	IntPredicate midAction = id -> false;
+	/** Largest group whose caster keeps the middle of their tile (see {@link #casterFor}). */
+	static final int CASTER_GROUP = 3;
+	private static final int NO_CASTER = -1;
+	/** From {@link #casterFor}: a caster with a spot waits to step into the middle of their tile. */
+	private static final int CASTER_WAITS = -2;
+	/** The caster drawn in the middle of each tile (or {@link #CASTER_WAITS}), last tick and this. */
+	private Map<Long, Integer> castersWere = new HashMap<>();
+	private Map<Long, Integer> castersNow = new HashMap<>();
+	/** The tick each caster started casting, for as long as they keep at it. */
+	private Map<Integer, Integer> castingSince = new HashMap<>();
 
 	/** How many players each tile's spacing is sized for, and the last tick the tile was that big. */
 	private Map<Long, int[]> previousSizes = new HashMap<>();
@@ -3886,6 +3912,63 @@ final class CrowdPlanner
 		return now[0];
 	}
 
+	/** Whether people laid out round someone in the middle of their tile stand a body's width from them. */
+	private static boolean roomRoundTheMiddle(boolean row, double angle, int spacing)
+	{
+		List<int[]> first = StackSpreader.spots(row, false, angle, true, spacing, 1, null);
+		return !first.isEmpty() && Math.hypot(first.get(0)[0], first.get(0)[1]) >= NEIGHBOUR_GAP;
+	}
+
+	/**
+	 * Who of two or three on a tile is drawn in its middle, where they really stand: someone casting
+	 * a skilling spell. Their spell effect is drawn there by the game wherever they are drawn, so
+	 * only there does it line up with them, and stood still they are never walked mid-cast. They
+	 * keep it while they cast, through the pauses between casts ({@link #casting}). Of two casters,
+	 * whoever has it keeps it; otherwise whoever is in the middle already, then whoever has been
+	 * casting longest. Someone with a spot is given it only between casts, or as one ends
+	 * ({@link #midAction}), so they walk straight in, and only once nobody else is in the middle, so
+	 * nobody walks into someone stepping out of it. Until then they keep their spot.
+	 *
+	 * @return the caster; {@link #CASTER_WAITS} while one with a spot waits to step in where the
+	 *         middle was kept for a caster last tick, so the others aren't laid out afresh meanwhile;
+	 *         or {@link #NO_CASTER}
+	 */
+	private int casterFor(long tile, List<StackSpreader.Entry> group, int tick)
+	{
+		Integer had = castersWere.get(tile);
+		int best = NO_CASTER;
+		boolean bestInMiddle = false;
+		boolean middleClear = true;
+		for (StackSpreader.Entry e : group)
+		{
+			// Without a spot here last tick (just arrived, or left in the middle), they're in the middle.
+			double[] was = drawnLastTick(e.id, tile);
+			boolean inMiddle = was == null || was[0] == 0 && was[1] == 0;
+			middleClear &= !inMiddle;
+			if (!casting.test(e.id))
+			{
+				continue;
+			}
+			if (had != null && had == e.id)
+			{
+				return e.id;
+			}
+			int since = castingSince.getOrDefault(e.id, tick);
+			int bestSince = castingSince.getOrDefault(best, tick);
+			if (best == NO_CASTER || inMiddle && !bestInMiddle
+				|| inMiddle == bestInMiddle && (since < bestSince || since == bestSince && e.id < best))
+			{
+				best = e.id;
+				bestInMiddle = inMiddle;
+			}
+		}
+		if (best == NO_CASTER || bestInMiddle || middleClear && !midAction.test(best))
+		{
+			return best;
+		}
+		return castersWere.containsKey(tile) ? CASTER_WAITS : NO_CASTER;
+	}
+
 	/**
 	 * Plan this tick.
 	 *
@@ -3958,6 +4041,17 @@ final class CrowdPlanner
 		currentMostFaced = new HashMap<>();
 		previousLineTiles = currentLineTiles;
 		currentLineTiles = new HashSet<>();
+		castersWere = castersNow;
+		castersNow = new HashMap<>();
+		Map<Integer, Integer> castingFrom = new HashMap<>();
+		for (StackSpreader.Entry e : still)
+		{
+			if (casting.test(e.id))
+			{
+				castingFrom.put(e.id, castingSince.getOrDefault(e.id, tick));
+			}
+		}
+		castingSince = castingFrom;
 		Map<Long, List<Integer>> movableByTile = new HashMap<>();
 		Map<Long, List<int[]>> spotsByTile = new HashMap<>();
 		Map<Long, String> shapeByTile = new HashMap<>();
@@ -4154,6 +4248,24 @@ final class CrowdPlanner
 				objectIds.put(tile, movable);
 				currentObjectOf.put(tile, object);
 				continue;
+			}
+			// Two or three out in the open, one of them alching or the like: the caster stays where
+			// they really stand and the others stand round them, as round anyone staying put. Not at
+			// a counter or a fire, which lay people out their own way, nor so close together that
+			// the others would stand inside the caster.
+			int caster = straight || atFire || middleTaken || group.size() > CASTER_GROUP || !roomRoundTheMiddle(row, angle, tileSpacing)
+				? NO_CASTER : casterFor(tile, group, tick);
+			if (caster != NO_CASTER)
+			{
+				// Laid out round the middle while a caster has it, or is about to step into it.
+				middleTaken = true;
+				castersNow.put(tile, caster);
+			}
+			if (caster >= 0)
+			{
+				// Given no spot of their own: the others' spots are laid out round them.
+				movable.remove((Integer) caster);
+				kind += ", caster in the middle";
 			}
 
 			// Neighbouring booth tiles each get their own row: a straight row stops short of a tile
@@ -4488,6 +4600,13 @@ final class CrowdPlanner
 			judgeTile = youTileNow;
 			judgeSlot = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
 		}
+		if (youTileNow != Long.MIN_VALUE && Integer.valueOf(localId).equals(castersNow.get(youTileNow)))
+		{
+			// Casting in the middle of your tile, with no spot there: judged from where you were drawn
+			// last tick.
+			judgeTile = youTileNow;
+			judgeSlot = -1;
+		}
 		// Only your personal space is kept clear: nobody is drawn inside you. Nobody steps out of
 		// your line of sight any more, on your tile or any other: people moving aside for you
 		// parted a crowd like the sea wherever you stood. A crowd huddles as it would, and seeing
@@ -4535,6 +4654,7 @@ final class CrowdPlanner
 			order.sort(Comparator.comparingDouble(s -> Math.hypot(spots.get(s)[0], spots.get(s)[1])));
 			slots.nearestFirst.put(tile, order);
 		}
+		slots.keepPlaces = castersNow.keySet();
 		Map<Long, Map<Integer, Integer>> assigned = slots.update(movableByTile, tile -> spotsByTile.get(tile).size(), tick);
 		lastSlots = assigned;
 		waited = new HashSet<>();
@@ -4647,6 +4767,14 @@ final class CrowdPlanner
 				int[] spot = spots.get(a.getValue());
 				plan.placements.add(new StackSpreader.Placement(a.getKey(), tile, spot[0], spot[1]));
 				placed.add(a.getKey());
+			}
+			Integer caster = castersNow.get(tile);
+			if (caster != null && caster >= 0)
+			{
+				// Placed where they really stand, so they are drawn there.
+				plan.placements.add(new StackSpreader.Placement(caster, tile, 0, 0));
+				plan.castersInTheMiddle.add(caster);
+				placed.add(caster);
 			}
 			plan.tiles.put(tile, new TileReport(shapeByTile.get(tile), spacingByTile.get(tile), shownByTile.get(tile),
 				e.getValue().size(), spots.size(), blockedByTile.get(tile)));
@@ -4831,5 +4959,8 @@ final class CrowdPlanner
 		waitingSinceNow.clear();
 		placedBefore.clear();
 		drawnBefore = null;
+		castersWere.clear();
+		castersNow.clear();
+		castingSince.clear();
 	}
 }

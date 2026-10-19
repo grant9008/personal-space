@@ -54,6 +54,8 @@ final class OffsetTable
 	private final boolean[] isActive = new boolean[CAPACITY];
 	private int activeCount;
 	private int frame;
+	/** How long the last frame took, as {@link #advance} was told: pets walk at the same pace (see SpreadingDrawCallbacks#movePet). */
+	private float frameSeconds;
 	/** Diagnostics: frames someone was moving without walking because the move was short. */
 	long driftFrames;
 
@@ -174,6 +176,12 @@ final class OffsetTable
 		return frame;
 	}
 
+	/** How long the last frame took, in seconds. */
+	float frameSeconds()
+	{
+		return frameSeconds;
+	}
+
 	/** Client thread. Zero every target before this tick's placements are applied. */
 	void clearTargets()
 	{
@@ -255,6 +263,7 @@ final class OffsetTable
 	void advance(float dtSeconds)
 	{
 		frame++;
+		frameSeconds = dtSeconds;
 		float farthest = 0f;
 		for (int i = activeCount - 1; i >= 0; i--)
 		{

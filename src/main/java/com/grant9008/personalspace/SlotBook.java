@@ -124,6 +124,12 @@ final class SlotBook
 	Set<Integer> busy = new HashSet<>();
 
 	/**
+	 * Tiles whose middle a caster has (see CrowdPlanner#casterFor): everyone with a spot there keeps
+	 * it. Moved to fill a gap, or to make way for you, they could walk right through the caster.
+	 */
+	Set<Long> keepPlaces = new HashSet<>();
+
+	/**
 	 * For the tile you're on, when just you and one other are about to be given spots there: the
 	 * spot to take yourself, the one on the camera's side. Take the other and the one left, with
 	 * the camera off to their side of you, stood between you and it, and was sent round to your
@@ -386,7 +392,7 @@ final class SlotBook
 				}
 				// Your spot is only yours while it exists: picked when the tile had more spots, it
 				// pointed past the end of a smaller one, and the planner failed reading it.
-				if (mine != yours && yours < capacity && tick - localSince >= LOCAL_SWAP_DELAY)
+				if (mine != yours && yours < capacity && tick - localSince >= LOCAL_SWAP_DELAY && !keepPlaces.contains(e.getKey()))
 				{
 					// Straight to your spot in one step. Whoever was there takes the best free spot if
 					// there is one, else yours, so neither of you is moved again next tick.
@@ -419,7 +425,7 @@ final class SlotBook
 			}
 			// Fill gaps from the back: the player in the worst spot moves into the best free one -
 			// never one standing between you and the camera.
-			for (int s = 0; s < capacity; s++)
+			for (int s = 0; s < capacity && !keepPlaces.contains(e.getKey()); s++)
 			{
 				if (t.occupant.containsKey(s) || t.held(s, tick) || inFront.contains(s))
 				{

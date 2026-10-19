@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
+import net.runelite.api.Animation;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.WorldView;
@@ -24,11 +25,21 @@ import net.runelite.api.gameval.AnimationID;
  * <p>Only other players, and only on this screen. Their own standing pose is remembered and put
  * back when they get busy, the switch goes off, the plugin stops, or they leave. Gear changes bring
  * the game's new pose, which is remembered and swapped in turn.
+ *
+ * <p>The Sit emote's loop starts with nine frames of getting down before the seated part repeats,
+ * so each frame the scene is drawn, everyone sat down is put in the seated part alone ({@link #seat}).
  */
 final class IdleSitter
 {
-	/** The Sit emote, looping. */
+	/** The Sit emote, looping: nine frames of sitting down, then the seated part, repeated. */
 	static final int SIT = AnimationID.EMOTE_SIT_LOOP;
+	/**
+	 * The Sit emote's seated part on its own, frame for frame: the same cross-legged loop with no
+	 * sitting down in front of it, so every frame of it is seated.
+	 */
+	static final int SEATED = AnimationID.AIDE_SITTING_CROSSLEGGED_READY;
+	/** Sitters breathe out of step: each player id's seated loop runs this many game cycles on from the one before. */
+	private static final int SEATED_PHASE = 7;
 	/**
 	 * Standing doing nothing this long, in game cycles (30 s), they sit down: away from the keyboard,
 	 * not just between one thing and the next. (After 5 s, anyone pausing for a moment sat.)
@@ -42,6 +53,10 @@ final class IdleSitter
 	private final Map<Player, Integer> lastBusy = new IdentityHashMap<>();
 	/** Where each player stood last tick. */
 	private final Map<Player, Long> lastAt = new IdentityHashMap<>();
+	/** How long each frame of {@link #SEATED} lasts, in game cycles, as the game has it; null until read. */
+	private int[] seatedLengths;
+	/** Whether {@link #seatedLengths} was looked for since the last tick: not read, it is tried again a tick later. */
+	private boolean seatedLooked;
 
 	IdleSitter(Client client)
 	{
@@ -58,6 +73,7 @@ final class IdleSitter
 	/** As above, for these players, you being {@code you}, at game cycle {@code cycle}. */
 	void update(boolean on, Iterable<? extends Player> players, Player you, int cycle)
 	{
+		seatedLooked = false;
 		if (!on || players == null)
 		{
 			standAll();
@@ -98,6 +114,88 @@ final class IdleSitter
 		stance.keySet().retainAll(here);
 		lastBusy.keySet().retainAll(here);
 		lastAt.keySet().retainAll(here);
+	}
+
+	/**
+	 * Once a frame, before the scene is drawn: everyone sat down who is sitting still, or turning
+	 * on the spot, is drawn in the seated loop ({@link #SEATED}) for this frame. Client thread.
+	 *
+	 * <p>Their standing pose swapped for the Sit emote wasn't enough on its own. The game never
+	 * starts a player's new pose from its first frame: it carries on at whatever frame the pose
+	 * before had got to, which lands in the emote's nine frames of sitting down. Sitting down, and
+	 * again whenever they turned on the spot (the game stands people up to turn), they showed
+	 * part-way down, leaning forward with their arms out. With more than 200 players about (50 in
+	 * low-memory mode) the game stops animating anyone whose pose is their standing pose and draws
+	 * them at a frame it held from long before, nearly always one of those nine: everyone sat down
+	 * was frozen half-way, and the whole crowd stood up and sat down again each time the count of
+	 * players crossed 200. The seated loop isn't their standing pose, so the game draws it as it is,
+	 * every frame of it seated; and the next game cycle the game puts their own pose back itself,
+	 * so nothing is left to undo when they get up.
+	 */
+	void seat()
+	{
+		if (stance.isEmpty())
+		{
+			return;
+		}
+		if (seatedLengths == null && !seatedLooked)
+		{
+			seatedLooked = true;
+			seatedLengths = seatedLengths(client);
+		}
+		seat(client.getGameCycle(), seatedLengths);
+	}
+
+	/** As above, at game cycle {@code cycle}, each frame of the seated loop lasting this long. */
+	void seat(int cycle, int[] lengths)
+	{
+		int total = 0;
+		if (lengths != null)
+		{
+			for (int length : lengths)
+			{
+				total += Math.max(1, length);
+			}
+		}
+		if (total == 0)
+		{
+			return;
+		}
+		for (Player p : stance.keySet())
+		{
+			int pose = p.getPoseAnimation();
+			boolean still = pose == SIT || pose == SEATED || pose == p.getIdlePoseAnimation()
+				|| pose == p.getIdleRotateLeft() || pose == p.getIdleRotateRight();
+			if (p.getAnimation() != -1 || pose == -1 || !still || SpreadingDrawCallbacks.reallyMoving(p))
+			{
+				// Doing something, or walking off: the game shows that, and they stand up at the next tick.
+				continue;
+			}
+			int t = Math.floorMod(cycle + SEATED_PHASE * p.getId(), total);
+			int frame = 0;
+			while (t >= Math.max(1, lengths[frame]))
+			{
+				t -= Math.max(1, lengths[frame]);
+				frame++;
+			}
+			p.setPoseAnimation(SEATED);
+			p.setPoseAnimationFrame(frame);
+		}
+	}
+
+	/** The frame lengths of {@link #SEATED}, or null if the game can't give them yet. */
+	private static int[] seatedLengths(Client client)
+	{
+		try
+		{
+			Animation seated = client.loadAnimation(SEATED);
+			int[] lengths = seated == null || seated.isMayaAnim() ? null : seated.getFrameLengths();
+			return lengths == null || lengths.length == 0 ? null : lengths;
+		}
+		catch (RuntimeException e)
+		{
+			return null;
+		}
 	}
 
 	/**

@@ -70,7 +70,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.30";
+	static final String VERSION = "1.9.33";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -138,6 +138,14 @@ public class PersonalSpacePlugin extends Plugin
 	 */
 	private final int[] busyTick = new int[OffsetTable.CAPACITY];
 	private static final int BUSY_TICKS = 10;
+	/**
+	 * Someone counts as casting a skilling spell (alching, enchanting...) for this long after their
+	 * last cast began, in game cycles: 9 seconds, long enough to miss a cast or two. The pauses
+	 * between casts don't end it; stopping does.
+	 */
+	static final int CASTING_CYCLES = 450;
+	/** Game cycles in a game tick. */
+	private static final int TICK_CYCLES = 30;
 
 	/**
 	 * Whether a player wears anything in the cape slot (a cape, cloak, Ava's device, quiver...): it
@@ -191,6 +199,48 @@ public class PersonalSpacePlugin extends Plugin
 		return animation >= AnimationID.FORESTRY_CAMPFIRE_BURNING_GENERIC && animation <= AnimationID.FORESTRY_CAMPFIRE_BURNING_YEW_LOGS
 			|| animation >= AnimationID.FORESTRY_CAMPFIRE_BURNING_JATOBA_LOGS && animation <= AnimationID.FORESTRY_CAMPFIRE_BURNING_ROSEWOOD_LOGS
 			|| animation >= AnimationID.FORESTRY_CAMPFIRE_BURNING_GENERIC_NOLOOP && animation <= AnimationID.FORESTRY_CAMPFIRE_BURNING_ROSEWOOD_LOGS_NOLOOP;
+	}
+
+	/**
+	 * Whether an action this far through ({@code frame}) is over before the next game tick: the last
+	 * moments of a cast. High Alchemy cast as fast as it goes plays for 2.8 seconds of every 3, so no
+	 * game tick ever falls between two casts, and a caster stepping into the middle of their tile
+	 * walks as one ends instead. Never for an action that repeats, nor one that can't be read.
+	 */
+	static boolean endsWithinATick(net.runelite.api.Animation action, int frame)
+	{
+		if (action == null || frame < 0 || action.getFrameStep() > 0)
+		{
+			return false;
+		}
+		if (action.isMayaAnim())
+		{
+			return action.getDuration() - frame <= TICK_CYCLES;
+		}
+		int[] lengths = action.getFrameLengths();
+		if (lengths == null || frame >= lengths.length)
+		{
+			return false;
+		}
+		int left = 0;
+		for (int f = frame; f < lengths.length; f++)
+		{
+			left += lengths[f];
+		}
+		return left <= TICK_CYCLES;
+	}
+
+	/** Whether this player's action ends before the next game tick (see {@link #endsWithinATick}). Client thread. */
+	private boolean actionEnding(Player p)
+	{
+		try
+		{
+			return p.getAnimation() != -1 && endsWithinATick(client.loadAnimation(p.getAnimation()), p.getAnimationFrame());
+		}
+		catch (RuntimeException e)
+		{
+			return false;
+		}
 	}
 
 	/**
@@ -524,6 +574,12 @@ public class PersonalSpacePlugin extends Plugin
 			// effect is on, and not in PvP areas, like the level filter.
 			styler.apply(config.otherAlchers(), filter != null && filter.enabled);
 		}
+		IdleSitter sitter = idleSitter;
+		if (sitter != null)
+		{
+			// Everyone sat down is drawn seated this frame, never part-way down (see IdleSitter#seat).
+			sitter.seat();
+		}
 		ensureInstalled();
 		if (wrapper != null)
 		{
@@ -811,6 +867,8 @@ public class PersonalSpacePlugin extends Plugin
 
 		List<StackSpreader.Entry> entries = new ArrayList<>();
 		List<StackSpreader.Placement> easingBack = new ArrayList<>();
+		Set<Integer> casters = new HashSet<>();
+		Set<Integer> castsEnding = new HashSet<>();
 		int nearbyCount = 0;
 		int skipped = 0;
 		int cycle = client.getGameCycle();
@@ -884,9 +942,22 @@ public class PersonalSpacePlugin extends Plugin
 			}
 			boolean busy = busyTick[id] != 0 && tick - busyTick[id] <= BUSY_TICKS;
 			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation(), busy, wearsCape(p.getPlayerComposition())));
+			if (alchStyler != null && alchStyler.castWithin(id, cycle, CASTING_CYCLES))
+			{
+				casters.add(id);
+				if (busyTick[id] == tick && actionEnding(p))
+				{
+					castsEnding.add(id);
+				}
+			}
 		}
 		}
 
+		planner.casting = casters::contains;
+		int thisTick = tick;
+		// A cast that is over before the next tick counts as a break between casts: High Alchemy
+		// cast as fast as it goes never leaves one.
+		planner.midAction = id -> id >= 0 && id < OffsetTable.CAPACITY && busyTick[id] == thisTick && !castsEnding.contains(id);
 		planner.smallGroupsClose = config.smallGroupsClose();
 		planner.pose = config.pose();
 		planner.cameraX = client.getCameraX();
@@ -899,8 +970,14 @@ public class PersonalSpacePlugin extends Plugin
 			planner.cameraY = Integer.MIN_VALUE;
 		}
 		planner.arrangement = config.arrangement();
+		CrowdPlanner.Surroundings around = surroundings(wv);
 		CrowdPlanner.Plan plan = planner.plan(entries, id -> shownTick[id] == tick, config.spacing(), config.maxStack(),
-			config.arrangement() != PersonalSpaceConfig.Arrangement.CIRCLE, config.includeLocalPlayer(), tick, surroundings(wv));
+			config.arrangement() != PersonalSpaceConfig.Arrangement.CIRCLE, config.includeLocalPlayer(), tick, around);
+		if (wrapper != null)
+		{
+			// A pet drawn beside whoever stands on it goes only where a body could stand.
+			wrapper.ground = around;
+		}
 		offsets.clearTargets();
 		for (StackSpreader.Placement pl : plan.unplaced)
 		{
@@ -929,6 +1006,13 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		for (StackSpreader.Placement pl : plan.placements)
 		{
+			if (plan.castersInTheMiddle.contains(pl.id))
+			{
+				middleTaken.add(pl.tile);
+			}
+		}
+		for (StackSpreader.Placement pl : plan.placements)
+		{
 			if (pl.id >= 0 && pl.id < OffsetTable.CAPACITY && placedTick[pl.id] != tick - 1)
 			{
 				// Not placed last tick: whatever they were waiting for then is over. Left set, it ended
@@ -943,7 +1027,11 @@ public class PersonalSpacePlugin extends Plugin
 			int nowZ = valid ? offsets.dz(pl.id) : 0;
 			boolean fromTheMiddle = valid && nowX == 0 && nowZ == 0 && (pl.dx != 0 || pl.dz != 0);
 			boolean aStep = valid && Math.hypot(pl.dx - nowX, pl.dz - nowZ) >= OffsetTable.MIN_WALK_DISTANCE;
-			boolean busyStep = valid && aStep && !offsets.isWalking(pl.id) && busyTick[pl.id] == tick;
+			// A caster stepping into the middle of their tile was given it between casts, or as one
+			// ends (see CrowdPlanner#casterFor): straight in, before the next. Kept waiting for a
+			// break as well, a High Alcher never had one and walked in mid-cast.
+			boolean busyStep = valid && aStep && !offsets.isWalking(pl.id) && busyTick[pl.id] == tick
+				&& !plan.castersInTheMiddle.contains(pl.id);
 			boolean waitHere = busyStep && (busyWaitSince[pl.id] != 0
 				|| worthWaiting(busyAnimation[pl.id], fromTheMiddle && !middleTaken.contains(pl.tile)));
 			if (busyStep && !waitHere)
@@ -1105,6 +1193,10 @@ public class PersonalSpacePlugin extends Plugin
 		if (levelFilter != null)
 		{
 			levelFilter.enabled = false;
+		}
+		if (wrapper != null)
+		{
+			wrapper.ground = null;
 		}
 		if (idleSitter != null)
 		{
@@ -1498,6 +1590,8 @@ public class PersonalSpacePlugin extends Plugin
 			s.refusedDrawn = w.refusedDrawn;
 			s.aloneRefusedDrawn = w.aloneRefusedDrawn;
 			s.movingRefusedDrawn = w.movingRefusedDrawn;
+			s.followersRefusedDrawn = w.followersRefusedDrawn;
+			s.followersBesideDrawn = w.followersBesideDrawn;
 			s.walksLegsStill = w.walksLegsStill;
 			s.walksLegsStillBusy = w.walksLegsStillBusy;
 			s.legsStillBy = w.legsStillBy.clone();

@@ -81,6 +81,8 @@ final class AlchStyler
 	private final Set<Player> glowing = Collections.newSetFromMap(new IdentityHashMap<>());
 	/** The emote each player last did for a cast (Party), so the next one is always another. */
 	private final int[] lastEmote = new int[OffsetTable.CAPACITY];
+	/** The game cycle each player last started a cast, by id (see {@link #castWithin}). */
+	private final int[] castCycle = new int[OffsetTable.CAPACITY];
 
 	/** Diagnostics: casts drawn still or as an emote. */
 	long restyled;
@@ -90,15 +92,35 @@ final class AlchStyler
 	AlchStyler(Client client)
 	{
 		this.client = client;
+		java.util.Arrays.fill(castCycle, Integer.MIN_VALUE / 2);
 	}
 
 	/** From AnimationChanged and GraphicChanged: look at this actor before the next frame. Client thread. */
 	void noticed(Actor actor)
 	{
-		if (actor instanceof Player && actor != client.getLocalPlayer())
+		if (!(actor instanceof Player))
+		{
+			return;
+		}
+		int id = ((Player) actor).getId();
+		if (CASTS.contains(actor.getAnimation()) && id >= 0 && id < castCycle.length)
+		{
+			// Noted before it's restyled: drawn still or dancing, they're casting all the same.
+			castCycle[id] = client.getGameCycle();
+		}
+		if (actor != client.getLocalPlayer())
 		{
 			changed.add((Player) actor);
 		}
+	}
+
+	/**
+	 * Whether this player (you too) started a cast in the last {@code cycles} game cycles, however
+	 * Alchers behavior shows it. Client thread.
+	 */
+	boolean castWithin(int id, int cycle, int cycles)
+	{
+		return id >= 0 && id < castCycle.length && cycle - castCycle[id] <= cycles;
 	}
 
 	/** Before each frame is drawn: restyle whoever started alching, if the setting asks and may. Client thread. */

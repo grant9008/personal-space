@@ -357,8 +357,8 @@ final class StackProbe implements RenderCallback
 		heldTotal++;
 	}
 
-	/** Ask the other render callbacks (e.g. Entity Hider) whether a player may be drawn, without this one taking part. */
-	boolean othersAllow(RenderCallbackManager manager, Player player)
+	/** Ask the other render callbacks (e.g. Entity Hider) whether a player or NPC may be drawn, without this one taking part. */
+	boolean othersAllow(RenderCallbackManager manager, Renderable renderable)
 	{
 		if (manager == null)
 		{
@@ -367,7 +367,7 @@ final class StackProbe implements RenderCallback
 		asking = true;
 		try
 		{
-			return manager.addEntity(player, false);
+			return manager.addEntity(renderable, false);
 		}
 		finally
 		{
