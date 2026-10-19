@@ -89,6 +89,12 @@ final class StackSpreader
 		final int orientation;
 		/** Busy with something (alching, smithing, an emote) a moment ago. */
 		final boolean busy;
+		/**
+		 * Wearing something in the cape slot (a cape, cloak, Ava's device, quiver...): it hangs
+		 * behind them, and in a crowd round an object nobody is given a spot in its way (see
+		 * {@link CrowdPlanner#CAPE_REACH}).
+		 */
+		final boolean cape;
 
 		Entry(int id, long tile, boolean local)
 		{
@@ -102,11 +108,17 @@ final class StackSpreader
 
 		Entry(int id, long tile, boolean local, int orientation, boolean busy)
 		{
+			this(id, tile, local, orientation, busy, false);
+		}
+
+		Entry(int id, long tile, boolean local, int orientation, boolean busy, boolean cape)
+		{
 			this.id = id;
 			this.tile = tile;
 			this.local = local;
 			this.orientation = orientation;
 			this.busy = busy;
+			this.cape = cape;
 		}
 	}
 

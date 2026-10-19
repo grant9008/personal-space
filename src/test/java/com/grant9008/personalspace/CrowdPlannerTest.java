@@ -5195,4 +5195,249 @@ public class CrowdPlannerTest
 			last = now;
 		}
 	}
+
+	/**
+	 * How far behind someone wearing a cape, and how far round from straight back, the legs of whoever
+	 * stands there pass through it, as the game's own models of the common capes have it (both
+	 * standing, idling): about 64 apart, within 70 degrees of straight back.
+	 */
+	private static final int CAPE_HANGS = 64;
+	private static final double CAPE_SIDE = Math.cos(Math.toRadians(70));
+
+	/** These people, with a cape on everyone {@code caped} picks. */
+	private static List<StackSpreader.Entry> withCapes(List<StackSpreader.Entry> still, java.util.function.IntPredicate caped)
+	{
+		List<StackSpreader.Entry> out = new ArrayList<>();
+		for (StackSpreader.Entry e : still)
+		{
+			out.add(new StackSpreader.Entry(e.id, e.tile, e.local, e.orientation, e.busy, caped.test(e.id)));
+		}
+		return out;
+	}
+
+	/**
+	 * Everyone drawn ({@code at}) in the way of someone's cape: behind them as the plugin turns them
+	 * (towards the fire they're round, or what they face), nearer than {@link #CAPE_HANGS}.
+	 */
+	private static List<String> inTheWayOfCapes(CrowdPlanner.Plan plan, List<StackSpreader.Entry> still, Map<Integer, double[]> at)
+	{
+		Map<Integer, int[]> offset = spots(plan);
+		List<String> out = new ArrayList<>();
+		for (StackSpreader.Entry a : still)
+		{
+			double[] wearer = at.get(a.id);
+			if (!a.cape || wearer == null)
+			{
+				continue;
+			}
+			int[] d = offset.getOrDefault(a.id, new int[]{0, 0});
+			int[] fire = plan.fires.get(a.tile);
+			int facing = fire != null ? StackSpreader.faceTowards(a.orientation, d[0], d[1], fire[0], fire[1])
+				: plan.curvedRows.contains(a.tile) ? StackSpreader.faceSameSpot(a.orientation, d[0], d[1]) : a.orientation;
+			double turn = facing * 2 * Math.PI / StackSpreader.FULL_TURN;
+			// Facing (-sin, -cos): the cape hangs the other way.
+			double backX = Math.sin(turn);
+			double backZ = Math.cos(turn);
+			for (Map.Entry<Integer, double[]> b : at.entrySet())
+			{
+				double east = b.getValue()[0] - wearer[0];
+				double north = b.getValue()[1] - wearer[1];
+				double apart = Math.hypot(east, north);
+				if (b.getKey() != a.id && apart > 0 && apart < CAPE_HANGS && east * backX + north * backZ > CAPE_SIDE * apart)
+				{
+					out.add(b.getKey() + " is drawn " + Math.round(apart) + " behind " + a.id + "'s cape");
+				}
+			}
+		}
+		return out;
+	}
+
+	@Test
+	public void nobodyRoundABusyCampfireStandsWhereSomeonesCapeHangs()
+	{
+		// Everyone round a busy campfire faces it, so a cape hangs out towards whoever stands behind,
+		// and with depth between players on, a yellow cape was drawn through the green legs of the
+		// one behind its wearer. Half of them wear capes, you too, and people come and go.
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		java.util.Random rnd = new java.util.Random(5);
+		List<StackSpreader.Entry> roster = withCapes(busyCampfire(12, 8, true), id -> id % 2 == 1);
+		Set<Integer> away = new HashSet<>();
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> last = new HashMap<>();
+		int moves = 0;
+		int stays = 0;
+		int drawn = 0;
+		for (int t = 1; t <= 200; t++)
+		{
+			for (StackSpreader.Entry e : roster)
+			{
+				if (e.id != YOU && t > 10 && rnd.nextInt(100) < 2 && !away.remove(e.id))
+				{
+					away.add(e.id);
+				}
+			}
+			List<StackSpreader.Entry> still = new ArrayList<>();
+			for (StackSpreader.Entry e : roster)
+			{
+				if (!away.contains(e.id))
+				{
+					still.add(e);
+				}
+			}
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, campfire);
+			if (t >= 3)
+			{
+				Map<Integer, double[]> at = drawnAsThePluginDoes(plan, still);
+				assertNobodyInsideAnybody("tick " + t, at);
+				Assert.assertEquals("tick " + t, new ArrayList<>(), inTheWayOfCapes(plan, still, at));
+				drawn += at.size();
+			}
+			Map<Integer, int[]> now = spots(plan);
+			for (Map.Entry<Integer, int[]> e : now.entrySet())
+			{
+				int[] was = last.get(e.getKey());
+				if (t > 10 && was != null)
+				{
+					stays++;
+					moves += Math.hypot(was[0] - e.getValue()[0], was[1] - e.getValue()[1]) >= 16 ? 1 : 0;
+				}
+			}
+			last = now;
+		}
+		Assert.assertTrue("people who stayed at the fire moved " + moves + " times in " + stays, stays > 3000 && moves <= 5);
+		Assert.assertTrue("only " + drawn / 198 + " drawn round the fire", drawn / 198 >= 36);
+	}
+
+	@Test
+	public void nobodyRoundABusyAnvilStandsWhereSomeonesCapeHangs()
+	{
+		// As round a fire: forty smithing, every other one in a cape, you among them in one. The
+		// people on the corner tiles face the anvil slantwise, and their capes hang that way.
+		List<StackSpreader.Entry> still = withCapes(smithing(15, 12, 2, 0, true), id -> id % 2 == 1 || id == YOU);
+		List<StackSpreader.Entry> corners = new ArrayList<>(still);
+		int id = 100;
+		for (long corner : new long[]{StackRegistry.key(0, 49, 50), StackRegistry.key(0, 51, 50)})
+		{
+			for (int i = 0; i < 4; i++)
+			{
+				corners.add(new StackSpreader.Entry(id, corner, false, facingTheAnvil(corner), true, id++ % 2 == 1));
+			}
+		}
+		for (List<StackSpreader.Entry> crowd : java.util.Arrays.asList(still, corners))
+		{
+			CrowdPlanner planner = new CrowdPlanner();
+			CrowdPlanner.Plan plan = null;
+			for (int t = 1; t <= 5; t++)
+			{
+				plan = atTheAnvil(planner, crowd, t);
+				assertStandingRoundTheAnvil("tick " + t, plan, crowd);
+				// Drawn: everyone given a spot, you, and whoever waits in the middle of a tile in sight.
+				Map<Integer, double[]> at = drawnAt(plan, crowd);
+				Set<Integer> placed = spots(plan).keySet();
+				for (StackSpreader.Entry e : crowd)
+				{
+					if (!placed.contains(e.id) && !e.local && plan.middleOutOfSight.contains(e.tile))
+					{
+						at.remove(e.id);
+					}
+				}
+				Assert.assertEquals("tick " + t, new ArrayList<>(), inTheWayOfCapes(plan, crowd, at));
+			}
+			Assert.assertTrue("only " + plan.placements.size() + " of " + crowd.size() + " stand round the anvil", plan.placements.size() >= crowd.size() * 3 / 4);
+		}
+	}
+
+	@Test
+	public void capesDontKeepAnyoneFromStandingBesideThem()
+	{
+		// A cape is only in the way of whoever stands behind it: side by side round the fire, a body's
+		// width apart, as many stand right at it with everyone in a cape as with nobody in one.
+		CrowdPlanner.Surroundings campfire = fireAt5050(openFlags(), false);
+		int[] nearest = new int[2];
+		for (int caped = 0; caped <= 1; caped++)
+		{
+			boolean capes = caped == 1;
+			List<StackSpreader.Entry> still = withCapes(busyCampfire(12, 8, true), who -> capes);
+			CrowdPlanner planner = new CrowdPlanner();
+			CrowdPlanner.Plan plan = null;
+			for (int t = 1; t <= 5; t++)
+			{
+				plan = atTheFire(planner, still, t, campfire);
+			}
+			for (double[] a : drawnAsThePluginDoes(plan, still).values())
+			{
+				nearest[caped] += fromTheFiresTile(a[0], a[1]) < CrowdPlanner.FIRE_MARGIN + CrowdPlanner.OBJECT_RING_STEP / 2.0 ? 1 : 0;
+			}
+		}
+		Assert.assertTrue("right at the fire: " + nearest[0] + " without capes, " + nearest[1] + " with", nearest[1] >= nearest[0] && nearest[0] >= 10);
+	}
+
+	@Test
+	public void aCapeHangsBehindItsWearerWhicheverWayTheyFace()
+	{
+		// Not everyone round the anvil faces it squarely: some are turned 30 or 40 degrees off it, some
+		// to the door, and those on the corners look past it. The plugin turns each of them to look
+		// where they were looking, so a cape hangs behind its wearer as they face, not as they would
+		// facing the anvil, and nobody is drawn there either.
+		List<StackSpreader.Entry> still = new ArrayList<>();
+		for (StackSpreader.Entry e : smithing(15, 12, 2, 0, true))
+		{
+			int turn = e.local ? 0 : e.id % 4 == 1 ? 228 : e.id % 4 == 2 ? -171 : e.id % 8 == 3 ? 1024 : 0;
+			still.add(new StackSpreader.Entry(e.id, e.tile, e.local, (e.orientation + turn + 2048) % 2048, e.busy, e.id % 2 == 1 || e.local));
+		}
+		int id = 100;
+		for (long corner : new long[]{StackRegistry.key(0, 49, 52), StackRegistry.key(0, 51, 52), StackRegistry.key(0, 49, 50)})
+		{
+			for (int i = 0; i < 3; i++)
+			{
+				int turn = (i - 1) * 142;
+				still.add(new StackSpreader.Entry(id, corner, false, (facingTheAnvil(corner) + turn + 2048) % 2048, false, id++ % 2 == 0));
+			}
+		}
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Plan plan = null;
+		for (int t = 1; t <= 6; t++)
+		{
+			plan = atTheAnvil(planner, still, t);
+			Map<Integer, double[]> at = drawnAt(plan, still);
+			Set<Integer> placed = spots(plan).keySet();
+			for (StackSpreader.Entry e : still)
+			{
+				if (!placed.contains(e.id) && !e.local && plan.middleOutOfSight.contains(e.tile))
+				{
+					at.remove(e.id);
+				}
+			}
+			assertNobodyInsideAnybody("tick " + t, at);
+			Assert.assertEquals("tick " + t, new ArrayList<>(), inTheWayOfCapes(plan, still, at));
+		}
+		// Fewer than when all face it: the place in front of anyone turned away is in the way of their cape.
+		Assert.assertTrue("only " + plan.placements.size() + " of " + still.size() + " stand round the anvil", plan.placements.size() >= still.size() * 2 / 3);
+	}
+
+	@Test
+	public void nobodyStandsWhereYourCapeHangsWithGiveMeASpotOff()
+	{
+		// With Give me a spot off you're drawn where you stand, in the middle of your tile, among the
+		// crowd round the fire or the anvil. Your cape hangs behind you all the same, and the ones who
+		// stood there kept their spots in its way.
+		List<List<StackSpreader.Entry>> scenes = java.util.Arrays.asList(withCapes(busyCampfire(12, 8, true), id -> id == YOU || id % 3 == 0),
+			withCapes(smithing(15, 12, 6, 6, true), id -> id == YOU || id % 3 == 0));
+		for (int k = 0; k < scenes.size(); k++)
+		{
+			List<StackSpreader.Entry> still = scenes.get(k);
+			CrowdPlanner.Surroundings around = k == 0 ? fireAt5050(openFlags(), false) : smithy();
+			CrowdPlanner planner = new CrowdPlanner();
+			for (int t = 1; t <= 8; t++)
+			{
+				CrowdPlanner.Plan plan = planner.plan(still, q -> true, PersonalSpaceConfig.SPACING_WIDE, PersonalSpaceConfig.MAX_STACK, true, false, t, around);
+				if (t >= 3)
+				{
+					Map<Integer, double[]> at = drawnAsThePluginDoes(plan, still);
+					assertNobodyInsideAnybody((k == 0 ? "fire" : "anvil") + ", tick " + t, at);
+					Assert.assertEquals((k == 0 ? "fire" : "anvil") + ", tick " + t, new ArrayList<>(), inTheWayOfCapes(plan, still, at));
+				}
+			}
+		}
+	}
 }

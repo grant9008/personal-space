@@ -20,6 +20,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.NPC;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
+import net.runelite.api.PlayerComposition;
 import net.runelite.api.Scene;
 import net.runelite.api.Tile;
 import net.runelite.api.WorldType;
@@ -38,6 +39,7 @@ import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.hooks.DrawCallbacks;
+import net.runelite.api.kit.KitType;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ChatIconManager;
 import net.runelite.client.party.PartyService;
@@ -68,7 +70,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.29";
+	static final String VERSION = "1.9.30";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -136,6 +138,17 @@ public class PersonalSpacePlugin extends Plugin
 	 */
 	private final int[] busyTick = new int[OffsetTable.CAPACITY];
 	private static final int BUSY_TICKS = 10;
+
+	/**
+	 * Whether a player wears anything in the cape slot (a cape, cloak, Ava's device, quiver...): it
+	 * hangs behind them, and in a crowd round an object nobody is given a spot in its way, where it
+	 * was drawn through their legs (see {@link StackSpreader.Entry#cape}).
+	 */
+	static boolean wearsCape(PlayerComposition look)
+	{
+		return look != null && look.getEquipmentId(KitType.CAPE) != -1;
+	}
+
 	/**
 	 * Someone given a spot while in the middle of an action waits in the middle of their tile for
 	 * a break in it, then walks out: moved mid-action, the action is cut off for the step (they
@@ -870,7 +883,7 @@ public class PersonalSpacePlugin extends Plugin
 				busyAnimation[id] = p.getAnimation();
 			}
 			boolean busy = busyTick[id] != 0 && tick - busyTick[id] <= BUSY_TICKS;
-			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation(), busy));
+			entries.add(new StackSpreader.Entry(id, tileKey, p == local, p.getCurrentOrientation(), busy, wearsCape(p.getPlayerComposition())));
 		}
 		}
 

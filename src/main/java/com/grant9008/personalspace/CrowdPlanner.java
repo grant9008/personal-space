@@ -1001,7 +1001,30 @@ final class CrowdPlanner
 	 * the places either side of you stood empty, as if nobody would work the anvil next to you.
 	 */
 	static final int OBJECT_YOUR_GAP = 56;
-	/** How far round a spot anyone drawn can crowd it, for any gap {@link Nearby#clear} is asked about. */
+	/**
+	 * Nobody round an object is given a spot in the way of someone's cape (anything in the cape
+	 * slot), behind them nearer than this, nor anyone wearing one a spot with someone that near behind
+	 * them. Everyone there faces the object, so a cape hangs out towards the row behind, and with depth
+	 * between players on it was drawn through the legs of whoever stood there. As the game's own
+	 * models have it, standing and idling (a cape sways): a skill, max, fire, god or team cape or an
+	 * Ava's device reaches 24 to 34 behind the middle of its wearer and 32 to 39 to either side, and
+	 * the legs of someone behind reach up to 17 forward of the middle of theirs, so it passes through
+	 * the legs of someone 44 to 52 straight behind, and of someone on the row behind off to one side
+	 * out to about 66 apart.
+	 */
+	static final int CAPE_REACH = 68;
+	/**
+	 * ...and only behind them: within this far round from straight back (70 degrees, as a cosine).
+	 * Further round, beside them, and in front of them, a cape touches nobody.
+	 */
+	static final double CAPE_BEHIND = Math.cos(Math.toRadians(70));
+	/**
+	 * A spot is kept while nobody is drawn in the way of a cape nearer than this, a little nearer
+	 * than a spot is given at: someone putting a cape on, or drawn in the middle of their tile just
+	 * behind one, doesn't walk everyone near them to the next spot and back.
+	 */
+	static final int CAPE_KEEP_REACH = 64;
+	/** How far round a spot anyone drawn can crowd it, for any gap {@link Nearby#clear} is asked about, or be in the way of a cape worn there. */
 	private static final int SPOT_NEIGHBOUR_REACH = 80;
 	/**
 	 * What a step nearer their own tile is worth to someone given a spot round an object, against a
@@ -1190,6 +1213,18 @@ final class CrowdPlanner
 	private static final short[][] SPOT_NEIGHBOURS = new short[OBJECT_SPOTS.size()][];
 	/** Which of {@link #OBJECT_SPOTS} are {@link #FIRE_MARGIN} clear of a fire's tile all round, for the crowd round a fire. */
 	private static final boolean[] CLEAR_OF_FLAMES = new boolean[OBJECT_SPOTS.size()];
+	/**
+	 * Where the people on each tile round an object (see {@link #besideIndex}) look, from its middle,
+	 * if they face it: the plugin turns them to face the spot {@link StackSpreader#LOOK_AHEAD} in front
+	 * of their tile (see {@link StackSpreader#faceSameSpot}). From a tile beside it that's its middle;
+	 * from a corner, a little short of it. Their capes hang straight back from there. Only for someone
+	 * whose facing isn't known: everyone else looks where they face (see {@link #lookingAt}).
+	 */
+	private static final double[][] OBJECT_FOCUS = new double[9][];
+	/** ...and round a fire, everyone looks at its middle. */
+	private static final double[] FIRE_FOCUS = {0, 0};
+	/** Asked of {@link Nearby#clear} for someone who may stand in the way of anyone's cape, and anyone in the way of theirs. */
+	private static final double[] ANY_CAPES = {};
 
 	static
 	{
@@ -1227,6 +1262,9 @@ final class CrowdPlanner
 		{
 			double east = (beside / 3 - 1) * 2.0 * HALF_TILE;
 			double north = (beside % 3 - 1) * 2.0 * HALF_TILE;
+			double away = Math.hypot(east, north);
+			double shortOf = away == 0 ? 0 : Math.max(0, 1 - StackSpreader.LOOK_AHEAD / away);
+			OBJECT_FOCUS[beside] = new double[]{east * shortOf, north * shortOf};
 			float[] from = new float[SPOT_X.length];
 			List<Integer> order = new ArrayList<>(SPOT_X.length);
 			for (int s = 0; s < SPOT_X.length; s++)
@@ -1250,6 +1288,41 @@ final class CrowdPlanner
 			OBJECT_CHEAPEST[beside] = order.stream().mapToInt(Integer::intValue).toArray();
 			OBJECT_COST[beside] = cost;
 		}
+	}
+
+	/**
+	 * Which way a cape worn at (x, z) hangs, its wearer looking at {@code focus} (see
+	 * {@link #lookingAt}), all from an object's middle: a unit vector, or null if they stand on it.
+	 */
+	static double[] hangs(double x, double z, double[] focus)
+	{
+		double east = x - focus[0];
+		double north = z - focus[1];
+		double away = Math.hypot(east, north);
+		return away < 1 ? null : new double[]{east / away, north / away};
+	}
+
+	/**
+	 * Whether a body at (x, z) is in the way of a cape worn at (capeX, capeZ) hanging towards
+	 * {@code back} (see {@link #hangs}): behind it, nearer than {@code reach} (see {@link #CAPE_REACH}).
+	 */
+	static boolean behind(double capeX, double capeZ, double[] back, double x, double z, int reach)
+	{
+		return back != null && behind(capeX, capeZ, back[0], back[1], x, z, reach);
+	}
+
+	/** {@link #behind}, the way it hangs given as (backX, backZ). */
+	private static boolean behind(double capeX, double capeZ, double backX, double backZ, double x, double z, int reach)
+	{
+		double east = x - capeX;
+		double north = z - capeZ;
+		double apart = east * east + north * north;
+		if (apart == 0 || apart >= (double) reach * reach)
+		{
+			return false;
+		}
+		double along = east * backX + north * backZ;
+		return along > 0 && along * along > CAPE_BEHIND * CAPE_BEHIND * apart;
 	}
 
 	private static List<int[]> objectSpots()
@@ -1656,6 +1729,11 @@ final class CrowdPlanner
 		final double[] others = new double[SPOT_X.length];
 		final double[] you = new double[SPOT_X.length];
 		final boolean[] used = new boolean[SPOT_X.length];
+		/** Spots in the way of a cape someone is drawn wearing (see {@link #CAPE_REACH}), and nearer it than {@link #CAPE_KEEP_REACH}. */
+		final boolean[] underCape = new boolean[SPOT_X.length];
+		final boolean[] underCapeKept = new boolean[SPOT_X.length];
+		/** Everyone drawn but not at a spot, as {east, north, 1 if one of this crowd or you}. */
+		private List<double[]> loose = new ArrayList<>();
 
 		Nearby()
 		{
@@ -1669,10 +1747,45 @@ final class CrowdPlanner
 			System.arraycopy(others, 0, out.others, 0, others.length);
 			System.arraycopy(you, 0, out.you, 0, you.length);
 			System.arraycopy(used, 0, out.used, 0, used.length);
+			System.arraycopy(underCape, 0, out.underCape, 0, underCape.length);
+			System.arraycopy(underCapeKept, 0, out.underCapeKept, 0, underCapeKept.length);
+			out.loose = new ArrayList<>(loose);
 			return out;
 		}
 
-		void add(double east, double north, boolean isYou)
+		/**
+		 * One of the crowd drawn at (east, north) from the object's middle without a spot, wearing a
+		 * cape looking at {@code cape} (see {@link #lookingAt}), or none (null).
+		 */
+		void add(double east, double north, boolean isYou, double[] cape)
+		{
+			addBody(east, north, isYou, true);
+			if (cape != null)
+			{
+				shade(east, north, hangs(east, north, cape), true);
+			}
+		}
+
+		/**
+		 * Someone drawn who isn't one of this crowd, as {east, north, 1 if it's you} from the object's
+		 * middle, and if they wear a cape and which way it hangs is known (round another object, or
+		 * you), {..., 1, which way it hangs}. Nobody is given a spot in the way of their cape, nor
+		 * anyone with a cape a spot with them in the way of it, but they take a spot from nobody: the
+		 * crowds on the tiles round about make room and come and go, and walked whoever had one to the
+		 * next spot or out of sight. Except you: you stay where you stand, and with Give me a spot off,
+		 * whoever stood behind you kept their spot in the way of your cape.
+		 */
+		void addElsewhere(double[] b)
+		{
+			boolean you = b[2] > 0;
+			addBody(b[0], b[1], you, you);
+			if (b.length > 5 && b[3] > 0)
+			{
+				shade(b[0], b[1], new double[]{b[4], b[5]}, you);
+			}
+		}
+
+		private void addBody(double east, double north, boolean isYou, boolean ofCrowd)
 		{
 			double[] near = isYou ? you : others;
 			for (int s = 0; s < near.length; s++)
@@ -1681,26 +1794,96 @@ final class CrowdPlanner
 				double z = SPOT_Z[s] - north;
 				near[s] = Math.min(near[s], x * x + z * z);
 			}
+			loose.add(new double[]{east, north, ofCrowd ? 1 : 0});
+		}
+
+		/** Marks the spots in the way of a cape at (x, z) hanging towards {@code back}: kept ones too if its wearer is one of this crowd. */
+		private void shade(double x, double z, double[] back, boolean ofCrowd)
+		{
+			for (int s = 0; s < SPOT_X.length; s++)
+			{
+				if (behind(x, z, back, SPOT_X[s], SPOT_Z[s], CAPE_REACH))
+				{
+					underCape[s] = true;
+					underCapeKept[s] |= ofCrowd && behind(x, z, back, SPOT_X[s], SPOT_Z[s], CAPE_KEEP_REACH);
+				}
+			}
 		}
 
 		/**
 		 * {@link #add} for someone standing at spot {@code at}. Only the spots nearer it than
-		 * {@link #SPOT_NEIGHBOUR_REACH} are updated: no gap {@link #clear} asks about is wider, so for the rest
-		 * the answer is the same either way.
+		 * {@link #SPOT_NEIGHBOUR_REACH} are updated: no gap {@link #clear} asks about is wider, nor
+		 * does a cape reach further, so for the rest the answer is the same either way.
 		 */
-		void addSpot(int at, boolean isYou)
+		void addSpot(int at, boolean isYou, double[] cape)
 		{
 			double[] near = isYou ? you : others;
+			double[] back = cape == null ? null : hangs(SPOT_X[at], SPOT_Z[at], cape);
 			for (short s : SPOT_NEIGHBOURS[at])
 			{
 				double x = SPOT_X[s] - SPOT_X[at];
 				double z = SPOT_Z[s] - SPOT_Z[at];
 				near[s] = Math.min(near[s], x * x + z * z);
+				if (behind(SPOT_X[at], SPOT_Z[at], back, SPOT_X[s], SPOT_Z[s], CAPE_REACH))
+				{
+					underCape[s] = true;
+					underCapeKept[s] |= behind(SPOT_X[at], SPOT_Z[at], back, SPOT_X[s], SPOT_Z[s], CAPE_KEEP_REACH);
+				}
 			}
 		}
 
-		/** Whether this spot is free and nobody is drawn closer to it than {@code gap}, or than {@link #OBJECT_YOUR_GAP} if it's you. */
-		boolean clear(int s, int gap)
+		/**
+		 * Whether anyone is drawn in the way of a cape worn at spot {@code s} by someone looking at
+		 * {@code cape}, nearer than {@code reach}: of this crowd only, or anyone.
+		 */
+		private boolean inTheWay(int s, double[] cape, int reach, boolean crowdOnly)
+		{
+			double east = SPOT_X[s] - cape[0];
+			double north = SPOT_Z[s] - cape[1];
+			double away = Math.sqrt(east * east + north * north);
+			if (away < 1)
+			{
+				return false;
+			}
+			double backX = east / away;
+			double backZ = north / away;
+			for (short t : SPOT_NEIGHBOURS[s])
+			{
+				if (used[t] && behind(SPOT_X[s], SPOT_Z[s], backX, backZ, SPOT_X[t], SPOT_Z[t], reach))
+				{
+					return true;
+				}
+			}
+			for (double[] b : loose)
+			{
+				if ((b[2] > 0 || !crowdOnly) && behind(SPOT_X[s], SPOT_Z[s], backX, backZ, b[0], b[1], reach))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * Whether someone may be given this spot: it's free, nobody is drawn closer to it than
+		 * {@code gap}, or than {@link #OBJECT_YOUR_GAP} if it's you, it isn't in the way of anyone's
+		 * cape, and if they wear one, looking at {@code cape} (else null), nobody is in the way of theirs.
+		 */
+		boolean clear(int s, int gap, double[] cape)
+		{
+			return spaced(s, gap) && (cape == ANY_CAPES || !underCape[s] && (cape == null || !inTheWay(s, cape, CAPE_REACH, false)));
+		}
+
+		/**
+		 * Whether someone already standing at this spot keeps it: as {@link #clear}, with capes judged
+		 * by {@link #CAPE_KEEP_REACH}, and only this crowd in the way of theirs.
+		 */
+		boolean keeps(int s, int gap, double[] cape)
+		{
+			return spaced(s, gap) && !underCapeKept[s] && (cape == null || !inTheWay(s, cape, CAPE_KEEP_REACH, true));
+		}
+
+		private boolean spaced(int s, int gap)
 		{
 			int yourGap = Math.max(gap, OBJECT_YOUR_GAP);
 			return !used[s] && others[s] >= gap * gap && you[s] >= yourGap * yourGap;
@@ -1743,6 +1926,12 @@ final class CrowdPlanner
 	private static final class AtObject
 	{
 		final int yourId;
+		final long object;
+		final boolean fire;
+		/** Everyone round it wearing a cape, and which way they face (-1 if that isn't known). */
+		final Map<Integer, Integer> capes;
+		/** Where each of them looks, worked out once: see {@link #cape}. */
+		private final Map<Integer, double[]> looks = new HashMap<>();
 		/** Id to spot, in the order they were given. */
 		final Map<Integer, Integer> spotOf = new LinkedHashMap<>();
 		final Map<Integer, Long> tileOf = new HashMap<>();
@@ -1751,9 +1940,26 @@ final class CrowdPlanner
 		final Set<Long> middles = new HashSet<>();
 		Nearby near = new Nearby();
 
-		AtObject(int yourId)
+		AtObject(int yourId, long object, boolean fire, Map<Integer, Integer> capes)
 		{
 			this.yourId = yourId;
+			this.object = object;
+			this.fire = fire;
+			this.capes = capes;
+		}
+
+		/**
+		 * Where someone on this tile wearing a cape looks (see {@link #lookingAt}), or null if they wear
+		 * none: the same array for them all tick, which {@link #fillNearestFirst} keeps its search by.
+		 */
+		double[] cape(int id, long tile)
+		{
+			Integer facing = capes.get(id);
+			if (facing == null)
+			{
+				return null;
+			}
+			return fire ? FIRE_FOCUS : looks.computeIfAbsent(id, k -> lookingAt(object, tile, facing));
 		}
 
 		void give(int id, long tile, int spot)
@@ -1762,7 +1968,7 @@ final class CrowdPlanner
 			tileOf.put(id, tile);
 			onTile.merge(tile, 1, Integer::sum);
 			near.used[spot] = true;
-			near.addSpot(spot, id == yourId);
+			near.addSpot(spot, id == yourId, cape(id, tile));
 		}
 
 		int on(long tile)
@@ -1778,12 +1984,12 @@ final class CrowdPlanner
 			(StackRegistry.sceneY(tile) - StackRegistry.sceneY(object)) * 2.0 * HALF_TILE};
 	}
 
-	/** The first of these spots that can be reached and is clear by {@code gap}, or -1. */
-	private static int firstClear(int[] order, Reach reach, Nearby near, int gap)
+	/** The first of these spots that can be reached and is clear by {@code gap} for someone wearing a cape (see {@link Nearby#clear}) or not, or -1. */
+	private static int firstClear(int[] order, Reach reach, Nearby near, int gap, double[] cape)
 	{
 		for (int s : order)
 		{
-			if (near.clear(s, gap) && reach.ok(s))
+			if (near.clear(s, gap, cape) && reach.ok(s))
 			{
 				return s;
 			}
@@ -1798,12 +2004,12 @@ final class CrowdPlanner
 	 * drawn straight from where they stand: the nearest clear spot was sometimes across the object,
 	 * and a smith made room for you by walking through the anvil.
 	 */
-	private static int nearestClear(int from, Reach reach, Nearby near, int gap, Ground ground)
+	private static int nearestClear(int from, Reach reach, Nearby near, int gap, double[] cape, Ground ground)
 	{
 		List<Integer> clear = new ArrayList<>();
 		for (int s = 0; s < SPOT_X.length; s++)
 		{
-			if (near.clear(s, gap) && reach.ok(s))
+			if (near.clear(s, gap, cape) && reach.ok(s))
 			{
 				clear.add(s);
 			}
@@ -1916,7 +2122,8 @@ final class CrowdPlanner
 	 * near their own tile. A spot is only used where it can be stood on and reached by a
 	 * straight walk from their tile that passes nothing in the way, as that walk is how they're drawn
 	 * getting there. Nobody is drawn closer than {@link #OBJECT_GAP} to anyone else, or
-	 * {@link #OBJECT_YOUR_GAP} to you. You choose first: the spot nearest the object on your side.
+	 * {@link #OBJECT_YOUR_GAP} to you, nor in the way of anyone's cape (see {@link #CAPE_REACH}). You
+	 * choose first: the spot nearest the object on your side.
 	 * Everyone keeps their spot while it stays clear, whoever loses it steps to the clear spot nearest
 	 * it, and anyone left over once the rings are full waits out of sight rather than being drawn out
 	 * on their own.
@@ -1946,11 +2153,16 @@ final class CrowdPlanner
 		if (!crowds.isEmpty())
 		{
 			int yourId = -1;
+			Map<Integer, Integer> capes = new HashMap<>();
 			for (List<StackSpreader.Entry> there : byTile.values())
 			{
 				for (StackSpreader.Entry en : there)
 				{
 					yourId = en.local ? en.id : yourId;
+					if (en.cape)
+					{
+						capes.put(en.id, en.orientation);
+					}
 				}
 			}
 			List<Long> objects = new ArrayList<>(crowds.keySet());
@@ -2005,11 +2217,12 @@ final class CrowdPlanner
 			objects.removeIf(object -> crowds.get(object).isEmpty());
 			// Everyone else drawn, as {plane, east, north, 1 if it's you}: at their spots, and one in the
 			// middle of any tile where someone without a spot is drawn. Fires are laid out after, clear of these.
+			// You in a cape, too: which way it hangs (see drawnBody).
 			List<double[]> bodies = new ArrayList<>();
+			Integer yourCape = capes.get(yourId);
 			for (StackSpreader.Placement p : plan.placements)
 			{
-				bodies.add(new double[]{StackRegistry.plane(p.tile), StackRegistry.sceneX(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dx,
-					StackRegistry.sceneY(p.tile) * 2.0 * HALF_TILE + HALF_TILE + p.dz, p.id == yourId ? 1 : 0});
+				bodies.add(drawnBody(plan, p.tile, p.dx, p.dz, p.id == yourId, p.id == yourId ? yourCape : null, null));
 			}
 			for (Map.Entry<Long, List<StackSpreader.Entry>> e : byTile.entrySet())
 			{
@@ -2032,8 +2245,7 @@ final class CrowdPlanner
 				}
 				if (drawn)
 				{
-					bodies.add(new double[]{StackRegistry.plane(tile), StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE,
-						StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE, you ? 1 : 0});
+					bodies.add(drawnBody(plan, tile, 0, 0, you, you ? yourCape : null, you && yourCape != null ? fireFacedAt(tile, crowds) : null));
 				}
 			}
 			// The crowd you're in first, so the crowds round the rest keep clear of you as well: beside a
@@ -2055,8 +2267,8 @@ final class CrowdPlanner
 						int s = remembered(id, object, tile);
 						if (s >= 0)
 						{
-							there.add(new double[]{StackRegistry.plane(object), StackRegistry.sceneX(object) * 2.0 * HALF_TILE + HALF_TILE + SPOT_X[s],
-								StackRegistry.sceneY(object) * 2.0 * HALF_TILE + HALF_TILE + SPOT_Z[s], id == yourId ? 1 : 0});
+							Integer facing = capes.get(id);
+							there.add(atSpot(object, s, id == yourId, facing == null ? null : focusOf(object, tile, facing)));
 						}
 					}
 				}
@@ -2070,7 +2282,7 @@ final class CrowdPlanner
 					yetToCome.addAll(standing.get(order.get(later)));
 				}
 				layOutRoundObject(plan, order.get(k), crowds.get(order.get(k)), idsByTile, alone, byTile, bodies, yetToCome, placed, shown,
-					capacity, around, yourId, now, groundsNow);
+					capacity, around, yourId, capes, now, groundsNow);
 			}
 		}
 		// Whoever lost their spot round an object (waiting, gone, or the crowd broken up) has it kept for them a while.
@@ -2098,6 +2310,96 @@ final class CrowdPlanner
 		grounds = groundsNow;
 	}
 
+	/**
+	 * Someone standing at spot {@code s} round {@code object}, as {plane, east, north, 1 if it's you}
+	 * in the scene, and with a cape, looking at {@code cape} (see {@link #lookingAt}), {..., 1, and
+	 * which way it hangs, east and north}.
+	 */
+	private static double[] atSpot(long object, int s, boolean you, double[] cape)
+	{
+		double x = StackRegistry.sceneX(object) * 2.0 * HALF_TILE + HALF_TILE + SPOT_X[s];
+		double z = StackRegistry.sceneY(object) * 2.0 * HALF_TILE + HALF_TILE + SPOT_Z[s];
+		double[] back = cape == null ? null : hangs(SPOT_X[s], SPOT_Z[s], cape);
+		return back != null ? new double[]{StackRegistry.plane(object), x, z, you ? 1 : 0, 1, back[0], back[1]}
+			: new double[]{StackRegistry.plane(object), x, z, you ? 1 : 0};
+	}
+
+	/**
+	 * Someone drawn at (dx, dz) from the middle of their tile, as {plane, east, north, 1 if it's you}
+	 * in the scene, and if they wear a cape and face this way ({@code facing}, else null), {..., 1, and
+	 * which way it hangs, east and north}: behind them as the plugin turns them (see
+	 * {@link StackRegistry#drawOrientation}), towards {@code fire} (from their tile's middle, else null)
+	 * if they're round one, else as this plan has laid out their tile so far.
+	 */
+	private static double[] drawnBody(Plan plan, long tile, int dx, int dz, boolean you, Integer facing, int[] fire)
+	{
+		double x = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE + dx;
+		double z = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE + dz;
+		if (facing == null || facing < 0)
+		{
+			return new double[]{StackRegistry.plane(tile), x, z, you ? 1 : 0};
+		}
+		int[] towards = fire != null ? fire : plan.fires.get(tile);
+		int turned;
+		if (towards != null)
+		{
+			turned = StackSpreader.faceTowards(facing, dx, dz, towards[0], towards[1]);
+		}
+		else if (plan.curvedRows.contains(tile) || plan.facingIn.contains(tile))
+		{
+			turned = StackSpreader.faceSameSpot(facing, dx, dz);
+		}
+		else
+		{
+			PersonalSpaceConfig.Pose pose = plan.poses.get(tile);
+			int inwards = StackSpreader.faceTowards(facing, dx, dz, 0, 0);
+			turned = pose == PersonalSpaceConfig.Pose.FACING ? inwards : pose == PersonalSpaceConfig.Pose.ANGLED ? StackSpreader.halfway(facing, inwards) : facing;
+		}
+		// Facing (-sin, -cos): the cape hangs the other way.
+		double a = StackSpreader.toRadians(turned);
+		return new double[]{StackRegistry.plane(tile), x, z, you ? 1 : 0, 1, Math.sin(a), Math.cos(a)};
+	}
+
+	/** Where the fire is, from this tile's middle, if its people are in the crowd round it this tick, else null. */
+	private int[] fireFacedAt(long tile, Map<Long, List<Long>> crowds)
+	{
+		for (Map.Entry<Long, List<Long>> c : crowds.entrySet())
+		{
+			long fire = c.getKey();
+			if (fireCrowds.contains(fire) && c.getValue().contains(tile))
+			{
+				return new int[]{(StackRegistry.sceneX(fire) - StackRegistry.sceneX(tile)) * 2 * HALF_TILE, (StackRegistry.sceneY(fire) - StackRegistry.sceneY(tile)) * 2 * HALF_TILE};
+			}
+		}
+		return null;
+	}
+
+	/** Where someone on this tile round this object, facing this way, looks: at the fire, round one, else see {@link #lookingAt}. */
+	private double[] focusOf(long object, long tile, int facing)
+	{
+		return fireCrowds.contains(object) ? FIRE_FOCUS : lookingAt(object, tile, facing);
+	}
+
+	/**
+	 * Where someone on this tile round an object, facing this way (-1 if that isn't known), looks,
+	 * from the object's middle. Wherever they're drawn, the plugin turns them to face the spot
+	 * {@link StackSpreader#LOOK_AHEAD} in front of their tile the way they face (see
+	 * {@link StackSpreader#faceSameSpot}), and their cape hangs straight back from it. Taken as the
+	 * object's middle, or a corner's {@link #OBJECT_FOCUS}, the cape of anyone turned off it (towards
+	 * the other of two anvils either side of their tile, a furnace's middle, the door) hung where
+	 * nobody was kept out of.
+	 */
+	private static double[] lookingAt(long object, long tile, int facing)
+	{
+		if (facing < 0)
+		{
+			return OBJECT_FOCUS[besideIndex(tile, object)];
+		}
+		double[] m = middleOf(tile, object);
+		double a = StackSpreader.toRadians(facing);
+		return new double[]{m[0] - Math.sin(a) * StackSpreader.LOOK_AHEAD, m[1] - Math.cos(a) * StackSpreader.LOOK_AHEAD};
+	}
+
 	/** 0 if you're one of the people on these tiles laid out round an object, else 1. */
 	private static int yoursFirst(List<Long> tiles, Map<Long, List<Integer>> idsByTile, int yourId)
 	{
@@ -2118,7 +2420,7 @@ final class CrowdPlanner
 	 */
 	private void layOutRoundObject(Plan plan, long object, List<Long> tiles, Map<Long, List<Integer>> idsByTile, Set<Long> alone,
 		Map<Long, List<StackSpreader.Entry>> byTile, List<double[]> bodies, List<double[]> yetToCome, Set<Integer> placed, IntPredicate shown,
-		int capacity, Surroundings around, int yourId, Map<Integer, long[]> now, Map<Long, Ground> groundsNow)
+		int capacity, Surroundings around, int yourId, Map<Integer, Integer> capes, Map<Integer, long[]> now, Map<Long, Ground> groundsNow)
 	{
 		int plane = StackRegistry.plane(object);
 		int objectX = StackRegistry.sceneX(object);
@@ -2176,7 +2478,9 @@ final class CrowdPlanner
 		{
 			if (b[0] == plane && Math.hypot(b[1] - middleX, b[2] - middleZ) < OBJECT_REACH + OBJECT_YOUR_GAP)
 			{
-				taken.add(new double[]{b[1] - middleX, b[2] - middleZ, b[3]});
+				// With a cape (round another object): which way it hangs, too.
+				taken.add(b.length > 4 ? new double[]{b[1] - middleX, b[2] - middleZ, b[3], b[4], b[5], b[6]}
+					: new double[]{b[1] - middleX, b[2] - middleZ, b[3]});
 			}
 		}
 		if (fire)
@@ -2216,7 +2520,7 @@ final class CrowdPlanner
 		// Unlike a fire's few spots, these are close enough together that keeping everyone where they
 		// are wastes little room: laying the crowd out afresh to fit in someone waiting walked thirty
 		// people somewhere new for one more spot, and soon left more waiting, not fewer.
-		AtObject at = objectSpots(object, tiles, idsByTile, alone, reach, ground, taken, capacity, yourId);
+		AtObject at = objectSpots(object, tiles, idsByTile, alone, reach, ground, taken, capacity, yourId, capes);
 		for (Map.Entry<Integer, Integer> g : at.spotOf.entrySet())
 		{
 			int id = g.getKey();
@@ -2229,7 +2533,7 @@ final class CrowdPlanner
 			objectMoves += had != null && had[0] == object && had[1] == tile && had[2] != s ? 1 : 0;
 			now.put(id, new long[]{object, tile, s});
 			objectSpotHeld.remove(id);
-			bodies.add(new double[]{plane, middleX + SPOT_X[s], middleZ + SPOT_Z[s], id == yourId ? 1 : 0});
+			bodies.add(atSpot(object, s, id == yourId, at.cape(id, tile)));
 		}
 		for (long tile : tiles)
 		{
@@ -2250,9 +2554,13 @@ final class CrowdPlanner
 			if (at.middles.contains(tile))
 			{
 				// Drawn in the middle of their tile all the same (you, or someone alone): the crowds
-				// round the objects after this one keep clear of them.
-				bodies.add(new double[]{plane, StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE,
-					StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE, youWait ? 1 : 0});
+				// round the objects after this one keep clear of them, and of the way a cape of theirs hangs.
+				double[] m = middleOf(tile, object);
+				double[] focus = at.cape(youWait ? yourId : idsByTile.get(tile).get(0), tile);
+				double[] back = focus == null ? null : hangs(m[0], m[1], focus);
+				double x = StackRegistry.sceneX(tile) * 2.0 * HALF_TILE + HALF_TILE;
+				double z = StackRegistry.sceneY(tile) * 2.0 * HALF_TILE + HALF_TILE;
+				bodies.add(back == null ? new double[]{plane, x, z, youWait ? 1 : 0} : new double[]{plane, x, z, youWait ? 1 : 0, 1, back[0], back[1]});
 			}
 			else if (someoneWaits && !alone.contains(tile))
 			{
@@ -2276,11 +2584,11 @@ final class CrowdPlanner
 				{
 					break;
 				}
-				if (room.clear(s, OBJECT_GAP) && r.ok(s))
+				if (room.clear(s, OBJECT_GAP, null) && r.ok(s))
 				{
 					more++;
 					room.used[s] = true;
-					room.addSpot(s, false);
+					room.addSpot(s, false, null);
 				}
 			}
 			int blocked;
@@ -2320,15 +2628,17 @@ final class CrowdPlanner
 	/**
 	 * Spots round one object for the people on the tiles round it, clear of everyone in {@code taken}
 	 * ({east, north, 1 if it's you} from the object's middle). Everyone keeps the spot they had while
-	 * it stays clear, and goes back to one kept for them if it's clear.
+	 * it stays clear, and goes back to one kept for them if it's clear. Nobody is given a spot in the
+	 * way of anyone's cape, nor anyone with a cape a spot with someone in the way of it (see
+	 * {@link #CAPE_REACH}).
 	 */
 	private AtObject objectSpots(long object, List<Long> tiles, Map<Long, List<Integer>> idsByTile, Set<Long> alone,
-		Map<Long, Reach> reach, Ground ground, List<double[]> taken, int capacity, int yourId)
+		Map<Long, Reach> reach, Ground ground, List<double[]> taken, int capacity, int yourId, Map<Integer, Integer> capes)
 	{
-		AtObject at = new AtObject(yourId);
+		AtObject at = new AtObject(yourId, object, fireCrowds.contains(object), capes);
 		for (double[] b : taken)
 		{
-			at.near.add(b[0], b[1], b[2] > 0);
+			at.near.addElsewhere(b);
 		}
 		// You first: the spot nearest the object on your side, or the one you have while no ring
 		// nearer it has room (that you can walk to straight from where you stand).
@@ -2340,7 +2650,8 @@ final class CrowdPlanner
 			}
 			Reach r = reach.get(tile);
 			int[] order = OBJECT_ORDER[besideIndex(tile, object)];
-			int best = firstClear(order, r, at.near, OBJECT_GAP);
+			double[] yourCape = at.cape(yourId, tile);
+			int best = firstClear(order, r, at.near, OBJECT_GAP, yourCape);
 			int had = remembered(yourId, object, tile);
 			int pick;
 			if (steppingBack.containsKey(yourId))
@@ -2349,11 +2660,11 @@ final class CrowdPlanner
 			}
 			else if (had < 0)
 			{
-				pick = best >= 0 ? best : firstClear(order, r, at.near, OBJECT_KEEP);
+				pick = best >= 0 ? best : firstClear(order, r, at.near, OBJECT_KEEP, yourCape);
 			}
 			else
 			{
-				boolean keep = r.ok(had) && at.near.clear(had, OBJECT_KEEP);
+				boolean keep = r.ok(had) && at.near.keeps(had, OBJECT_KEEP, yourCape);
 				if (best >= 0 && (!keep || SPOT_RING[best] < SPOT_RING[had]) && ground.walkBetween(had, best))
 				{
 					pick = best;
@@ -2364,9 +2675,15 @@ final class CrowdPlanner
 				}
 				else
 				{
-					pick = nearestClear(had, r, at.near, OBJECT_GAP, ground);
-					pick = pick >= 0 ? pick : nearestClear(had, r, at.near, OBJECT_KEEP, ground);
+					pick = nearestClear(had, r, at.near, OBJECT_GAP, yourCape, ground);
+					pick = pick >= 0 ? pick : nearestClear(had, r, at.near, OBJECT_KEEP, yourCape, ground);
+					// You stay round it all the same, in the way of a cape or with someone in the way of yours.
+					pick = pick >= 0 ? pick : nearestClear(had, r, at.near, OBJECT_KEEP, ANY_CAPES, ground);
 				}
+			}
+			if (pick < 0 && had < 0 && !steppingBack.containsKey(yourId))
+			{
+				pick = firstClear(order, r, at.near, OBJECT_KEEP, ANY_CAPES);
 			}
 			if (pick >= 0)
 			{
@@ -2380,7 +2697,7 @@ final class CrowdPlanner
 				}
 				double[] m = middleOf(tile, object);
 				at.middles.add(tile);
-				at.near.add(m[0], m[1], true);
+				at.near.add(m[0], m[1], true, yourCape);
 			}
 		}
 		// Everyone whose spot is still clear keeps it.
@@ -2400,7 +2717,7 @@ final class CrowdPlanner
 				}
 				tileOf.put(id, tile);
 				int had = remembered(id, object, tile);
-				if (had >= 0 && at.on(tile) < capacity && r.ok(had) && at.near.clear(had, OBJECT_KEEP))
+				if (had >= 0 && at.on(tile) < capacity && r.ok(had) && at.near.keeps(had, OBJECT_KEEP, at.cape(id, tile)))
 				{
 					at.give(id, tile, had);
 					continue;
@@ -2446,9 +2763,18 @@ final class CrowdPlanner
 			Reach r = reach.get(tile);
 			int[] order = OBJECT_CHEAPEST[besideIndex(tile, object)];
 			Integer had = lost.get(id);
-			int pick = switched.contains(id) ? -1 : had != null ? nearestClear(had, r, at.near, OBJECT_GAP, ground) : firstClear(order, r, at.near, OBJECT_GAP);
+			double[] cape = at.cape(id, tile);
+			int pick = switched.contains(id) ? -1
+				: had != null ? nearestClear(had, r, at.near, OBJECT_GAP, cape, ground) : firstClear(order, r, at.near, OBJECT_GAP, cape);
 			pick = pick >= 0 || switched.contains(id) ? pick
-				: had != null ? nearestClear(had, r, at.near, OBJECT_KEEP, ground) : firstClear(order, r, at.near, OBJECT_KEEP);
+				: had != null ? nearestClear(had, r, at.near, OBJECT_KEEP, cape, ground) : firstClear(order, r, at.near, OBJECT_KEEP, cape);
+			// With nowhere their cape is clear of everyone, somewhere it isn't, and with nowhere clear of
+			// everyone's cape, somewhere in the way of one: drawn in the middle of their tile instead,
+			// they stood inside whoever was there, or right up against you.
+			pick = pick >= 0 || switched.contains(id) || cape == null ? pick
+				: had != null ? nearestClear(had, r, at.near, OBJECT_KEEP, null, ground) : firstClear(order, r, at.near, OBJECT_KEEP, null);
+			pick = pick >= 0 || switched.contains(id) ? pick
+				: had != null ? nearestClear(had, r, at.near, OBJECT_KEEP, ANY_CAPES, ground) : firstClear(order, r, at.near, OBJECT_KEEP, ANY_CAPES);
 			if (pick >= 0)
 			{
 				at.give(id, tile, pick);
@@ -2465,8 +2791,13 @@ final class CrowdPlanner
 			List<Integer> inside = new ArrayList<>();
 			for (Map.Entry<Integer, Integer> g : at.spotOf.entrySet())
 			{
+				int spot = g.getValue();
+				double[] theirs = at.cape(g.getKey(), at.tileOf.get(g.getKey()));
+				// ...and whoever would have them in the way of their cape there, or stands in the way of theirs.
 				if (g.getKey() != yourId && !alone.contains(at.tileOf.get(g.getKey()))
-					&& Math.hypot(SPOT_X[g.getValue()] - m[0], SPOT_Z[g.getValue()] - m[1]) < OBJECT_KEEP)
+					&& (Math.hypot(SPOT_X[spot] - m[0], SPOT_Z[spot] - m[1]) < OBJECT_KEEP
+					|| theirs != null && behind(SPOT_X[spot], SPOT_Z[spot], hangs(SPOT_X[spot], SPOT_Z[spot], theirs), m[0], m[1], CAPE_KEEP_REACH)
+					|| cape != null && behind(m[0], m[1], hangs(m[0], m[1], cape), SPOT_X[spot], SPOT_Z[spot], CAPE_KEEP_REACH)))
 				{
 					inside.add(g.getKey());
 				}
@@ -2485,23 +2816,25 @@ final class CrowdPlanner
 				Nearby again = new Nearby();
 				for (double[] b : taken)
 				{
-					again.add(b[0], b[1], b[2] > 0);
+					again.addElsewhere(b);
 				}
 				for (Map.Entry<Integer, Integer> g : at.spotOf.entrySet())
 				{
 					again.used[g.getValue()] = true;
-					again.addSpot(g.getValue(), g.getKey() == yourId);
+					again.addSpot(g.getValue(), g.getKey() == yourId, at.cape(g.getKey(), at.tileOf.get(g.getKey())));
 				}
 				for (long middle : at.middles)
 				{
+					// You, waiting in the middle of your tile, or the one alone on it.
 					double[] mm = middleOf(middle, object);
-					again.add(mm[0], mm[1], idsByTile.get(middle).contains(yourId));
+					boolean yours = idsByTile.get(middle).contains(yourId);
+					again.add(mm[0], mm[1], yours, at.cape(yours ? yourId : idsByTile.get(middle).get(0), middle));
 				}
 				at.near = again;
 			}
 			else
 			{
-				at.near.add(m[0], m[1], false);
+				at.near.add(m[0], m[1], false, cape);
 			}
 		}
 		// Whoever had to leave their spot steps to the clear one nearest it that they can walk to
@@ -2515,7 +2848,7 @@ final class CrowdPlanner
 			{
 				continue;
 			}
-			int pick = at.on(tile) < capacity ? nearestClear(l.getValue(), reach.get(tile), at.near, OBJECT_GAP, ground) : -1;
+			int pick = at.on(tile) < capacity ? nearestClear(l.getValue(), reach.get(tile), at.near, OBJECT_GAP, at.cape(id, tile), ground) : -1;
 			waiting.get(tile).remove((Integer) id);
 			if (pick >= 0)
 			{
@@ -2534,7 +2867,7 @@ final class CrowdPlanner
 				int id = it.next();
 				long[] held = objectSpotHeld.get(id);
 				if (held != null && held[0] == object && held[1] == tile && at.on(tile) < capacity
-					&& reach.get(tile).ok((int) held[2]) && at.near.clear((int) held[2], OBJECT_GAP))
+					&& reach.get(tile).ok((int) held[2]) && at.near.clear((int) held[2], OBJECT_GAP, at.cape(id, tile)))
 				{
 					at.give(id, tile, (int) held[2]);
 					it.remove();
@@ -2568,48 +2901,81 @@ final class CrowdPlanner
 		Map<Long, Reach> reach, int gap, int capacity)
 	{
 		// Spots only ever stop being clear as people are placed: each tile's cheapest is still its
-		// cheapest while it stays clear, and each tile's search carries on from where it got to.
-		Map<Long, double[]> cheapest = new HashMap<>();
-		Map<Long, Integer> next = new HashMap<>();
+		// cheapest while it stays clear, and each tile's search carries on from where it got to. Kept
+		// apart for someone waiting without a cape and for each place someone with one looks (see
+		// AtObject#cape): fewer spots are clear with one, and which depends on which way it hangs.
+		Map<double[], Map<Long, double[]>> cheapest = new java.util.IdentityHashMap<>();
+		Map<double[], Map<Long, Integer>> next = new java.util.IdentityHashMap<>();
 		while (true)
 		{
 			long bestTile = NO_OBJECT;
 			double[] best = null;
+			int bestWho = 0;
 			for (long tile : tiles)
 			{
-				if (waiting.get(tile).isEmpty() || at.on(tile) >= capacity)
+				List<Integer> queue = waiting.get(tile);
+				if (queue.isEmpty() || at.on(tile) >= capacity)
 				{
 					continue;
 				}
-				double[] mine = cheapest.get(tile);
-				if (mine == null || mine[0] >= 0 && !at.near.clear((int) mine[0], gap))
+				// The next one waiting there, or with nowhere clear for them (their cape in the way of
+				// someone, or someone's cape in theirs), the next one with a cape if they had none or
+				// without one if they had: one stuck waiting doesn't keep everyone behind them waiting too.
+				double[] cape = at.cape(queue.get(0), tile);
+				int who = 0;
+				double[] mine = cheapestFor(at, object, tile, tiles, reach, gap, cape, cheapest, next);
+				for (int i = 1; mine[0] < 0 && i < queue.size(); i++)
 				{
-					mine = cheapestFor(at, object, tile, tiles, reach, gap, next);
-					cheapest.put(tile, mine);
+					double[] theirs = at.cape(queue.get(i), tile);
+					if ((theirs == null) != (cape == null))
+					{
+						who = i;
+						mine = cheapestFor(at, object, tile, tiles, reach, gap, theirs, cheapest, next);
+						break;
+					}
 				}
 				if (mine[0] >= 0 && (best == null || mine[1] < best[1]))
 				{
 					bestTile = tile;
 					best = mine;
+					bestWho = who;
 				}
 			}
 			if (best == null)
 			{
 				return;
 			}
-			at.give(waiting.get(bestTile).remove(0), bestTile, (int) best[0]);
+			at.give(waiting.get(bestTile).remove(bestWho), bestTile, (int) best[0]);
 		}
 	}
 
-	/** The cheapest spot clear by {@code gap} for someone on {@code tile} (see {@link #fillNearestFirst}), as {spot, cost}, or {-1, MAX_VALUE}. */
-	private static double[] cheapestFor(AtObject at, long object, long tile, List<Long> tiles, Map<Long, Reach> reach, int gap, Map<Long, Integer> next)
+	/** {@link #cheapestFor}, kept for each tile while it stays clear (see {@link #fillNearestFirst}). */
+	private static double[] cheapestFor(AtObject at, long object, long tile, List<Long> tiles, Map<Long, Reach> reach, int gap, double[] cape,
+		Map<double[], Map<Long, double[]>> cheapest, Map<double[], Map<Long, Integer>> next)
+	{
+		Map<Long, double[]> kept = cheapest.computeIfAbsent(cape, k -> new HashMap<>());
+		double[] mine = kept.get(tile);
+		if (mine == null || mine[0] >= 0 && !at.near.clear((int) mine[0], gap, cape))
+		{
+			mine = cheapestFor(at, object, tile, tiles, reach, gap, cape, next.computeIfAbsent(cape, k -> new HashMap<>()));
+			kept.put(tile, mine);
+		}
+		return mine;
+	}
+
+	/**
+	 * The cheapest spot clear by {@code gap} for someone on {@code tile}, wearing a cape or not (see
+	 * {@link #fillNearestFirst}), as {spot, cost}, or {-1, MAX_VALUE}.
+	 */
+	private static double[] cheapestFor(AtObject at, long object, long tile, List<Long> tiles, Map<Long, Reach> reach, int gap, double[] cape,
+		Map<Long, Integer> next)
 	{
 		int beside = besideIndex(tile, object);
 		int[] order = OBJECT_CHEAPEST[beside];
 		float[] cost = OBJECT_COST[beside];
 		Reach r = reach.get(tile);
 		int p = next.getOrDefault(tile, 0);
-		while (p < order.length && !(at.near.clear(order[p], gap) && r.ok(order[p])))
+		while (p < order.length && !(at.near.clear(order[p], gap, cape) && r.ok(order[p])))
 		{
 			p++;
 		}
@@ -2620,7 +2986,7 @@ final class CrowdPlanner
 		for (int q = p; q < order.length && cost[order[q]] < pickCost; q++)
 		{
 			int s = order[q];
-			if (!at.near.clear(s, gap) || !r.ok(s))
+			if (!at.near.clear(s, gap, cape) || !r.ok(s))
 			{
 				continue;
 			}
