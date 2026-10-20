@@ -238,6 +238,105 @@ public class SlotBookTest
 	}
 
 	@Test
+	public void whoeverWalksOntoSomeoneTakesTheSideTheyCameFrom()
+	{
+		// CrowdPlanner#sidesFor works out the sides: here 20 came from spot 0's side, so 10 steps to spot 1.
+		SlotBook book = new SlotBook();
+		book.sideFor = Collections.singletonMap(TILE, Map.of(20, 0, 10, 1));
+		Map<Integer, Integer> a = step(book, 1, 10, 20);
+		Assert.assertEquals(0, (int) a.get(20));
+		Assert.assertEquals(1, (int) a.get(10));
+		book.sideFor = new HashMap<>();
+		Map<Integer, Integer> b = step(book, 2, 10, 20);
+		Assert.assertEquals("and keeps it", 0, (int) b.get(20));
+		Assert.assertEquals(1, (int) b.get(10));
+	}
+
+	@Test
+	public void aThirdKeepingTheirSideIsNotMovedToTheSpotTheydHaveHad()
+	{
+		SlotBook book = new SlotBook();
+		step(book, 1, 10, 20);
+		book.sideFor = Collections.singletonMap(TILE, Map.of(30, 3));
+		Assert.assertEquals(3, (int) step(book, 2, 10, 20, 30).get(30));
+		book.sideFor = new HashMap<>();
+		for (int t = 3; t < 20; t++)
+		{
+			Map<Integer, Integer> now = step(book, t, 10, 20, 30);
+			Assert.assertEquals("tick " + t, 3, (int) now.get(30));
+			Assert.assertEquals(0, (int) now.get(10));
+			Assert.assertEquals(1, (int) now.get(20));
+		}
+		Assert.assertEquals("a fourth takes the spot left", 2, (int) step(book, 20, 10, 20, 30, 40).get(40));
+		// Once someone else leaves, they fill gaps like anyone.
+		Map<Integer, Integer> later = step(book, 21, 20, 30, 40);
+		later = step(book, 21 + SlotBook.HOLD_TICKS + 1, 20, 30, 40);
+		Assert.assertEquals(0, (int) later.get(30));
+	}
+
+	@Test
+	public void yourSideIsYoursWhereverTheBestSpotIs()
+	{
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		book.yourId = 99;
+		book.sideFor = Collections.singletonMap(TILE, Map.of(99, 1, 10, 0));
+		Map<Integer, Integer> a = step(book, 1, 10, 99);
+		Assert.assertEquals(1, (int) a.get(99));
+		Assert.assertEquals(0, (int) a.get(10));
+		book.sideFor = new HashMap<>();
+		for (int t = 2; t < 10; t++)
+		{
+			Assert.assertEquals("you aren't swapped to the front later", 1, (int) step(book, t, 10, 99).get(99));
+		}
+	}
+
+	@Test
+	public void aSideIsTakenOverAHoldButNeverOneHeldForYou()
+	{
+		SlotBook book = new SlotBook();
+		step(book, 1, 5, 10);
+		step(book, 2, 10);
+		// 5 stepped away from spot 0: someone keeping their side walks straight into it.
+		book.sideFor = Collections.singletonMap(TILE, Map.of(20, 0));
+		Assert.assertEquals(0, (int) step(book, 3, 10, 20).get(20));
+
+		SlotBook mine = new SlotBook();
+		mine.yourId = 5;
+		step(mine, 1, 5, 10);
+		step(mine, 2, 10);
+		// You stepped away from it: it's kept for you.
+		mine.sideFor = Collections.singletonMap(TILE, Map.of(20, 0));
+		Assert.assertNotEquals(0, (int) step(mine, 3, 10, 20).get(20));
+	}
+
+	@Test
+	public void backWithASideOfYourOwnTheSpotYouHadIsLetGo()
+	{
+		// You stepped off spot 0 and came straight back from the other side: your side is spot 1,
+		// and whoever was there steps the other way, into the spot you had. Kept for you, they were
+		// sent to a third spot instead and walked round to theirs a few seconds later.
+		SlotBook book = new SlotBook();
+		book.localId = 99;
+		book.yourId = 99;
+		book.sideFor = Collections.singletonMap(TILE, Map.of(99, 0, 10, 1));
+		step(book, 1, 10, 99);
+		book.sideFor = new HashMap<>();
+		step(book, 2);
+		book.sideFor = Collections.singletonMap(TILE, Map.of(99, 1, 10, 0));
+		Map<Integer, Integer> back = step(book, 3, 10, 99);
+		Assert.assertEquals(1, (int) back.get(99));
+		Assert.assertEquals("they step into the spot you had", 0, (int) back.get(10));
+		book.sideFor = new HashMap<>();
+		for (int t = 4; t < 4 + 2 * SlotBook.HOLD_TICKS; t++)
+		{
+			Map<Integer, Integer> now = step(book, t, 10, 99);
+			Assert.assertEquals("tick " + t, 1, (int) now.get(99));
+			Assert.assertEquals("tick " + t, 0, (int) now.get(10));
+		}
+	}
+
+	@Test
 	public void clearForgetsEverything()
 	{
 		SlotBook book = new SlotBook();

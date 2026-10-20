@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.IntPredicate;
 import java.util.function.Predicate;
 import net.runelite.api.Animation;
 import net.runelite.api.Client;
@@ -71,7 +72,7 @@ public class FollowerOnCrowdedTileTest
 	};
 
 	/** Someone in the game, where they really stand, and what they're doing. */
-	private static final class Body
+	static final class Body
 	{
 		final int id;
 		int x;
@@ -101,7 +102,7 @@ public class FollowerOnCrowdedTileTest
 		}
 	}
 
-	private static final class Game
+	static final class Game
 	{
 		final List<Body> players = new ArrayList<>();
 		final List<Body> npcs = new ArrayList<>();
@@ -133,6 +134,11 @@ public class FollowerOnCrowdedTileTest
 		final CrowdPlanner planner = new CrowdPlanner();
 		final StillnessTracker stillness = new StillnessTracker();
 		int tick;
+		/** For the planner, with the plugin's own ticks: where the camera is, "Give me a spot", and who is casting. */
+		int cameraX = MIDDLE;
+		int cameraY = MIDDLE - 1500;
+		boolean giveMeASpot = true;
+		IntPredicate casting = id -> false;
 
 		Game()
 		{
@@ -171,8 +177,7 @@ public class FollowerOnCrowdedTileTest
 				return null;
 			});
 			shim = new SpreadingDrawCallbacks(client, offsets, stacks, probe, callbacks, FakeMeshes.fake(DrawCallbacks.class, d));
-			ground = FakeMeshes.fake(CrowdPlanner.Surroundings.class, Map.of("canStand",
-				(Function<Object[], Object>) args -> canStand((Long) args[0], (Integer) args[1], (Integer) args[2])));
+			ground = surroundings();
 			shim.ground = ground;
 		}
 
@@ -424,8 +429,9 @@ public class FollowerOnCrowdedTileTest
 		/**
 		 * A game tick as the plugin has it (see PersonalSpacePlugin#onGameTick): everyone in the middle
 		 * of the same tile two ticks running, you too, goes to its planner (Smart, spacing 256, 30 a
-		 * tile, a spot for you), and the plan is handed over as the plugin hands it: spots, who is on
-		 * each crowded tile, the middles out of sight, and the ground.
+		 * tile, a spot for you unless {@link #giveMeASpot} is off), with which way each of them came
+		 * onto it, and the plan is handed over as the plugin hands it: spots, who is on each crowded
+		 * tile, the middles out of sight, and the ground.
 		 */
 		void tick()
 		{
@@ -436,15 +442,18 @@ public class FollowerOnCrowdedTileTest
 				long key = StackRegistry.key(0, p.x >> 7, p.z >> 7);
 				boolean centred = StillnessTracker.isCentred(p.x, p.z);
 				offsets.setWalkingOff(p.id, !centred);
-				if (stillness.observe(p.id, key, centred, tick))
+				if (stillness.observe(p.id, key, centred, tick, p.x, p.z))
 				{
 					still.add(new StackSpreader.Entry(p.id, key, p == you, p.orientation));
 				}
 			}
-			planner.cameraX = MIDDLE;
-			planner.cameraY = MIDDLE - 1500;
+			planner.cameraX = cameraX;
+			planner.cameraY = cameraY;
+			planner.casting = casting;
+			planner.cameFrom = stillness::cameFrom;
+			planner.arrivedTick = stillness::arrivedTick;
 			CrowdPlanner.Surroundings around = surroundings();
-			CrowdPlanner.Plan plan = planner.plan(still, id -> true, 256, 30, true, true, tick, around);
+			CrowdPlanner.Plan plan = planner.plan(still, id -> true, 256, 30, true, giveMeASpot, tick, around);
 			shim.ground = around;
 			offsets.clearTargets();
 			for (StackSpreader.Placement pl : plan.placements)
@@ -459,6 +468,7 @@ public class FollowerOnCrowdedTileTest
 			turnIn.addAll(plan.facingIn);
 			stacks.rebuild(members, turnIn, unplaced, plan.fires, plan.poses, plan.middleOutOfSight);
 			stacks.setArrivals(stillness::arrivedTick);
+			stacks.setCameFrom(stillness::cameFromLately);
 		}
 
 		/** One frame: who the game adds to the scene, handed to the shim, then the renderer's opaque pass. */
@@ -1080,25 +1090,161 @@ public class FollowerOnCrowdedTileTest
 		Assert.assertTrue(new CollisionTerrain(new int[][][]{g.flags}).canStand(0, MIDDLE, MIDDLE, spot[0], spot[1]));
 	}
 
+	/** Whether a pet drawn at {@code at} stands clear of the flames of a fire on the tile in the middle, as anyone at it is drawn. */
+	private static boolean offTheFire(Game g, int[] at)
+	{
+		return g.ground.canStand(StackRegistry.key(0, TILE, TILE), at[0] - MIDDLE, at[1] - MIDDLE);
+	}
+
 	@Test
-	public void aPetUnderSomeoneAloneOnACampfireStaysUnderThem()
+	public void aPetUnderSomeoneAloneOnACampfireStandsBesideTheFire()
 	{
 		// A campfire with three things on it, and a fifth now and then as logs go on: the one the
-		// game shows there is the player standing on it, as without the plugin, and there's no
-		// room beside them out of the flames, so the pet stays under them.
+		// game shows there is the player standing on it, as without the plugin. There's no room
+		// beside them out of the flames, and the pet stayed under them: it walks out to the fire's
+		// side instead, the way its owner is.
 		Game g = new Game();
-		g.you = g.player(0, TILE + 3, TILE);
+		g.you = g.player(0, TILE + 3, TILE + 3);
 		Body tender = g.player(1, TILE, TILE);
+		Body owner = g.player(2, TILE + 3, TILE);
 		Body pet = g.npc(7, TILE, TILE, true);
+		pet.interacting = owner.actor;
 		g.fires.add(StackRegistry.key(0, TILE, TILE));
-		StringBuilder seen = new StringBuilder();
+		List<int[]> trace = new ArrayList<>();
 		for (int i = 0; i < 200; i++)
 		{
 			g.scenery[TILE][TILE] = i % 40 < 30 ? 3 : 5;
-			seen.append(g.run(pet, 1));
+			trace.addAll(g.trace(pet, 1));
 		}
-		Assert.assertEquals(times("0", 200), seen.toString());
+		Assert.assertEquals("drawn every frame", times("1", 200), seen(trace));
+		Assert.assertTrue("never jumps: " + largestStep(trace), largestStep(trace) <= STRIDE);
+		Assert.assertTrue("walked out with its own walk", walkingFrames(trace) >= 10);
+		int[] spot = last(trace);
+		Assert.assertTrue("off the fire: " + spot[0] + "," + spot[1], offTheFire(g, spot));
+		Assert.assertTrue("on its owner's side", spot[0] > MIDDLE + 64);
+		for (int[] at : trace.subList(100, 200))
+		{
+			Assert.assertArrayEquals("stays put while it stands there", spot, at);
+		}
 		Assert.assertEquals("the tender is drawn all along", times("1", 40), g.run(tender, 40));
+	}
+
+	@Test
+	public void aPetAloneOnACampfireWalksOutOfTheFlames()
+	{
+		// Nobody else on the fire: the game draws the pet itself, standing in the flames. It walks
+		// out to the fire's side, its owner's way, and stays there while it stands on the fire.
+		Game g = new Game();
+		g.you = g.player(0, TILE + 3, TILE + 3);
+		Body owner = g.player(1, TILE - 3, TILE);
+		Body pet = g.npc(7, TILE, TILE, true);
+		pet.interacting = owner.actor;
+		pet.orientation = 1536;
+		g.fires.add(StackRegistry.key(0, TILE, TILE));
+		g.scenery[TILE][TILE] = 3;
+		List<int[]> trace = g.trace(pet, 200);
+		Assert.assertEquals("drawn once every frame", times("1", 200), seen(trace));
+		Assert.assertTrue("never jumps: " + largestStep(trace), largestStep(trace) <= STRIDE);
+		Assert.assertTrue("walked out with its own walk", walkingFrames(trace) >= 10);
+		int[] spot = last(trace);
+		Assert.assertTrue("off the fire: " + spot[0] + "," + spot[1], offTheFire(g, spot));
+		Assert.assertTrue("on its owner's side, just off the flames: " + spot[0], spot[0] < MIDDLE - 64 && spot[0] > MIDDLE - 128);
+		Assert.assertEquals("standing once there, facing its own way", 0, spot[3]);
+		Assert.assertEquals(1536, spot[2]);
+		for (int[] at : trace.subList(100, 200))
+		{
+			Assert.assertArrayEquals("stays put while it stands there", spot, at);
+		}
+	}
+
+	@Test
+	public void aPetWalkingOffACampfireIsHandedBackWithoutAJump()
+	{
+		Game g = new Game();
+		g.you = g.player(0, TILE + 3, TILE + 3);
+		Body owner = g.player(1, TILE - 3, TILE);
+		Body pet = g.npc(7, TILE, TILE, true);
+		pet.interacting = owner.actor;
+		g.fires.add(StackRegistry.key(0, TILE, TILE));
+		g.scenery[TILE][TILE] = 3;
+		List<int[]> on = g.trace(pet, 150);
+		Assert.assertTrue(offTheFire(g, last(on)));
+		// It walks off a tile east, away from its spot: what's left of its step out is eased away as it goes.
+		List<int[]> off = g.trace(pet, 150, () -> g.stepTowards(pet, MIDDLE + 128, MIDDLE));
+		List<int[]> all = joined(on, off);
+		Assert.assertEquals("drawn once every frame", times("1", all.size()), seen(all));
+		Assert.assertTrue("never jumps: " + largestStep(all), largestStep(all) <= STRIDE + 2);
+		Assert.assertArrayEquals("where it really is in the end, as the game draws it", new int[]{MIDDLE + 128, MIDDLE},
+			new int[]{last(off)[0], last(off)[1]});
+		Assert.assertEquals("and left to the game", times("1", 20), g.run(pet, 20));
+	}
+
+	@Test
+	public void aPetWalkingOffAFullCampfireIsDrawnAllTheWay()
+	{
+		// Four things on the fire and someone tending it: the game has no room there for anyone else,
+		// and leaves the pet out as it walks off. It vanished from beside the fire and came back a
+		// stride further on; it eases back as it goes instead, either way.
+		for (int east : new int[]{1, -1})
+		{
+			Game g = new Game();
+			g.you = g.player(0, TILE + 3, TILE + 3);
+			g.player(1, TILE, TILE);
+			Body owner = g.player(2, TILE - 3, TILE);
+			Body pet = g.npc(7, TILE, TILE, true);
+			pet.interacting = owner.actor;
+			g.fires.add(StackRegistry.key(0, TILE, TILE));
+			g.scenery[TILE][TILE] = 4;
+			List<int[]> on = g.trace(pet, 150);
+			Assert.assertTrue(offTheFire(g, last(on)));
+			List<int[]> off = g.trace(pet, 200, () -> g.stepTowards(pet, MIDDLE + east * 128, MIDDLE));
+			List<int[]> all = joined(on, off);
+			Assert.assertEquals("drawn once every frame", times("1", all.size()), seen(all));
+			Assert.assertTrue("never jumps: " + largestStep(all), largestStep(all) <= STRIDE + 2);
+			Assert.assertArrayEquals("where it really is in the end", new int[]{MIDDLE + east * 128, MIDDLE},
+				new int[]{last(off)[0], last(off)[1]});
+		}
+	}
+
+	@Test
+	public void aPetOnABusyCampfireStandsRoundItWithTheCrowd()
+	{
+		// The Grand Exchange's Forester's Campfire, with the plugin's own ticks: everyone standing on
+		// it and beside it is one crowd round it, and nobody is shown in its middle. The pet on the
+		// fire was drawn where it stood, right in the flames, with the crowd round it.
+		Game g = new Game();
+		g.ticking = true;
+		g.fires.add(StackRegistry.key(0, TILE, TILE));
+		g.scenery[TILE][TILE] = 3;
+		g.you = g.player(0, TILE + 4, TILE + 4);
+		List<Body> crowd = new ArrayList<>();
+		for (int i = 0; i < 6; i++)
+		{
+			crowd.add(g.player(1 + i, TILE, TILE));
+		}
+		for (int i = 0; i < 3; i++)
+		{
+			Body beside = g.player(10 + i, TILE - 1, TILE);
+			beside.orientation = 1536;
+			crowd.add(beside);
+		}
+		Body pet = g.npc(7, TILE, TILE, true);
+		pet.interacting = crowd.get(0).actor;
+		g.run(pet, 400);
+		Assert.assertNotNull("one crowd round the fire", g.stacks.fireAt(StackRegistry.key(0, TILE, TILE)));
+		List<int[]> trace = g.trace(pet, 300);
+		Assert.assertEquals("drawn every frame", times("1", 300), seen(trace));
+		Assert.assertTrue("never jumps: " + largestStep(trace), largestStep(trace) <= STRIDE);
+		for (int[] at : trace)
+		{
+			Assert.assertTrue("never in the flames: " + at[0] + "," + at[1], offTheFire(g, at));
+		}
+		int[] spot = last(trace);
+		for (Body p : crowd)
+		{
+			int[] them = g.at(p);
+			Assert.assertTrue("clear of the crowd", them == null || apart(spot, them) >= SpreadingDrawCallbacks.PET_KEEP);
+		}
 	}
 
 	@Test

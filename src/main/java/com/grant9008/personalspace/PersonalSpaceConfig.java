@@ -39,7 +39,6 @@ public interface PersonalSpaceConfig extends Config
 	int MAX_HIDE_BELOW = 126;
 	String KEY_TEST_OFFSET = "testOffset";
 	String KEY_DEPTH = "depthBetweenPlayers";
-	String KEY_WALK_WHILE_BUSY = "walkWhileBusy";
 	String KEY_IDLE_SIT = "idlePlayersSit";
 	String KEY_CLICK_PAST = "clickPastMoved";
 	String KEY_SHOW_SIDEBAR = "showSidebarButton";
@@ -404,17 +403,6 @@ public interface PersonalSpaceConfig extends Config
 		position = 5
 	)
 	default boolean depthBetweenPlayers()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = KEY_WALK_WHILE_BUSY,
-		name = "Walk while busy",
-		description = "On (recommended): people moved while they're doing something (alching, cooking) are shown walking to their spot. Off: they glide there in the pose of what they're doing.",
-		position = 5
-	)
-	default boolean walkWhileBusy()
 	{
 		return true;
 	}

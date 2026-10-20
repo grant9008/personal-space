@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1933.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1935.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -103,7 +103,6 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Use items through players | Using an item or spell on what you see (a fire, a booth), people drawn away from their tile or hidden in a crowd don't take the left-click. Right-click still lists them. |
 | Draw me in front | Always draw yourself over the people in your crowd. |
 | Depth between players | On (recommended): in a crowd, shields, capes and hats stay properly in front of or behind the people next to them as you turn the camera. Off: everyone is drawn whole, one over another, as the game does, so gear pops between people. GPU plugin only. |
-| Walk while busy | Someone busy with something (alching, tending a fire) is shown taking the steps when they're moved to a spot, instead of gliding there. |
 | Give me a spot | On (the default): you're spread out too, taking a spot in the crowd (the front one, at a bank counter). Off: you stay exactly where you stand and the crowd spreads around you. |
 | Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |
 | Show sidebar button | Hide the sidebar button; every setting is still in the plugin's configuration. |

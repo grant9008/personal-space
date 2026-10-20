@@ -36,7 +36,6 @@ final class Snapshot
 	boolean includeLocal;
 	boolean drawMeInFront;
 	boolean depthTest;
-	boolean walkWhileBusy;
 	/** Idle players sit, and how many are sat down now. */
 	boolean idleSit;
 	int sitting;
@@ -118,7 +117,7 @@ final class Snapshot
 	String sliding;
 	/** Frames someone walking off a spot was drawn with legs keeping pace with their body; total. */
 	long legsMatched;
-	/** Frames someone walking for real while busy was drawn walking (Walk while busy); total. */
+	/** Frames someone walking for real while busy was drawn walking, their action left out; total. */
 	long movingBusyWalks;
 	/** Frames where draws were kept back but the renderer never asked for its opaque pass; should stay 0. */
 	long passMissedFrames;
@@ -126,6 +125,8 @@ final class Snapshot
 	long hiddenInYourWay;
 	/** Moving players drawn without a walk animation because they were busy and busy walks were off; total. */
 	long walkSkippedBusy;
+	/** Moving players drawn with their own action, not a walk, because they were fighting; frames, total. */
+	long walkKeptFighting;
 	/** Moving players shown walking although busy with an emote or action; total. */
 	long walkBusy;
 	/** Whether busy walks were switched off because the game reported an animation change from one. */

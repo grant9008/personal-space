@@ -1,6 +1,7 @@
 package com.grant9008.personalspace;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -8,7 +9,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
+import java.util.function.IntUnaryOperator;
 
 /**
  * Decides, once per game tick, which crowded tiles are spread out and where everyone on them stands.
@@ -22,6 +25,9 @@ import java.util.function.IntPredicate;
  * for a few seconds, so if the others come straight back everyone returns to the same places.)</li>
  * <li>The tile's shape comes from {@link ShapeMemory}, its spots from {@link StackSpreader#spots},
  * and who stands where from {@link SlotBook}.</li>
+ * <li>Whoever walks onto someone keeps the side of the tile they came from, and whoever was there
+ * steps to the other side: see {@link #sidesFor}. A pair's spots lie along the way they came, in
+ * front and behind as much as left and right: see {@link #turnFor}.</li>
  * <li>People standing on a fire, which a Forester's Campfire allows, stand round it instead, and
  * the last one left there keeps their spot beside it: see {@link #layOutOnFires}.</li>
  * <li>With Smart, everyone using one thing nobody can stand on, such as an anvil, from the tiles
@@ -186,6 +192,38 @@ final class CrowdPlanner
 	 * about to end counts as a break. Set by the plugin each tick.
 	 */
 	IntPredicate midAction = id -> false;
+	/**
+	 * Which way each player standing still came onto their tile, as {east, north} from its middle to
+	 * where they were the tick before they got there (see {@link StillnessTracker#cameFrom}), or null
+	 * when that isn't known. Set by the plugin each tick.
+	 */
+	IntFunction<int[]> cameFrom = id -> null;
+	/** The tick each player came to stand where they are (see {@link StillnessTracker#arrivedTick}); 0 if unknown. Set by the plugin each tick. */
+	IntUnaryOperator arrivedTick = id -> 0;
+	/** Largest group in which whoever walks onto the others keeps the side they came from (see {@link #sidesFor}). */
+	static final int SIDED_GROUP = 3;
+	/**
+	 * How much more the spot someone keeps must lie the way they came than the next spot does, as
+	 * cosines: walking straight at a pair between its two sides, there's no side to keep.
+	 */
+	static final double SIDE_MARGIN = 0.25;
+	/**
+	 * How near a diagonal the way someone came onto their tile must be for their group's spots to
+	 * lie along it (see {@link #turnFor}), in degrees; otherwise they lie square on. Running, the tick
+	 * before someone stopped can be two steps back, and the game walks diagonally first: a diagonal
+	 * step and then a straight one leaves where they were then 18 degrees off the diagonal, when
+	 * they walked in square on.
+	 */
+	static final double DIAGONAL_WAY = 12;
+	/**
+	 * Which way each small group's spots lie across its tile, in degrees from east and west (see
+	 * {@link #turnFor}), last tick and this: chosen as the group forms and kept while it lasts.
+	 */
+	private Map<Long, Double> turnsWere = new HashMap<>();
+	private Map<Long, Double> turnsNow = new HashMap<>();
+	/** Tiles whose spots go round the other way for the third of three (see {@link #clockwiseFor}), last tick and this. */
+	private Set<Long> clockwiseWere = new HashSet<>();
+	private Set<Long> clockwiseNow = new HashSet<>();
 	/** Largest group whose caster keeps the middle of their tile (see {@link #casterFor}). */
 	static final int CASTER_GROUP = 3;
 	private static final int NO_CASTER = -1;
@@ -663,7 +701,7 @@ final class CrowdPlanner
 	static final int FIRE_FALLBACK_GAP = FIRE_KEEP;
 
 	/** Whether one of these fires (as {@link Surroundings#firesNear} gives them) is on the tile itself. */
-	private static boolean fireUnderfoot(List<int[]> fires)
+	static boolean fireUnderfoot(List<int[]> fires)
 	{
 		for (int[] fire : fires)
 		{
@@ -3045,8 +3083,10 @@ final class CrowdPlanner
 	 * @param middle whether the middle of the tile is left out of its spots
 	 * @param guard  whether anyone may be standing in the middle of the tile, whom its ring must
 	 *               keep clear of however it moves over
+	 * @param turn   how far its ring is turned round, and {@code clockwise} which way it goes round
+	 *               (see {@link StackSpreader#crowdSpots})
 	 */
-	Room roomFor(long tile, List<double[]> shares, int wanted, boolean middle, boolean guard, int people)
+	Room roomFor(long tile, List<double[]> shares, int wanted, boolean middle, boolean guard, int people, double turn, boolean clockwise)
 	{
 		Room best;
 		if (shares.isEmpty())
@@ -3057,7 +3097,7 @@ final class CrowdPlanner
 		{
 			int floor = Math.min(wanted, ROOM_FLOOR);
 			int spacing = wanted;
-			List<double[]> area = roomAt(shares, middle, guard, spacing, people);
+			List<double[]> area = roomAt(shares, middle, guard, spacing, people, turn, clockwise);
 			if (area.isEmpty())
 			{
 				// The widest spacing that fits, found by halving: a closer ring nearly always fits
@@ -3067,7 +3107,7 @@ final class CrowdPlanner
 				while (hi - lo > 1)
 				{
 					int mid = (lo + hi) / 2;
-					if (roomAt(shares, middle, guard, mid, people).isEmpty())
+					if (roomAt(shares, middle, guard, mid, people, turn, clockwise).isEmpty())
 					{
 						hi = mid;
 					}
@@ -3077,11 +3117,11 @@ final class CrowdPlanner
 					}
 				}
 				spacing = lo;
-				area = roomAt(shares, middle, guard, spacing, people);
+				area = roomAt(shares, middle, guard, spacing, people, turn, clockwise);
 			}
 			if (area.isEmpty())
 			{
-				double[] c = leastCrowded(shares, StackSpreader.spots(false, false, 0, middle, spacing, people, null),
+				double[] c = leastCrowded(shares, StackSpreader.crowdSpots(middle, spacing, people, null, turn, clockwise),
 					farAt(guard, spacing));
 				best = new Room(c[0], c[1], spacing, wanted, false);
 			}
@@ -3099,14 +3139,14 @@ final class CrowdPlanner
 		Room chosen = best;
 		if (was != null && was.wanted == wanted && best.fits)
 		{
-			if (was.fits && fitsAt(shares, middle, guard, was, people))
+			if (was.fits && fitsAt(shares, middle, guard, was, people, turn, clockwise))
 			{
 				chosen = best.spacing > was.spacing + SPACING_DEADBAND || !best.moved() ? best : was;
 			}
 			else
 			{
 				int spacing = Math.min(was.spacing, best.spacing);
-				List<double[]> area = roomAt(shares, middle, guard, spacing, people);
+				List<double[]> area = roomAt(shares, middle, guard, spacing, people, turn, clockwise);
 				if (!area.isEmpty())
 				{
 					double[] c = nearestTo(area, was.x, was.z);
@@ -3137,9 +3177,10 @@ final class CrowdPlanner
 	 * Where a crowd's middle may be moved to, within half a tile, for its first {@code people}
 	 * spots at this spacing to keep to their shares: a convex polygon, empty if nowhere will do.
 	 */
-	private static List<double[]> roomAt(List<double[]> shares, boolean middle, boolean guard, int spacing, int people)
+	private static List<double[]> roomAt(List<double[]> shares, boolean middle, boolean guard, int spacing, int people, double turn,
+		boolean clockwise)
 	{
-		List<int[]> spots = StackSpreader.spots(false, false, 0, middle, spacing, people, null);
+		List<int[]> spots = StackSpreader.crowdSpots(middle, spacing, people, null, turn, clockwise);
 		double far = farAt(guard, spacing);
 		List<double[]> poly = new ArrayList<>();
 		poly.add(new double[]{-far, -far});
@@ -3173,14 +3214,15 @@ final class CrowdPlanner
 	}
 
 	/** Whether a crowd standing as {@code room} says keeps to its shares, moved over no further than it may. */
-	private static boolean fitsAt(List<double[]> shares, boolean middle, boolean guard, Room room, int people)
+	private static boolean fitsAt(List<double[]> shares, boolean middle, boolean guard, Room room, int people, double turn,
+		boolean clockwise)
 	{
 		double far = farAt(guard, room.spacing);
 		if (Math.abs(room.x) > far + 1 || Math.abs(room.z) > far + 1)
 		{
 			return false;
 		}
-		for (int[] p : StackSpreader.spots(false, false, 0, middle, room.spacing, people, null))
+		for (int[] p : StackSpreader.crowdSpots(middle, room.spacing, people, null, turn, clockwise))
 		{
 			if (!withinShares(shares, p[0] + room.x, p[1] + room.z))
 			{
@@ -3363,13 +3405,16 @@ final class CrowdPlanner
 	 * @param wanted   how many people need a spot
 	 * @param blocked  set to how many spots the chosen layout had blocked
 	 * @param squeezed set to whether the ring was used instead of the tile's own shape
+	 * @param turn     how far a ring is turned round, and {@code clockwise} which way it goes round (see
+	 *                 {@link StackSpreader#crowdSpots})
 	 */
 	private static List<int[]> spotsWithRoom(boolean row, boolean straight, double angle, boolean middleTaken, int spacing,
 		int capacity, int wanted, StackSpreader.SpotCheck check, int[] blocked, boolean[] squeezed, int arcRadius, boolean bow,
-		double wrap, int[] used)
+		double wrap, double turn, boolean clockwise, int[] used)
 	{
 		blocked[0] = 0;
-		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, bow, wrap);
+		List<int[]> best = StackSpreader.spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, bow, wrap,
+			turn, clockwise);
 		int bestBlocked = blocked[0];
 		squeezed[0] = false;
 		used[0] = spacing;
@@ -3397,7 +3442,7 @@ final class CrowdPlanner
 				if (best.size() < wanted && (row || s != spacing))
 				{
 					blocked[0] = 0;
-					List<int[]> ring = StackSpreader.spots(false, false, angle, middleTaken, s, capacity, check);
+					List<int[]> ring = StackSpreader.crowdSpots(middleTaken, s, capacity, check, turn, clockwise);
 					if (ring.size() > best.size())
 					{
 						best = ring;
@@ -3637,12 +3682,12 @@ final class CrowdPlanner
 						boolean[] squeezed = {false};
 						int[] used = {r.spacing};
 						List<int[]> spots = spotsWithRoom(true, true, r.angle, r.middleTaken, r.spacing, spotsFor(r.tile, capacity), r.wanted,
-							r.check, r.blocked, squeezed, StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC, used);
+							r.check, r.blocked, squeezed, StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC, 0, false, used);
 						if (!r.middleTaken && spots.size() < r.wanted)
 						{
 							// Someone will be left in the middle without a spot: don't give the middle away too.
 							spots = spotsWithRoom(true, true, r.angle, true, r.spacing, spotsFor(r.tile, capacity), r.wanted, r.check, r.blocked, squeezed,
-								StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC, used);
+								StackSpreader.LOOK_AHEAD, bowRows, StackSpreader.WRAP_ARC, 0, false, used);
 						}
 						if (squeezed[0])
 						{
@@ -3920,6 +3965,229 @@ final class CrowdPlanner
 	}
 
 	/**
+	 * For a tile of two or three where one of them has just walked onto the others, the spot each of
+	 * them still without one takes: whoever came keeps the side of the tile they came from, or as
+	 * near it as its spots allow, and whoever was there steps to the other side. Nobody walks round
+	 * or through anybody: walking in from the left, you used to be sent on to the right of whoever
+	 * you stopped on, and they stepped out to the left behind you. Someone who stays in the middle
+	 * (you, when your character stays put, or a caster) counts too: the others step away from them.
+	 *
+	 * <p>Only the spots the group fills anyway are used, or for an odd one out the spot across from
+	 * theirs too, the same shape turned round: the third of three stands on whichever side they came
+	 * from. Nobody already given a spot is moved. Left as it always was when it isn't known which
+	 * way they came (a teleport, logging in), two came together, they came straight at the spots
+	 * between the two sides, or the group is bigger, or round a fire, laid out for reasons of its own.
+	 */
+	private Map<Long, Map<Integer, Integer>> sidesFor(Map<Long, List<StackSpreader.Entry>> byTile, Map<Long, List<Integer>> movableByTile,
+		Map<Long, List<int[]>> spotsByTile, Plan plan, IntPredicate shown, int capacity, int localId)
+	{
+		Map<Long, Map<Integer, Integer>> out = new HashMap<>();
+		for (Map.Entry<Long, List<Integer>> e : movableByTile.entrySet())
+		{
+			long tile = e.getKey();
+			List<int[]> spots = spotsByTile.get(tile);
+			List<Integer> movable = e.getValue();
+			if (spots == null || movable.isEmpty() || plan.fires.containsKey(tile))
+			{
+				continue;
+			}
+			// Whoever came last, if only one of them did.
+			int came = cameLast(byTile.get(tile), shown);
+			if (came < 0)
+			{
+				continue;
+			}
+			int[] from = cameFrom.apply(came);
+			Map<Integer, Integer> placed = slots.spotsOn(tile);
+			List<Integer> newcomers = new ArrayList<>();
+			Set<Integer> kept = new HashSet<>();
+			for (int id : movable)
+			{
+				Integer s = placed.get(id);
+				if (s == null)
+				{
+					newcomers.add(id);
+				}
+				else
+				{
+					kept.add(s);
+				}
+			}
+			int filled = Math.min(capacity, movable.size());
+			List<Integer> free = new ArrayList<>();
+			for (int s = 0; s < Math.min(spots.size(), filled + filled % 2); s++)
+			{
+				if (!kept.contains(s))
+				{
+					free.add(s);
+				}
+			}
+			boolean moves = movable.contains(came);
+			if (free.size() < 2 || newcomers.isEmpty() || moves && !newcomers.contains(came))
+			{
+				continue;
+			}
+			// Which way each free spot lies from the middle of them, so a crowd moved over to make
+			// room for its neighbours is judged from where it stands.
+			double midX = 0;
+			double midZ = 0;
+			for (int s : free)
+			{
+				midX += spots.get(s)[0] / (double) free.size();
+				midZ += spots.get(s)[1] / (double) free.size();
+			}
+			double length = Math.hypot(from[0], from[1]);
+			Map<Integer, Double> toward = new HashMap<>();
+			for (int s : free)
+			{
+				double east = spots.get(s)[0] - midX;
+				double north = spots.get(s)[1] - midZ;
+				double d = Math.hypot(east, north);
+				toward.put(s, d < 1 ? 0 : (east * from[0] + north * from[1]) / (d * length));
+			}
+			// The way they came first; a tie keeps the tile's own order.
+			free.sort(Comparator.comparingDouble(s -> -toward.get(s)));
+			if (toward.get(free.get(0)) - toward.get(free.get(1)) < SIDE_MARGIN)
+			{
+				continue;
+			}
+			Map<Integer, Integer> sides = new HashMap<>();
+			if (moves)
+			{
+				sides.put(came, free.remove(0));
+			}
+			// Whoever was there steps the other way, you first, as SlotBook settles you first.
+			newcomers.remove((Integer) came);
+			if (newcomers.remove((Integer) localId))
+			{
+				newcomers.add(0, localId);
+			}
+			for (int id : newcomers)
+			{
+				if (!free.isEmpty())
+				{
+					sides.put(id, free.remove(free.size() - 1));
+				}
+			}
+			out.put(tile, sides);
+		}
+		return out;
+	}
+
+	/**
+	 * Whoever of these people, standing together on a tile, came onto it last, if only one of them
+	 * did, it's known which way they came, and few enough of them are shown to keep sides
+	 * ({@link #SIDED_GROUP}); else -1.
+	 */
+	private int cameLast(List<StackSpreader.Entry> people, IntPredicate shown)
+	{
+		int came = -1;
+		int cameTick = 0;
+		int together = 0;
+		int here = 0;
+		for (StackSpreader.Entry en : people)
+		{
+			if (!shown.test(en.id))
+			{
+				continue;
+			}
+			here++;
+			int arrived = arrivedTick.applyAsInt(en.id);
+			if (came < 0 || arrived > cameTick)
+			{
+				came = en.id;
+				cameTick = arrived;
+				together = 1;
+			}
+			else if (arrived == cameTick)
+			{
+				together++;
+			}
+		}
+		return came < 0 || together > 1 || cameTick <= 0 || here > SIDED_GROUP || cameFrom.apply(came) == null ? -1 : came;
+	}
+
+	/**
+	 * Which way a small group's spots lie across its tile as it forms, in degrees anticlockwise from
+	 * east and west (see {@link StackSpreader#crowdSpots}): along the way whoever walked onto the
+	 * others came, so they keep that side, front and back or a diagonal as much as left and right,
+	 * and whoever was there steps straight out the other way ({@link #sidesFor}). Laid out east and
+	 * west, someone walking in from the front or back had no side to keep and stood wherever the
+	 * camera put them.
+	 *
+	 * <p>The way is one of the eight anyone walks: a pair stands square to the tiles or on a
+	 * diagonal ({@link #DIAGONAL_WAY}), never at the odd slant of where someone was mid-stride the
+	 * tick before. Where their end of it can't be stood on (a wall, an object, flames), the next way
+	 * round towards it that can. 0, east and west as always, when nobody walked onto the others or
+	 * none of those ways has room.
+	 */
+	private double turnFor(long tile, List<StackSpreader.Entry> group, IntPredicate shown, int spacing, Surroundings around)
+	{
+		int came = cameLast(group, shown);
+		if (came < 0)
+		{
+			return 0;
+		}
+		int[] from = cameFrom.apply(came);
+		double way = Math.toDegrees(Math.atan2(from[1], from[0]));
+		double diagonal = Math.floor(way / 90) * 90 + 45;
+		double nearest = Math.abs(way - diagonal) <= DIAGONAL_WAY ? diagonal : Math.round(way / 90) * 90.0;
+		// Then the next way round, on the side of it they came from.
+		double round = way >= nearest ? 45 : -45;
+		for (double end : new double[]{nearest, nearest + round, nearest - round})
+		{
+			int[] spot = StackSpreader.crowdSpots(false, spacing, 1, null, end, false).get(0);
+			if (around.canStand(tile, spot[0], spot[1]))
+			{
+				return (end % 180 + 180) % 180;
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * Whether the spots round a pair go round the other way for the third of three, who has just
+	 * walked onto them (see {@link StackSpreader#crowdSpots}). The third has the choice of the spot
+	 * after the pair's two or the one across from it ({@link #sidesFor}), and going round the other
+	 * way puts those two either side of the pair's line instead: between the four, whichever way
+	 * they came there's one on their side. With a pair laid out on a diagonal and a third coming
+	 * square on, both spots of one way round could leave them well round from where they came.
+	 * Only while the pair have the first two spots and nobody else has one, so nobody moves for it.
+	 */
+	private boolean clockwiseFor(long tile, List<StackSpreader.Entry> group, IntPredicate shown, double turn, int spacing,
+		StackSpreader.SpotCheck check, boolean was)
+	{
+		int came = cameLast(group, shown);
+		Map<Integer, Integer> placed = slots.spotsOn(tile);
+		if (came < 0 || group.size() != 3 || placed.containsKey(came) || placed.size() != 2)
+		{
+			return was;
+		}
+		for (int s : placed.values())
+		{
+			if (s > 1)
+			{
+				return was;
+			}
+		}
+		// Turning the rest round must leave the pair's own two spots first, where they are.
+		for (int[] spot : StackSpreader.crowdSpots(false, spacing, 2, null, turn, false))
+		{
+			if (!check.canStand(spot[0], spot[1]))
+			{
+				return was;
+			}
+		}
+		int[] from = cameFrom.apply(came);
+		double way = Math.toDegrees(Math.atan2(from[1], from[0])) - turn;
+		// Of the third's two spots each way round, 120 and 300 degrees on from the first spot or 240
+		// and 60, the one nearer the way they came.
+		double anticlockwise = Math.abs(Math.cos(Math.toRadians(way - 120)));
+		double clockwise = Math.abs(Math.cos(Math.toRadians(way + 120)));
+		return Math.abs(clockwise - anticlockwise) < 1e-6 ? was : clockwise > anticlockwise;
+	}
+
+	/**
 	 * Who of two or three on a tile is drawn in its middle, where they really stand: someone casting
 	 * a skilling spell. Their spell effect is drawn there by the game wherever they are drawn, so
 	 * only there does it line up with them, and stood still they are never walked mid-cast. They
@@ -4043,6 +4311,10 @@ final class CrowdPlanner
 		currentLineTiles = new HashSet<>();
 		castersWere = castersNow;
 		castersNow = new HashMap<>();
+		turnsWere = turnsNow;
+		turnsNow = new HashMap<>();
+		clockwiseWere = clockwiseNow;
+		clockwiseNow = new HashSet<>();
 		Map<Integer, Integer> castingFrom = new HashMap<>();
 		for (StackSpreader.Entry e : still)
 		{
@@ -4095,6 +4367,17 @@ final class CrowdPlanner
 			if (group.size() < 2)
 			{
 				continue;
+			}
+			// The way a group's spots lie across its tile is kept for as long as the group is
+			// together, whatever it is laid out as meanwhile.
+			Double hadTurn = turnsWere.get(tile);
+			if (hadTurn != null)
+			{
+				turnsNow.put(tile, hadTurn);
+			}
+			if (clockwiseWere.contains(tile))
+			{
+				clockwiseNow.add(tile);
 			}
 			List<Integer> movable = new ArrayList<>(group.size());
 			for (StackSpreader.Entry en : group)
@@ -4366,6 +4649,22 @@ final class CrowdPlanner
 				shownByTile.put(tile, group.size());
 				continue;
 			}
+			// Two or three in the open who have only just met, one walking onto the others: their
+			// spots lie along the way that one came (see turnFor), and stay that way while they're
+			// together. A row, or a crowd round a fire, is laid out its own way.
+			double turn = hadTurn != null ? hadTurn
+				: row || atFire || !slots.spotsOn(tile).isEmpty() ? 0 : turnFor(tile, group, shown, tileSpacing, around);
+			turnsNow.put(tile, turn);
+			double ringTurn = row ? 0 : turn;
+			boolean clockwise = !row && clockwiseFor(tile, group, shown, turn, tileSpacing, check, clockwiseWere.contains(tile));
+			if (clockwise)
+			{
+				clockwiseNow.add(tile);
+			}
+			else if (!row)
+			{
+				clockwiseNow.remove(tile);
+			}
 			// A crowd with people on the tiles around it moves over and closes up as a whole to keep
 			// to its share of the ground, and its spots keep their order, so nobody walks round the
 			// others to get anywhere.
@@ -4384,7 +4683,7 @@ final class CrowdPlanner
 				// makes room and for checking its spots, or a spot the choice allowed could be turned
 				// down and everyone after it in the list renumbered.
 				shares = sharesOf(tile, StackSpreader.MAX_LINE_EXTENT + MAX_SHIFT * Math.sqrt(2) + 1, null, tick, false);
-				room = roomFor(tile, shares, tileSpacing, middleTaken, guard, people);
+				room = roomFor(tile, shares, tileSpacing, middleTaken, guard, people, turn, clockwise);
 				moveOver = new double[]{room.x, room.z};
 				if (room.spacing < tileSpacing || room.moved())
 				{
@@ -4397,7 +4696,7 @@ final class CrowdPlanner
 			int[] used = {tileSpacing};
 			boolean middleNow = middleTaken;
 			List<int[]> spots = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, spotsFor(tile, capacity),
-				Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
+				Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, ringTurn, clockwise, used);
 			if (!middleTaken && spots.size() < movable.size() && (!row || squeezed[0]))
 			{
 				// Walls leave too few spots for everyone: someone stays in the middle without a spot,
@@ -4405,7 +4704,7 @@ final class CrowdPlanner
 				boolean wasRow = row && squeezed[0];
 				middleNow = true;
 				spots = spotsWithRoom(false, false, angle, true, tileSpacing, spotsFor(tile, capacity),
-					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
+					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, ringTurn, clockwise, used);
 				squeezed[0] |= wasRow;
 			}
 			if (room != null && room.moved() && (used[0] < room.spacing || middleNow != middleTaken))
@@ -4414,7 +4713,7 @@ final class CrowdPlanner
 				// middle, or left someone in the middle: move it over again for the ring it has now,
 				// or its near side lands on whoever stands in the middle of the tile.
 				boolean g = guard || middleNow;
-				List<double[]> area = roomAt(shares, middleNow, g, used[0], people);
+				List<double[]> area = roomAt(shares, middleNow, g, used[0], people, ringTurn, clockwise);
 				double far = farAt(g, used[0]);
 				double[] c = area.isEmpty()
 					? new double[]{Math.max(-far, Math.min(far, room.x)), Math.max(-far, Math.min(far, room.z))}
@@ -4424,7 +4723,7 @@ final class CrowdPlanner
 				laidOut = movedOver(check, shares, again, g);
 				int closer = used[0];
 				spots = spotsWithRoom(false, false, angle, middleNow, closer, spotsFor(tile, capacity),
-					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, used);
+					Math.min(capacity, movable.size()), laidOut, blocked, squeezed, arcRadius, false, StackSpreader.WRAP_ARC, ringTurn, clockwise, used);
 			}
 			if (room != null && !room.fits)
 			{
@@ -4432,8 +4731,8 @@ final class CrowdPlanner
 				// its neighbours), but the ring can still have enough spots further round that do:
 				// take those, rather than handing out spots that lean into the neighbours.
 				Room within = new Room(moveOver[0], moveOver[1], used[0], room.wanted, true);
-				List<int[]> kept = StackSpreader.spots(false, false, angle, middleNow, used[0], spotsFor(tile, capacity),
-					movedOver(check, shares, within, guard || middleNow));
+				List<int[]> kept = StackSpreader.crowdSpots(middleNow, used[0], spotsFor(tile, capacity),
+					movedOver(check, shares, within, guard || middleNow), ringTurn, clockwise);
 				if (kept.size() >= Math.min(capacity, movable.size()))
 				{
 					spots = kept;
@@ -4451,7 +4750,7 @@ final class CrowdPlanner
 				int[] plainUsed = {tileSpacing};
 				int[] plainBlocked = {0};
 				List<int[]> loose = spotsWithRoom(row, false, angle, middleTaken, tileSpacing, spotsFor(tile, capacity),
-					Math.min(capacity, movable.size()), check, plainBlocked, plain, arcRadius, false, StackSpreader.WRAP_ARC, plainUsed);
+					Math.min(capacity, movable.size()), check, plainBlocked, plain, arcRadius, false, StackSpreader.WRAP_ARC, ringTurn, clockwise, plainUsed);
 				if (!plain[0] && loose.size() >= Math.min(spots.size(), movable.size()))
 				{
 					spots = loose;
@@ -4479,7 +4778,7 @@ final class CrowdPlanner
 				int[] ringUsed = {tileSpacing};
 				int[] ringBlocked = {0};
 				List<int[]> asRing = spotsWithRoom(false, false, angle, middleNow, tileSpacing, spotsFor(tile, capacity),
-					Math.min(capacity, movable.size()), laidOut, ringBlocked, ring, arcRadius, false, StackSpreader.WRAP_ARC, ringUsed);
+					Math.min(capacity, movable.size()), laidOut, ringBlocked, ring, arcRadius, false, StackSpreader.WRAP_ARC, ringTurn, clockwise, ringUsed);
 				if (asRing.size() >= spots.size())
 				{
 					spots = asRing;
@@ -4499,7 +4798,7 @@ final class CrowdPlanner
 					int[] stillUsed = {hadUsed};
 					int[] stillBlocked = {0};
 					List<int[]> asBefore = spotsWithRoom(row && !squeezed[0], false, angle, middleNow, hadUsed, spotsFor(tile, capacity),
-						Math.min(capacity, movable.size()), laidOut, stillBlocked, stillSqueezed, arcRadius, false, StackSpreader.WRAP_ARC, stillUsed);
+						Math.min(capacity, movable.size()), laidOut, stillBlocked, stillSqueezed, arcRadius, false, StackSpreader.WRAP_ARC, ringTurn, clockwise, stillUsed);
 					if (asBefore.size() >= spots.size() && stillUsed[0] == hadUsed)
 					{
 						spots = asBefore;
@@ -4589,6 +4888,8 @@ final class CrowdPlanner
 				slots.pairSideForYou.put(youTileNow, nearest);
 			}
 		}
+		// Whoever has just walked onto someone keeps the side they came from.
+		slots.sideFor = sidesFor(byTile, movableByTile, spotsByTile, plan, shown, capacity, localId);
 		// Your personal space and line of sight are judged from where you'll stand. The tick you
 		// are first given a spot you were in the middle of your tile a moment ago, and judged from
 		// there, the spot beside you fell inside you: the other player went round you first and
@@ -4598,7 +4899,8 @@ final class CrowdPlanner
 		if (lastYouSlot < 0 && yourSpots != null)
 		{
 			judgeTile = youTileNow;
-			judgeSlot = Math.min(slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
+			Integer side = slots.sideFor.getOrDefault(youTileNow, Collections.emptyMap()).get(localId);
+			judgeSlot = Math.min(side != null ? side : slots.pairSideForYou.getOrDefault(youTileNow, 0), yourSpots.size() - 1);
 		}
 		if (youTileNow != Long.MIN_VALUE && Integer.valueOf(localId).equals(castersNow.get(youTileNow)))
 		{
@@ -4962,5 +5264,9 @@ final class CrowdPlanner
 		castersWere.clear();
 		castersNow.clear();
 		castingSince.clear();
+		turnsWere.clear();
+		turnsNow.clear();
+		clockwiseWere.clear();
+		clockwiseNow.clear();
 	}
 }

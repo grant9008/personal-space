@@ -183,6 +183,26 @@ final class StackRegistry
 		return arrivals.applyAsInt(id);
 	}
 
+	/** Which way someone standing at (x, z) on a tile came onto it lately; see {@link StillnessTracker#cameFromLately}. */
+	interface CameFrom
+	{
+		int[] lately(int id, long tileKey, int x, int z);
+	}
+
+	private volatile CameFrom cameFrom = (id, tileKey, x, z) -> null;
+
+	/** Where to find which way people came onto their tiles. */
+	void setCameFrom(CameFrom lately)
+	{
+		cameFrom = lately == null ? (id, tileKey, x, z) -> null : lately;
+	}
+
+	/** Which way this player, standing at (x, z) on this tile, came onto it, as {east, north} from there, if that was lately; else null. */
+	int[] cameFrom(int id, long tileKey, int x, int z)
+	{
+		return cameFrom.lately(id, tileKey, x, z);
+	}
+
 	/** True if this player is on a crowded tile but wasn't given a spot this tick. */
 	boolean isUnplaced(int id)
 	{

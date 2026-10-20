@@ -107,7 +107,6 @@ final class PersonalSpacePanel extends PluginPanel
 	private final JPanel troubleshootingBody = new JPanel(new GridBagLayout());
 	private final JLabel troubleshootingHeader = new JLabel("Troubleshooting");
 	private final ToggleSwitch depthTestSwitch = new ToggleSwitch();
-	private final ToggleSwitch walkBusySwitch = new ToggleSwitch();
 	private final ToggleSwitch sitSwitch = new ToggleSwitch();
 	private final ToggleSwitch clickPastSwitch = new ToggleSwitch();
 	private final JPanel checksPanel = new JPanel(new GridBagLayout());
@@ -227,7 +226,6 @@ final class PersonalSpacePanel extends PluginPanel
 		smallGroupsSwitch.setOn(config.smallGroupsClose());
 		combatSwitch.setOn(config.pauseInCombat());
 		depthTestSwitch.setOn(config.depthBetweenPlayers());
-		walkBusySwitch.setOn(config.walkWhileBusy());
 		sitSwitch.setOn(config.idlePlayersSit());
 		clickPastSwitch.setOn(config.clickPastMoved());
 		setEverydayEnabled(config.active());
@@ -409,11 +407,6 @@ final class PersonalSpacePanel extends PluginPanel
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Depth between players", depthTestSwitch,
 			"On (recommended): in a crowd, shields, capes and hats stay properly in front of or behind the people next to them as you turn the camera. Off: everyone is drawn whole, one over another, so gear pops between people. Only worth turning off if something looks wrong. GPU plugin only."), c);
-
-		c.gridy++;
-		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Walk while busy", walkBusySwitch,
-			"On (recommended): people moved while they're doing something (alching, cooking) are shown walking to their spot. Off: they glide there in the pose of what they're doing."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
@@ -686,7 +679,6 @@ final class PersonalSpacePanel extends PluginPanel
 		smallGroupsSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_SMALL_GROUPS_CLOSE, on));
 		combatSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_PAUSE_IN_COMBAT, on));
 		depthTestSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_DEPTH, on));
-		walkBusySwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_WALK_WHILE_BUSY, on));
 		sitSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_IDLE_SIT, on));
 		clickPastSwitch.onToggle(on -> write(PersonalSpaceConfig.KEY_CLICK_PAST, on));
 	}
@@ -737,7 +729,6 @@ final class PersonalSpacePanel extends PluginPanel
 		includeMeSwitch.setEnabled(enabled);
 		inFrontSwitch.setEnabled(enabled);
 		depthTestSwitch.setEnabled(enabled);
-		walkBusySwitch.setEnabled(enabled);
 		sitSwitch.setEnabled(enabled);
 		clickPastSwitch.setEnabled(enabled);
 		smallGroupsSwitch.setEnabled(enabled);

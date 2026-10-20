@@ -19,7 +19,8 @@ import java.util.function.ToIntFunction;
  * further out or further back. The rules:
  * <ul>
  * <li>Anyone who already has a spot keeps it.</li>
- * <li>A newcomer takes the best free spot.</li>
+ * <li>A newcomer takes the best free spot, unless they have just walked onto the others: then the
+ * side they came from, and whoever was there the other side ({@link #sideFor}).</li>
  * <li>When someone leaves, their spot is held for {@link #HOLD_TICKS} ticks. If they come back in
  * that time they get it back; nobody else takes it.</li>
  * <li>Once a hold runs out, the player in the worst spot moves into the gap. Only that one player
@@ -39,6 +40,11 @@ final class SlotBook
 		final Map<Integer, Integer> occupant = new HashMap<>();
 		final Map<Integer, Integer> heldFor = new HashMap<>();
 		final Map<Integer, Integer> heldUntil = new HashMap<>();
+		/**
+		 * For people who kept the side they came from (see {@link #sideFor}), the spot they would
+		 * have had instead, by id: nobody is moved there to fill it.
+		 */
+		final Map<Integer, Integer> instead = new HashMap<>();
 
 		boolean held(int slot, int tick)
 		{
@@ -66,6 +72,7 @@ final class SlotBook
 				return;
 			}
 			occupant.remove(slot);
+			instead.remove(id);
 			if (hold)
 			{
 				heldFor.put(slot, id);
@@ -75,10 +82,25 @@ final class SlotBook
 
 		void assign(int id, int slot)
 		{
+			instead.remove(id);
 			slotOf.put(id, slot);
 			occupant.put(slot, id);
 			heldFor.remove(slot);
 			heldUntil.remove(slot);
+		}
+
+		/** Lets go of any spot still held for this player. */
+		void release(int id)
+		{
+			for (Iterator<Map.Entry<Integer, Integer>> it = heldFor.entrySet().iterator(); it.hasNext(); )
+			{
+				Map.Entry<Integer, Integer> h = it.next();
+				if (h.getValue() == id)
+				{
+					heldUntil.remove(h.getKey());
+					it.remove();
+				}
+			}
 		}
 	}
 
@@ -96,6 +118,7 @@ final class SlotBook
 	/**
 	 * Your own player's id when your character may be moved, else -1. You get the best spot on your
 	 * tile (the front, where what you're doing looks right); whoever had it swaps with you, once.
+	 * Walking onto someone, or them onto you, you take the side {@link #sideFor} gives you instead.
 	 */
 	int localId = -1;
 
@@ -143,6 +166,15 @@ final class SlotBook
 	 * there. Tending the fire, you were drawn further off than someone just standing about by it.
 	 */
 	Map<Long, Integer> fireSideForYou = new HashMap<>();
+
+	/**
+	 * For tiles where someone has just walked onto the others, the spot each of them still without
+	 * one takes, by id: whoever came keeps the side they came from, and whoever was there steps to
+	 * the other side (see CrowdPlanner#sidesFor). Taken before anything else, a spot held for
+	 * someone who stepped away included, and yours, if you are one of them, stays yours. One held
+	 * for you is never taken, unless you are back with a side of your own: then it's let go.
+	 */
+	Map<Long, Map<Integer, Integer>> sideFor = new HashMap<>();
 	private long yourPickTile = Long.MIN_VALUE;
 	private int yourPick;
 
@@ -261,6 +293,48 @@ final class SlotBook
 			t.heldUntil.entrySet().removeIf(h -> h.getValue() < tick || h.getKey() >= all);
 			t.heldFor.keySet().retainAll(t.heldUntil.keySet());
 
+			Set<Integer> inFront = keepClear.getOrDefault(e.getKey(), Collections.emptySet());
+			// Someone who has just walked onto the others keeps the side they came from, and whoever
+			// was there steps to the other side: before anyone comes back to a held spot, or takes
+			// the best free one.
+			Map<Integer, Integer> sides = sideFor.getOrDefault(e.getKey(), Collections.emptyMap());
+			// You first: back with a side of your own, the spot you had is no longer held for you,
+			// and whoever steps to the other side may step into it. Kept for you, they were sent to a
+			// third spot instead and walked round to it later.
+			List<Integer> siding = sides.isEmpty() ? Collections.<Integer>emptyList() : new ArrayList<>(ids);
+			if (siding.remove((Integer) yourId))
+			{
+				siding.add(0, yourId);
+			}
+			for (int id : siding)
+			{
+				Integer side = sides.get(id);
+				if (side == null || t.slotOf.containsKey(id) || side >= capacity || t.occupant.containsKey(side)
+					|| inFront.contains(side) || id != yourId && heldForYou(t, side, tick))
+				{
+					continue;
+				}
+				int first = 0;
+				while (t.occupant.containsKey(first))
+				{
+					first++;
+				}
+				t.assign(id, side);
+				if (first < side)
+				{
+					t.instead.put(id, first);
+				}
+				if (id == yourId)
+				{
+					t.release(id);
+				}
+				if (id == localId)
+				{
+					yourPick = side;
+					yourPickTile = e.getKey();
+					movedYou = true;
+				}
+			}
 			// People coming back to a spot held for them.
 			for (int id : ids)
 			{
@@ -291,7 +365,6 @@ final class SlotBook
 			}
 			Integer atFire = fireSideForYou.get(e.getKey());
 			int yours = atFire != null && atFire < capacity ? atFire : yourPickTile == e.getKey() ? yourPick : 0;
-			Set<Integer> inFront = keepClear.getOrDefault(e.getKey(), Collections.emptySet());
 			for (int id : arriving)
 			{
 				if (t.slotOf.containsKey(id))
@@ -436,8 +509,10 @@ final class SlotBook
 				{
 					// Never you. Other people filling a gap is what keeps a crowd tidy, but you notice
 					// your own character moving far more than anyone else's, so only arriving and
-					// settling the camera somewhere new ever move you.
-					if (t.occupant.get(slot) == localId || asideForYou.contains(t.occupant.get(slot)))
+					// settling the camera somewhere new ever move you. Nor anyone who kept the side
+					// they came from into the spot they'd have had instead, across the others.
+					if (t.occupant.get(slot) == localId || asideForYou.contains(t.occupant.get(slot))
+						|| Integer.valueOf(s).equals(t.instead.get(t.occupant.get(slot))))
 					{
 						continue;
 					}
@@ -536,6 +611,13 @@ final class SlotBook
 			yourPickTile = Long.MIN_VALUE;
 		}
 		return out;
+	}
+
+	/** Who has which spot on this tile as things stand, before this tick's update. */
+	Map<Integer, Integer> spotsOn(long tile)
+	{
+		Tile t = tiles.get(tile);
+		return t == null ? Collections.emptyMap() : Collections.unmodifiableMap(t.slotOf);
 	}
 
 	/** The spots of a tile in the order to try them: nearest its middle first where that's known. */

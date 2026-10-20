@@ -5440,4 +5440,156 @@ public class CrowdPlannerTest
 			}
 		}
 	}
+
+	/** Which way each player came onto their tile, and when, as StillnessTracker tells the planner. */
+	private static void cameFrom(CrowdPlanner planner, Map<Integer, int[]> from, Map<Integer, Integer> arrived)
+	{
+		planner.cameFrom = from::get;
+		planner.arrivedTick = id -> arrived.getOrDefault(id, 0);
+	}
+
+	@Test
+	public void atABoothWhoeverWalksUpAlongTheCounterStandsAtTheirEndOfIt()
+	{
+		// A pair at a bank booth stands side by side along it. Coming along the counter from the
+		// west, the one who came used to be sent past the other to the east end.
+		CrowdPlanner planner = new CrowdPlanner();
+		CrowdPlanner.Surroundings booth = surroundings(true, true, false);
+		Map<Integer, int[]> from = new HashMap<>();
+		Map<Integer, Integer> arrived = new HashMap<>();
+		cameFrom(planner, from, arrived);
+		arrived.put(2, 1);
+		for (int t = 1; t <= 4; t++)
+		{
+			Assert.assertTrue(planner.plan(players(2, NORTH), id -> true, 72, 5, true, false, t, booth).placements.isEmpty());
+		}
+		arrived.put(1, 5);
+		from.put(1, new int[]{-128, 0});
+		Map<Integer, int[]> at = null;
+		for (int t = 6; t <= 10; t++)
+		{
+			CrowdPlanner.Plan plan = planner.plan(players(1, NORTH, 2, NORTH), id -> true, 72, 5, true, false, t, booth);
+			Assert.assertTrue(plan.tiles.get(TILE).shape.startsWith("counter row"));
+			at = spots(plan);
+		}
+		Assert.assertTrue("the one who came, west: " + at.get(1)[0], at.get(1)[0] < 0);
+		Assert.assertTrue("the one who was there, east: " + at.get(2)[0], at.get(2)[0] > 0);
+	}
+
+	@Test
+	public void aFourthOrMoreIsLaidOutAsBeforeWhicheverWayTheyCame()
+	{
+		// Bigger groups keep the layout they have: the fourth takes the next spot of the pattern.
+		for (int[] way : new int[][]{{-128, 0}, {128, 0}, {0, -128}, {90, 90}})
+		{
+			CrowdPlanner told = new CrowdPlanner();
+			CrowdPlanner plain = new CrowdPlanner();
+			Map<Integer, int[]> from = new HashMap<>();
+			Map<Integer, Integer> arrived = new HashMap<>();
+			cameFrom(told, from, arrived);
+			for (int id = 1; id <= 3; id++)
+			{
+				arrived.put(id, id);
+			}
+			List<StackSpreader.Entry> three = players(1, NORTH, 2, NORTH, 3, NORTH);
+			List<StackSpreader.Entry> four = players(1, NORTH, 2, NORTH, 3, NORTH, 4, SOUTH);
+			for (int t = 1; t <= 12; t++)
+			{
+				if (t == 6)
+				{
+					arrived.put(4, 6);
+					from.put(4, way);
+				}
+				List<StackSpreader.Entry> still = t < 6 ? three : four;
+				Map<Integer, int[]> a = spots(told.plan(still, id -> true, 128, 6, true, false, t, OPEN));
+				Map<Integer, int[]> b = spots(plain.plan(still, id -> true, 128, 6, true, false, t, OPEN));
+				for (int id : b.keySet())
+				{
+					Assert.assertArrayEquals("tick " + t + ", player " + id, b.get(id), a.get(id));
+				}
+			}
+		}
+	}
+
+	/** Open ground, but for where {@code stand} says nobody can be drawn on {@link #TILE}. */
+	private static CrowdPlanner.Surroundings openBut(StackSpreader.SpotCheck stand)
+	{
+		return new CrowdPlanner.Surroundings()
+		{
+			public boolean canStand(long t, int dx, int dz) { return t != TILE || stand.canStand(dx, dz); }
+			public boolean facesObstacle(long t, double a) { return false; }
+			public boolean isCounter(long t, double a) { return false; }
+			public boolean facesFire(long t, double a) { return false; }
+			public List<int[]> firesNear(long t) { return new ArrayList<>(); }
+		};
+	}
+
+	/**
+	 * Player 2 stands alone, then player 1 walks on from {@code from}, over ground {@code around}:
+	 * where each is laid out, a few ticks later, with the camera turned round every tick meanwhile.
+	 */
+	private static Map<Integer, int[]> walksOnto(int[] from, CrowdPlanner.Surroundings around)
+	{
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, int[]> came = new HashMap<>();
+		Map<Integer, Integer> arrived = new HashMap<>();
+		cameFrom(planner, came, arrived);
+		arrived.put(2, 1);
+		for (int t = 1; t <= 4; t++)
+		{
+			Assert.assertTrue(planner.plan(players(2, NORTH), id -> true, 72, 5, true, false, t, around).placements.isEmpty());
+		}
+		arrived.put(1, 5);
+		came.put(1, from);
+		Map<Integer, int[]> at = null;
+		for (int t = 6; t <= 16; t++)
+		{
+			double camera = t * Math.PI / 3;
+			planner.cameraX = 50 * 128 + 64 + (int) Math.round(1500 * Math.cos(camera));
+			planner.cameraY = 50 * 128 + 64 + (int) Math.round(1500 * Math.sin(camera));
+			Map<Integer, int[]> now = spots(planner.plan(players(1, NORTH, 2, SOUTH), id -> true, 72, 5, true, false, t, around));
+			if (at != null)
+			{
+				Assert.assertArrayEquals("tick " + t + ": nobody moves once laid out", at.get(1), now.get(1));
+				Assert.assertArrayEquals("tick " + t + ": nobody moves once laid out", at.get(2), now.get(2));
+			}
+			at = now;
+		}
+		return at;
+	}
+
+	@Test
+	public void aPairMetFromTheFrontOrBackStandsAlongTheWayTheOneWhoCameWalked()
+	{
+		// It used to stand east and west, whichever way anyone came: from the north there was no
+		// side to keep. Now the one who came stands at their end of the way they came, the other at
+		// the far end, and turning the camera moves neither.
+		for (int[] from : new int[][]{{0, 128}, {0, -128}, {-90, 90}, {120, -6}, {112, 240}})
+		{
+			Map<Integer, int[]> at = walksOnto(from, OPEN);
+			double way = Math.atan2(from[1], from[0]);
+			double diagonal = Math.abs(Math.toDegrees(way) % 90) - 45;
+			double expected = Math.abs(diagonal) <= CrowdPlanner.DIAGONAL_WAY
+				? Math.round((way - Math.PI / 4) / (Math.PI / 2)) * (Math.PI / 2) + Math.PI / 4 : Math.round(way / (Math.PI / 2)) * (Math.PI / 2);
+			String what = "from " + from[0] + "," + from[1];
+			Assert.assertEquals(what + ": the one who came, at their end", expected, Math.atan2(at.get(1)[1], at.get(1)[0]), 0.03);
+			Assert.assertEquals(what + ": the other, across from them", 58, Math.hypot(at.get(2)[0], at.get(2)[1]), 1);
+			Assert.assertArrayEquals(what + ": across the middle", new int[]{-at.get(1)[0], -at.get(1)[1]}, at.get(2));
+		}
+	}
+
+	@Test
+	public void aWallAtTheEndOfTheWaySomeoneCameTurnsThePairTheNearestWayWithRoom()
+	{
+		// Come from the north with the north of the tile blocked a little way out (a door shut
+		// behind them, say): the two stand on the diagonal next to it, still on that side.
+		Map<Integer, int[]> at = walksOnto(new int[]{0, 128}, openBut((dx, dz) -> dz <= 50));
+		Assert.assertTrue("the one who came, on the north: " + at.get(1)[0] + "," + at.get(1)[1], at.get(1)[1] >= 40 && Math.abs(at.get(1)[0]) >= 40);
+		Assert.assertArrayEquals("the other across from them", new int[]{-at.get(1)[0], -at.get(1)[1]}, at.get(2));
+		// With no room anywhere on that side, they stand east and west as always.
+		at = walksOnto(new int[]{0, 128}, openBut((dx, dz) -> dz <= 20));
+		Assert.assertEquals(0, at.get(1)[1]);
+		Assert.assertEquals(0, at.get(2)[1]);
+		Assert.assertEquals(0, at.get(1)[0] + at.get(2)[0]);
+	}
 }

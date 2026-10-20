@@ -181,6 +181,25 @@ final class StackSpreader
 	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity,
 		SpotCheck check, int arcRadius, boolean bow, double wrap)
 	{
+		return spots(row, straight, angle, middleTaken, spacing, capacity, check, arcRadius, bow, wrap, 0, false);
+	}
+
+	/**
+	 * A crowd's spots, as above, turned {@code turn} degrees round from where they usually start,
+	 * anticlockwise seen from above (east towards north): its first two spots then lie that way
+	 * across the tile instead of east and west, and the rest follow round with them. With
+	 * {@code clockwise}, the spots after the first two go round the other way: the same shape seen
+	 * in a mirror, with the first two where they were.
+	 */
+	static List<int[]> crowdSpots(boolean middleTaken, int spacing, int capacity, SpotCheck check, double turn, boolean clockwise)
+	{
+		return spots(false, false, 0, middleTaken, spacing, capacity, check, LOOK_AHEAD, false, WRAP_ARC, turn, clockwise);
+	}
+
+	/** As above, a crowd's rings turned {@code turn} degrees, and maybe going round {@code clockwise}; a row isn't turned. */
+	static List<int[]> spots(boolean row, boolean straight, double angle, boolean middleTaken, int spacing, int capacity,
+		SpotCheck check, int arcRadius, boolean bow, double wrap, double turn, boolean clockwise)
+	{
 		List<int[]> out = new ArrayList<>(capacity);
 		if (!row)
 		{
@@ -190,7 +209,7 @@ final class StackSpreader
 				{
 					continue;
 				}
-				int[] spot = crowdSpot(i, spacing);
+				int[] spot = crowdSpot(i, spacing, turn, clockwise);
 				if (check == null || check.canStand(spot[0], spot[1]))
 				{
 					out.add(spot);
@@ -329,18 +348,22 @@ final class StackSpreader
 		return wide ? Math.max(LOOK_AHEAD, (int) Math.ceil(spacing / (MAX_ARC / ARC_REACH))) : LOOK_AHEAD;
 	}
 
-	/** Crowd spot {@code index}, relative to the tile centre: an inner ring, the middle, then an outer ring. */
-	private static int[] crowdSpot(int index, int spacing)
+	/**
+	 * Crowd spot {@code index}, relative to the tile centre, turned {@code turn} degrees and maybe
+	 * going round {@code clockwise}: an inner ring, the middle, then an outer ring.
+	 */
+	private static int[] crowdSpot(int index, int spacing, double turn, boolean clockwise)
 	{
+		int round = clockwise ? -1 : 1;
 		if (index < INNER_RING.length)
 		{
-			return polar(0.8 * spacing, INNER_RING[index]);
+			return polar(0.8 * spacing, turn + round * INNER_RING[index]);
 		}
 		if (index == INNER_RING.length)
 		{
 			return new int[]{0, 0};
 		}
-		return polar(Math.min(1.6 * spacing, MAX_LINE_EXTENT), OUTER_RING[index - INNER_RING.length - 1]);
+		return polar(Math.min(1.6 * spacing, MAX_LINE_EXTENT), turn + round * OUTER_RING[index - INNER_RING.length - 1]);
 	}
 
 	private static int[] polar(double radius, double degrees)

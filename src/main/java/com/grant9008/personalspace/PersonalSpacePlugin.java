@@ -70,7 +70,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.33";
+	static final String VERSION = "1.9.35";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -304,6 +304,8 @@ public class PersonalSpacePlugin extends Plugin
 	private boolean warnedBadIds;
 	private int tick;
 	private final CombatWatch combat = new CombatWatch();
+	/** Whether you count as in combat as of the last tick, whether or not spreading pauses for it: the shim never swaps a fighter's action for a walk. */
+	private boolean youFighting;
 
 	/** What the last game tick found, for the sidebar. */
 	private Snapshot.Gate gate = Snapshot.Gate.NOT_LOGGED_IN;
@@ -585,7 +587,9 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			wrapper.drawMeInFront = config.drawMeInFront();
 			wrapper.depthBetweenPlayers = config.depthBetweenPlayers();
-			wrapper.walkWhileBusy = config.walkWhileBusy();
+			// Off, paused while you fight or in a PvP area, nobody's action is swapped for a walk.
+			wrapper.spreading = filter != null && filter.enabled;
+			wrapper.youFighting = youFighting;
 		}
 
 		long now = System.nanoTime();
@@ -919,7 +923,7 @@ public class PersonalSpacePlugin extends Plugin
 			}
 			long tileKey = StackRegistry.key(StackRegistry.layer(world.getId(), wp.getPlane()), lp.getSceneX(), lp.getSceneY());
 			boolean centred = StillnessTracker.isCentred(lp.getX(), lp.getY());
-			boolean standingStill = stillness.observe(id, tileKey, centred, tick);
+			boolean standingStill = stillness.observe(id, tileKey, centred, tick, lp.getX(), lp.getY());
 			offsets.setWalkingOff(id, !centred);
 			if (!standingStill || p.isDead())
 			{
@@ -959,6 +963,9 @@ public class PersonalSpacePlugin extends Plugin
 		// cast as fast as it goes never leaves one.
 		planner.midAction = id -> id >= 0 && id < OffsetTable.CAPACITY && busyTick[id] == thisTick && !castsEnding.contains(id);
 		planner.smallGroupsClose = config.smallGroupsClose();
+		// Whoever walks onto someone keeps the side they came from (see CrowdPlanner#sidesFor).
+		planner.cameFrom = stillness::cameFrom;
+		planner.arrivedTick = stillness::arrivedTick;
 		planner.pose = config.pose();
 		planner.cameraX = client.getCameraX();
 		planner.cameraY = client.getCameraY();
@@ -1102,6 +1109,7 @@ public class PersonalSpacePlugin extends Plugin
 		stacks.rebuild(members, turnIn, unplacedIds, plan.fires, plan.poses, plan.middleOutOfSight);
 		stacks.setWaiting(waitingInTheMiddle);
 		stacks.setArrivals(stillness::arrivedTick);
+		stacks.setCameFrom(stillness::cameFromLately);
 		probe.forgetTilesNotIn(stacks);
 
 		nearby = nearbyCount;
@@ -1145,8 +1153,8 @@ public class PersonalSpacePlugin extends Plugin
 		}
 		Actor target = local.getInteracting();
 		boolean attacking = target instanceof NPC || target instanceof Player;
-		boolean fighting = combat.update(local.getHealthRatio() != -1, attacking, attacking && target.getHealthRatio() != -1, tick);
-		if (fighting && config.pauseInCombat())
+		youFighting = combat.update(local.getHealthRatio() != -1, attacking, attacking && target.getHealthRatio() != -1, tick);
+		if (youFighting && config.pauseInCombat())
 		{
 			return Snapshot.Gate.IN_COMBAT;
 		}
@@ -1511,7 +1519,6 @@ public class PersonalSpacePlugin extends Plugin
 		s.includeLocal = config.includeLocalPlayer();
 		s.drawMeInFront = config.drawMeInFront();
 		s.depthTest = config.depthBetweenPlayers();
-		s.walkWhileBusy = config.walkWhileBusy();
 		s.idleSit = config.idlePlayersSit();
 		s.sitting = idleSitter == null ? 0 : idleSitter.sitting();
 		s.clickPast = config.clickPastMoved();
@@ -1608,6 +1615,7 @@ public class PersonalSpacePlugin extends Plugin
 			s.passMissedFrames = w.passMissedFrames;
 			s.hiddenInYourWay = w.hiddenInYourWay;
 			s.walkSkippedBusy = w.walkSkippedBusy;
+			s.walkKeptFighting = w.walkKeptFighting;
 			s.walkBusy = w.walkBusy;
 			s.busyWalksOff = busyWalksOff;
 			s.slideBusy = w.slideBusy;

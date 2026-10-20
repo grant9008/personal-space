@@ -1,7 +1,10 @@
 package com.grant9008.personalspace;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntPredicate;
@@ -144,6 +147,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	private final int[] revealedFrame = new int[OffsetTable.CAPACITY];
 	/** The frame the game last handed each NPC over in the main world, by index, so no pet is drawn twice (see {@link #drawRefusedFollowers}). */
 	private final int[] npcFrame = longAgo(65536);
+	/** Where it was then, as local x and z packed into one (see {@link #packed}): a pet that walked onto someone came from there. */
+	private final int[] npcSeenAt = new int[65536];
 	/** The frame each player was last really drawn (or kept back to be drawn) by this shim. */
 	private final int[] drawnFrame = longAgo(OffsetTable.CAPACITY);
 	/**
@@ -635,8 +640,20 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		k.legFrame = legs[1];
 	}
 
-	/** Whether people doing something as they walk are drawn walking (Walk while busy). */
-	volatile boolean walkWhileBusy = true;
+	/**
+	 * Set by the plugin each frame: whether the effect is on here and now (switched on, not paused
+	 * while you fight, not in a PvP area). Only then is anyone's action ever swapped for a walk; the
+	 * rest of the time everyone is drawn exactly as the game draws them.
+	 */
+	volatile boolean spreading = true;
+	/** Set by the plugin each frame: whether you count as in combat by its own reckoning ({@link CombatWatch}). */
+	volatile boolean youFighting;
+	/** Someone counts as fighting this long after the last sign of it, in game cycles: {@link CombatWatch#LINGER_TICKS}, 8 ticks of 30, about 5 s. */
+	static final int FIGHT_HOLD_CYCLES = CombatWatch.LINGER_TICKS * 30;
+	/** The game cycle each player last showed a sign of fighting (see {@link #fighting}). */
+	private final int[] fightCycle = longAgo(OffsetTable.CAPACITY);
+	/** Diagnostics: frames someone busy on the move was drawn with their own action because they were fighting. */
+	long walkKeptFighting;
 	/** Diagnostics: frames drawn with legs keeping pace with the body, and busy people drawn walking on the move. */
 	long legsMatched;
 	long movingBusyWalks;
@@ -655,13 +672,15 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * skated. Their walk is played instead at the pace their body really moves on screen.
 	 *
 	 * <p>Doing something as they walk (alching on the run), the game draws the action over the walk,
-	 * legs and all, and they glide along in its pose; with Walk while busy on, the action is left
-	 * out while they move (see {@link #modelMidStep}).
+	 * legs and all, and they glide along in its pose; so the action is left
+	 * out while they move (see {@link #modelMidStep}). Never yours, though: what you do on the move
+	 * (an attack, a spell, a bite to eat) is what you time your next click by, so you see it as the
+	 * game draws it, crowd or not. Nor anyone's who keeps their action ({@link #keepsOwnAction}).
 	 */
 	private int[] movingLegs(Player player, int id, int drawnX, int drawnZ, boolean drawnAway)
 	{
 		boolean busy = player.getAnimation() != -1;
-		if (busy && !(walkWhileBusy && busyWalks) || id < 0 || id >= OffsetTable.CAPACITY)
+		if (busy && (!busyWalks || isLocal(player) || keepsOwnAction(player)) || id < 0 || id >= OffsetTable.CAPACITY)
 		{
 			return null;
 		}
@@ -687,6 +706,54 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		legFrame[id] = frame;
 		int at = walkTiming(pose).frameAt(legSeconds[id]);
 		return at < 0 ? (busy ? new int[]{pose, player.getPoseAnimationFrame()} : null) : new int[]{pose, at};
+	}
+
+	/**
+	 * Whether this busy player is drawn on the move just as the game has them, action and all,
+	 * rather than walking with it left out: always while the effect is off, paused or in a PvP area,
+	 * and for anyone fighting ({@link #fighting}). Stepping between attacks (woox walking at
+	 * Vorkath), each attack has to be seen to fire; with it left out they only walked.
+	 */
+	private boolean keepsOwnAction(Player player)
+	{
+		if (!spreading)
+		{
+			return true;
+		}
+		if (fighting(player))
+		{
+			walkKeptFighting++;
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Client thread. Whether this player is fighting, as far as can be seen: facing a player, or an
+	 * NPC that can fight (one with a combat level, or with its health bar showing), their own health
+	 * bar showing (hit a moment ago), or, for you, in combat by the plugin's own reckoning
+	 * ({@link #youFighting}). A sign counts for {@link #FIGHT_HOLD_CYCLES} after it was last seen:
+	 * stepping away between attacks, the game stops having them face their target while the attack
+	 * still plays. Alching, tending a fire or fletching faces nobody and shows no health bar, so it
+	 * isn't fighting. Nor is fishing: a fishing spot is an NPC, but one with no combat level and no
+	 * health bar, like a banker, so a crowd of fishers is still walked to their spots.
+	 */
+	private boolean fighting(Player player)
+	{
+		Actor target = player.getInteracting();
+		boolean sign = target instanceof Player || target instanceof NPC && (target.getCombatLevel() > 0 || target.getHealthRatio() != -1)
+			|| player.getHealthRatio() != -1 || youFighting && isLocal(player);
+		int id = player.getId();
+		if (id < 0 || id >= OffsetTable.CAPACITY)
+		{
+			return sign;
+		}
+		int cycle = client.getGameCycle();
+		if (sign)
+		{
+			fightCycle[id] = cycle;
+		}
+		return cycle - fightCycle[id] <= FIGHT_HOLD_CYCLES;
 	}
 
 	/**
@@ -972,13 +1039,19 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * whoever {@link #middleOf} gives a crowd's middle to). It walks out from under them to a spot of
 	 * its own ({@link #besideSpot}), stays there while they do, and walks back into the middle once
 	 * they step off and the game hands it over again ({@link #drawPetAside});</li>
+	 * <li>just off the flames, when its tile has a fire on it, whoever stands there: a spot of its own
+	 * beside the fire ({@link #fireSpot}). Nobody is shown in the middle of a busy campfire, the crowd
+	 * on it stands round it, so it was drawn where it stood, right in the flames;</li>
 	 * <li>where it stands, when nobody is shown in the middle of its tile: a crowd spread round it
 	 * (it vanished from an empty middle, and came back whenever nobody stood there or the stack probe
-	 * held everyone back: on a busy campfire a pet on the fire flickered in and out), a tile with no
-	 * room left (a campfire's, full of flames), or someone only walking across it.</li>
+	 * held everyone back), a tile with no room left (full of other things), or someone only walking
+	 * across it.</li>
 	 * </ul>
-	 * With no room round them (a campfire's flames all round), or them left undrawn there (see
-	 * {@link #undrawnInTheMiddle}), it stays under them, as in the game.
+	 * With no room round them, or them left undrawn there (see {@link #undrawnInTheMiddle}), it stays
+	 * under them, as in the game; and with no room round a fire, it stays out of sight rather than
+	 * stand in it. One the game draws itself standing in a fire walks out of it too (see
+	 * {@link #leadOffTheFire}), and one walking off from its spot across a tile with no room on it is
+	 * eased back as it goes (see {@link #walkOffUnseen}).
 	 */
 	private void drawRefusedFollowers(WorldView wv, int frame, int left, int top, int right, int bottom)
 	{
@@ -994,13 +1067,29 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		for (NPC npc : wv.npcs())
 		{
 			int index = npc == null ? -1 : npc.getIndex();
-			NPCComposition composition = index < 0 || index >= npcFrame.length || npcFrame[index] == frame ? null : npc.getComposition();
+			// One the game handed over itself is only looked at for a fire it may be standing in.
+			boolean handedOver = index >= 0 && index < npcFrame.length && npcFrame[index] == frame;
+			NPCComposition composition = index < 0 || index >= npcFrame.length
+				|| handedOver && (!probe.enabled || ground == null || petSpots.containsKey(index)) ? null : npc.getComposition();
 			LocalPoint lp = composition == null ? null : npc.getLocalLocation();
 			// Only one the game would draw: a follower it shows (not one turned invisible), of one tile,
-			// standing in the middle of it. One walking is handed over as it comes.
-			if (lp == null || !composition.isFollower() || composition.getSize() != 1 || npc.getTransformedComposition() == null
-				|| !StillnessTracker.isCentred(lp.getX(), lp.getY()))
+			// standing in the middle of it. One walking is handed over as it comes, unless it walks off
+			// from beside someone or a fire across a tile with no room on it (see walkOffUnseen).
+			if (lp == null || !composition.isFollower() || composition.getSize() != 1 || npc.getTransformedComposition() == null)
 			{
+				continue;
+			}
+			if (!StillnessTracker.isCentred(lp.getX(), lp.getY()))
+			{
+				if (!handedOver && !petSpots.isEmpty() && petSpots.containsKey(index))
+				{
+					walkOffUnseen(npc, wv, plane, lp, frame, left, top, right, bottom);
+				}
+				continue;
+			}
+			if (handedOver)
+			{
+				leadOffTheFire(npc, wv, plane, lp, frame);
 				continue;
 			}
 			if (count == leftOut.length)
@@ -1048,9 +1137,11 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			boolean crowded = stacks.membersAt(tile).length > 0;
 			Player over = crowded ? playerOver(wv, tile, plane, x, z) : overLeftOut[i];
 			overLeftOut[i] = null;
-			boolean beside = over != null && probe.enabled && !undrawnInTheMiddle(over, tile) && probe.othersAllow(renderCallbacks, over);
+			// In a fire: beside it, whoever stands there.
+			boolean fire = probe.enabled && onFire(tile);
+			boolean beside = fire || over != null && probe.enabled && !undrawnInTheMiddle(over, tile) && probe.othersAllow(renderCallbacks, over);
 			// Where it stands: a crowd spread round it, or with no room on its tile, or someone only walking across it.
-			boolean inPlace = over == null && (crowded || probe.enabled && (passingLeftOut[i] || tileFull(wv, plane, lp.getSceneX(), lp.getSceneY())));
+			boolean inPlace = !fire && over == null && (crowded || probe.enabled && (passingLeftOut[i] || tileFull(wv, plane, lp.getSceneX(), lp.getSceneY())));
 			PetSpot s = petSpots.isEmpty() ? null : petSpots.get(index);
 			if (s != null && s.npc != npc)
 			{
@@ -1077,11 +1168,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 					s = new PetSpot(npc, tile, x, z, npc.getCurrentOrientation());
 					s.frame = frame;
 				}
-				if (!besideSpot(s, npc, wv, tile, x, z))
+				if (!(fire ? fireSpot(s, npc, wv, tile, x, z) : besideSpot(s, npc, over, wv, tile, x, z)))
 				{
 					if (s.x == 0f && s.z == 0f)
 					{
-						// No room round them: under them, as in the game.
+						// No room round them: under them, as in the game. Or round the fire: out of
+						// sight, rather than in the flames.
 						petSpots.remove(index);
 						continue;
 					}
@@ -1143,6 +1235,47 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			petRetry.values().removeIf(after -> after <= frame);
 		}
+	}
+
+	/**
+	 * A pet drawn beside someone, or beside the fire it stood in, walking off across a tile the game
+	 * has no room on: a busy campfire's, with its flames and the people standing in it. The game
+	 * leaves it out on its way, as it does anyone walking there (see {@link #drawRefusedMoving}), and
+	 * it vanished from its spot and came back a stride further on. What's left of its step out is
+	 * eased away as it goes instead, as when the game hands it over (see {@link #drawPetAside}), and
+	 * once it's back where it really is it's the game's again.
+	 */
+	private void walkOffUnseen(NPC npc, WorldView wv, int plane, LocalPoint lp, int frame, int left, int top, int right, int bottom)
+	{
+		int index = npc.getIndex();
+		PetSpot s = petSpots.get(index);
+		int x = lp.getX();
+		int z = lp.getY();
+		int orientation = npc.getCurrentOrientation();
+		if (s.npc != npc || !probe.enabled || !crossingFullTile(wv, plane, x, z, orientation) || !probe.othersAllow(renderCallbacks, npc))
+		{
+			return;
+		}
+		s.toX = 0;
+		s.toZ = 0;
+		if (movePet(s, x, z, true, orientation))
+		{
+			petSpots.remove(index);
+			return;
+		}
+		int dx = Math.round(s.x);
+		int dz = Math.round(s.z);
+		if (!zoneDrawn(x, z, frame) || !onScreen(wv, x + dx, z + dz, plane, left, top, right, bottom))
+		{
+			return;
+		}
+		int y = Perspective.getTileHeight(client, lp, plane) - npc.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + dx, z + dz);
+		keep(lentProjection, lentScene, lentObject, npc, s.facing, s.facing, x + dx, y, z + dz, false);
+		Kept k = kept[keptCount - 1];
+		k.lent = true;
+		k.plane = plane;
+		petLegs(k, npc, s);
+		followersBesideDrawn++;
 	}
 
 	/** Scratch for {@link #drawRefusedFollowers}: the pets left out this frame, where, who stands still over each, and whether anyone at all does. */
@@ -1229,6 +1362,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		int facing;
 		/** The frame it was last moved, or found under them. */
 		int frame = Integer.MIN_VALUE / 2;
+		/** Which way it steps out first (see {@link #arrivalSide}), -1 for no way in particular, and the tile and the one over it that was for. */
+		int side = -1;
+		long sideTile = Long.MIN_VALUE;
+		int sideOver = -1;
 
 		PetSpot(NPC npc, long tile, int realX, int realZ, int facing)
 		{
@@ -1279,17 +1416,28 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	/**
 	 * This pet's spot beside whoever stands in the middle of its tile, into {@link PetSpot#toX}: the one
 	 * it has while nobody comes too near it ({@link #PET_KEEP}), else the first with room going round
-	 * from the way it would go anyway. That's towards its owner, or straight ahead when its owner is
-	 * the one standing on it: the way it goes next, whatever the camera does, and the way it already
-	 * faces (followers face their owner), so it walks out forwards and stands by its owner's side.
-	 * (Away from the camera it was hidden behind the person's legs, and it would have moved round
-	 * them as the camera turned.) Room is ground a body could stand on, reached from the middle
-	 * without going through anything (no wall, object or fire's flames: see
-	 * {@link CrowdPlanner.Surroundings#canStand}), with nobody drawn there or going to be (see
-	 * {@link #clearFor}). False if there's no room anywhere round them, or the ground isn't known.
+	 * from the way it would go anyway. That's away from where they came from, if they have just
+	 * walked onto it, or back the way it came, if it has just walked onto them (see
+	 * {@link #arrivalSide}), so neither is drawn walking through the other: stepping onto your pet
+	 * from the east, it came out under you and stood on your east side, the way you came. Otherwise
+	 * it's towards its owner, or straight ahead when its owner is the one standing on it: the way it
+	 * goes next, whatever the camera does, and the way it already faces (followers face their owner),
+	 * so it walks out forwards and stands by its owner's side. (Away from the camera it was hidden
+	 * behind the person's legs, and it would have moved round them as the camera turned.) Room is
+	 * ground a body could stand on, reached from the middle without going through anything (no wall,
+	 * object or fire's flames: see {@link CrowdPlanner.Surroundings#canStand}), with nobody drawn
+	 * there or going to be (see {@link #clearFor}). False if there's no room anywhere round them, or
+	 * the ground isn't known.
 	 */
-	private boolean besideSpot(PetSpot s, NPC npc, WorldView wv, long tile, int x, int z)
+	private boolean besideSpot(PetSpot s, NPC npc, Player over, WorldView wv, long tile, int x, int z)
 	{
+		if (s.sideTile != tile || s.sideOver != over.getId())
+		{
+			// Worked out once, as they meet: who came last is only known then.
+			s.sideTile = tile;
+			s.sideOver = over.getId();
+			s.side = arrivalSide(npc, over, tile, x, z);
+		}
 		if (s.tile == tile && (s.toX != 0 || s.toZ != 0) && clearFor(npc, wv, x + s.toX, z + s.toZ, PET_KEEP, PET_GAP, false))
 		{
 			return true;
@@ -1308,24 +1456,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			// No room a moment ago: not looked for again yet.
 			return false;
 		}
-		int ahead = npc.getCurrentOrientation();
-		Actor owner = npc.getInteracting();
-		LocalPoint at = owner == null || owner.getWorldView() != wv ? null : owner.getLocalLocation();
-		if (at != null)
-		{
-			int ownerX = at.getX();
-			int ownerZ = at.getY();
-			if (owner instanceof Player)
-			{
-				// Drawn at a spot: towards where they're drawn.
-				ownerX += offsets.dx(((Player) owner).getId());
-				ownerZ += offsets.dz(((Player) owner).getId());
-			}
-			if (Math.hypot(ownerX - x, ownerZ - z) >= PET_OWNER_APART)
-			{
-				ahead = OffsetTable.facing(ownerX - x, ownerZ - z);
-			}
-		}
+		int owners = s.side >= 0 ? -1 : ownersWay(npc, wv, x, z);
+		int ahead = s.side >= 0 ? s.side : owners >= 0 ? owners : npc.getCurrentOrientation();
 		for (int i = 0; i < PET_DIRECTIONS; i++)
 		{
 			// Straight that way first, then a little to either side of it, and so on round.
@@ -1345,6 +1477,271 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		}
 		petRetry.put(npc.getIndex(), offsets.frame() + PET_RETRY_FRAMES);
 		return false;
+	}
+
+	/**
+	 * Which way, in game orientation units, this pet's owner is from (x, z): towards where they're
+	 * drawn. -1 when that isn't known, or they're nearer than {@link #PET_OWNER_APART}: the one
+	 * standing on it.
+	 */
+	private int ownersWay(NPC npc, WorldView wv, int x, int z)
+	{
+		Actor owner = npc.getInteracting();
+		LocalPoint at = owner == null || owner.getWorldView() != wv ? null : owner.getLocalLocation();
+		if (at == null)
+		{
+			return -1;
+		}
+		int ownerX = at.getX();
+		int ownerZ = at.getY();
+		if (owner instanceof Player)
+		{
+			// Drawn at a spot: towards where they're drawn.
+			ownerX += offsets.dx(((Player) owner).getId());
+			ownerZ += offsets.dz(((Player) owner).getId());
+		}
+		return Math.hypot(ownerX - x, ownerZ - z) >= PET_OWNER_APART ? OffsetTable.facing(ownerX - x, ownerZ - z) : -1;
+	}
+
+	/**
+	 * This pet's spot beside the fire it stands in, into {@link PetSpot#toX}, whoever else stands
+	 * there: just off the flames, where people standing on a fire stand round it
+	 * ({@link CrowdPlanner#FIRE_SPOTS}). Round a busy campfire nobody is shown in its middle, so a pet
+	 * on it was drawn where it stood, in the flames, with the crowd round it; on a quiet one the game
+	 * drew it there itself. The spot it has while nobody comes too near it ({@link #PET_KEEP}), else
+	 * the one with room nearest the side it would go anyway: towards its owner, or straight ahead
+	 * (followers face their owner), so it stands by its owner at the fire. Once out of the flames, the
+	 * one with room nearest where it's drawn, so it steps aside as little as it can. Either way one it
+	 * can walk to straight without going through anyone ({@link #clearWay}) if there is one. Room is
+	 * as beside someone (see {@link #besideSpot}). False if there's no room round the fire, or the
+	 * ground isn't known.
+	 */
+	private boolean fireSpot(PetSpot s, NPC npc, WorldView wv, long tile, int x, int z)
+	{
+		CrowdPlanner.Surroundings around = ground;
+		if (around == null)
+		{
+			return false;
+		}
+		if (s.tile == tile && (s.toX != 0 || s.toZ != 0) && around.canStand(tile, s.toX, s.toZ)
+			&& clearFor(npc, wv, x + s.toX, z + s.toZ, PET_KEEP, PET_GAP, false))
+		{
+			return true;
+		}
+		s.tile = tile;
+		s.toX = 0;
+		s.toZ = 0;
+		Integer retry = petRetry.isEmpty() ? null : petRetry.get(npc.getIndex());
+		if (retry != null && offsets.frame() < retry)
+		{
+			// No room a moment ago: not looked for again yet.
+			return false;
+		}
+		boolean out = !inTheFlames(s.x, s.z);
+		int owners = out ? -1 : ownersWay(npc, wv, x, z);
+		double angle = (owners >= 0 ? owners : npc.getCurrentOrientation()) * Math.PI / 1024;
+		double nearX = out ? s.x : -Math.sin(angle) * CrowdPlanner.FIRE_SIDE;
+		double nearZ = out ? s.z : -Math.cos(angle) * CrowdPlanner.FIRE_SIDE;
+		List<int[]> spots = new ArrayList<>(CrowdPlanner.FIRE_SPOTS);
+		spots.sort(Comparator.comparingDouble(f -> Math.hypot(f[0] - nearX, f[1] - nearZ)));
+		int[] pick = null;
+		for (int[] f : spots)
+		{
+			if (around.canStand(tile, f[0], f[1]) && clearFor(npc, wv, x + f[0], z + f[1], PET_GAP, CrowdPlanner.OBJECT_YOUR_GAP, true))
+			{
+				if (clearWay(wv, x, z, s.x, s.z, f[0], f[1]))
+				{
+					pick = f;
+					break;
+				}
+				// Only through someone: if nowhere else.
+				pick = pick == null ? f : pick;
+			}
+		}
+		if (pick == null)
+		{
+			petRetry.put(npc.getIndex(), offsets.frame() + PET_RETRY_FRAMES);
+			return false;
+		}
+		s.toX = pick[0];
+		s.toZ = pick[1];
+		return true;
+	}
+
+	/** How far from the middle of a fire's tile, either way, its flames reach, as the plugin keeps everyone out of them. */
+	private static final int FLAMES = Perspective.LOCAL_HALF_TILE_SIZE + PersonalSpacePlugin.FIRE_CLEARANCE;
+
+	private static boolean inTheFlames(double east, double north)
+	{
+		return Math.abs(east) < FLAMES && Math.abs(north) < FLAMES;
+	}
+
+	/** Whether the straight way from (fromX, fromZ) to (toX, toZ), from the middle of a fire's tile, goes through its flames. */
+	private static boolean acrossTheFlames(double fromX, double fromZ, double toX, double toZ)
+	{
+		// How far along the way it is when it comes in past each side of them, and goes out past the other.
+		double in = 0;
+		double out = 1;
+		double[] towards = {fromX - toX, toX - fromX, fromZ - toZ, toZ - fromZ};
+		double[] room = {fromX + FLAMES, FLAMES - fromX, fromZ + FLAMES, FLAMES - fromZ};
+		for (int i = 0; i < 4; i++)
+		{
+			if (towards[i] == 0)
+			{
+				if (room[i] <= 0)
+				{
+					return false;
+				}
+				continue;
+			}
+			double t = room[i] / towards[i];
+			if (towards[i] < 0)
+			{
+				in = Math.max(in, t);
+			}
+			else
+			{
+				out = Math.min(out, t);
+			}
+		}
+		return in < out;
+	}
+
+	/**
+	 * Nobody stands nearer than this to a pet's straight way round a fire to its spot (see
+	 * {@link #clearWay}): it walks out between the people round it, rather than through them.
+	 */
+	private static final int PET_PASS = 24;
+
+	/**
+	 * Whether a pet standing on a fire's tile at (x, z), drawn at (fromX, fromZ) from there, can walk
+	 * straight to (toX, toZ): past nobody standing nearer than {@link #PET_PASS} to its way, where
+	 * they're drawn or going (anyone it's already beside, it walks away from), and, once it's out of
+	 * the flames, not back across them to the other side of the fire.
+	 */
+	private boolean clearWay(WorldView wv, int x, int z, float fromX, float fromZ, int toX, int toZ)
+	{
+		if (!inTheFlames(fromX, fromZ) && acrossTheFlames(fromX, fromZ, toX, toZ))
+		{
+			return false;
+		}
+		int plane = wv.getPlane();
+		for (Player p : wv.players())
+		{
+			LocalPoint lp = p == null || reallyMoving(p) ? null : p.getLocalLocation();
+			if (lp == null || p.getWorldLocation() == null || p.getWorldLocation().getPlane() != plane)
+			{
+				continue;
+			}
+			int id = p.getId();
+			if (inTheWay(lp.getX() + offsets.targetX(id) - x, lp.getY() + offsets.targetZ(id) - z, fromX, fromZ, toX, toZ)
+				|| !offsets.isWalking(id) && inTheWay(lp.getX() + offsets.dx(id) - x, lp.getY() + offsets.dz(id) - z, fromX, fromZ, toX, toZ))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Whether someone at (east, north) is in the way of a walk from (fromX, fromZ) to (toX, toZ), all from the same middle; not if it starts beside them. */
+	private static boolean inTheWay(int east, int north, float fromX, float fromZ, int toX, int toZ)
+	{
+		if (Math.hypot(east - fromX, north - fromZ) < PET_GAP)
+		{
+			return false;
+		}
+		double wayX = toX - fromX;
+		double wayZ = toZ - fromZ;
+		double length = wayX * wayX + wayZ * wayZ;
+		double t = length == 0 ? 0 : Math.max(0, Math.min(1, ((east - fromX) * wayX + (north - fromZ) * wayZ) / length));
+		return Math.hypot(fromX + t * wayX - east, fromZ + t * wayZ - north) < PET_PASS;
+	}
+
+	/**
+	 * A pet the game drew standing in the middle of a tile with a fire on it, in the flames (nobody
+	 * stands there, so it had the middle): from the next frame it walks out to its spot beside the
+	 * fire ({@link #fireSpot}), drawn there by {@link #drawPetAside} as the game hands it over, until
+	 * it walks off. With no room round the fire, it's left to the game.
+	 */
+	private void leadOffTheFire(NPC npc, WorldView wv, int plane, LocalPoint lp, int frame)
+	{
+		long tile = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY());
+		if (!onFire(tile))
+		{
+			return;
+		}
+		PetSpot s = new PetSpot(npc, tile, lp.getX(), lp.getY(), npc.getCurrentOrientation());
+		s.frame = frame;
+		if (fireSpot(s, npc, wv, tile, lp.getX(), lp.getY()))
+		{
+			petSpots.put(npc.getIndex(), s);
+		}
+	}
+
+	/** Which tiles have a fire on them, as {@link #ground} has it, looked up once for each one (each tick). */
+	private final Map<Long, Boolean> fireOn = new HashMap<>();
+	private CrowdPlanner.Surroundings fireOnGround;
+
+	/** Whether this tile has a fire on it (see {@link CrowdPlanner.Surroundings#firesNear}); false while the ground isn't known. */
+	private boolean onFire(long tile)
+	{
+		CrowdPlanner.Surroundings around = ground;
+		if (around == null)
+		{
+			return false;
+		}
+		if (around != fireOnGround)
+		{
+			fireOn.clear();
+			fireOnGround = around;
+		}
+		Boolean fire = fireOn.get(tile);
+		if (fire == null)
+		{
+			List<int[]> fires = around.firesNear(tile);
+			fire = fires != null && CrowdPlanner.fireUnderfoot(fires);
+			fireOn.put(tile, fire);
+		}
+		return fire;
+	}
+
+	/**
+	 * A pet that walked onto someone's tile is drawn beside them once the game left it out: frames
+	 * since it was last handed over somewhere else for that to count as it having just walked in.
+	 */
+	static final int PET_ARRIVAL_FRAMES = 10;
+
+	/**
+	 * Which way, in game orientation units, a pet steps out from under whoever stands over it, by
+	 * which of them came last: away from where they came from when they have just walked onto it
+	 * (see {@link StillnessTracker#cameFromLately}), or back the way it came when it has just walked
+	 * onto them (the game last handed it over a moment ago, somewhere else). -1 when neither is known,
+	 * or they came together.
+	 */
+	private int arrivalSide(NPC npc, Player over, long tile, int x, int z)
+	{
+		int index = npc.getIndex();
+		boolean itCame = index >= 0 && index < npcFrame.length && offsets.frame() - npcFrame[index] <= PET_ARRIVAL_FRAMES
+			&& npcSeenAt[index] != packed(x, z);
+		int[] theyCame = stacks.cameFrom(over.getId(), tile, x, z);
+		if (itCame && theyCame == null)
+		{
+			int east = (npcSeenAt[index] >>> 16) - x;
+			int north = (npcSeenAt[index] & 0xFFFF) - z;
+			// Further than a walk: it was put there (a teleport after its owner), from nowhere in particular.
+			return Math.abs(east) + Math.abs(north) <= OffsetTable.JUMP ? OffsetTable.facing(east, north) : -1;
+		}
+		if (theyCame != null && !itCame)
+		{
+			return OffsetTable.facing(-theyCame[0], -theyCame[1]);
+		}
+		return -1;
+	}
+
+	/** Local x and z, each within a scene, in one int. */
+	private static int packed(int x, int z)
+	{
+		return (x & 0xFFFF) << 16 | (z & 0xFFFF);
 	}
 
 	/**
@@ -1512,11 +1909,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	}
 
 	/**
-	 * A pet the game handed over that is drawn beside someone, or on its way back from there (see
-	 * {@link #drawRefusedFollowers}). Still beside them while they're shown there (the stack probe let
-	 * it in for a frame, say). Otherwise it walks back into the middle of its tile from where it's
-	 * drawn, rather than jumping there as they step off, and is then left to the game. Its click box
-	 * stays where the game puts it, on its own tile. False if it's the game's to draw as it is.
+	 * A pet the game handed over that is drawn beside someone, or beside the fire it stands in, or on
+	 * its way back from there (see {@link #drawRefusedFollowers}). Still beside them while they're
+	 * shown there (the stack probe let it in for a frame, say), and beside the fire while it stands in
+	 * it. Otherwise it walks back into the middle of its tile from where it's drawn, rather than
+	 * jumping there as they step off, and is then left to the game. Its click box stays where the
+	 * game puts it, on its own tile. False if it's the game's to draw as it is.
 	 */
 	private boolean drawPetAside(Projection projection, Scene scene, GameObject gameObject, NPC npc, Model model, int x, int y, int z)
 	{
@@ -1542,8 +1940,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		boolean centred = StillnessTracker.isCentred(lp.getX(), lp.getY());
 		long tile = StackRegistry.key(StackRegistry.layer(wv.getId(), plane), lp.getSceneX(), lp.getSceneY());
 		Player over = centred ? playerOver(wv, tile, plane, lp.getX(), lp.getY()) : null;
-		if (over == null || undrawnInTheMiddle(over, tile) || !probe.othersAllow(renderCallbacks, over)
-			|| !besideSpot(s, npc, wv, tile, lp.getX(), lp.getY()))
+		// In a fire, beside it whoever stands there; else beside whoever is shown over it.
+		if (centred && onFire(tile) ? !fireSpot(s, npc, wv, tile, lp.getX(), lp.getY())
+			: over == null || undrawnInTheMiddle(over, tile) || !probe.othersAllow(renderCallbacks, over)
+			|| !besideSpot(s, npc, over, wv, tile, lp.getX(), lp.getY()))
 		{
 			s.toX = 0;
 			s.toZ = 0;
@@ -2235,11 +2635,15 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			if (renderable instanceof NPC && client.isClientThread() && isMainScene(scene))
 			{
 				int index = ((NPC) renderable).getIndex();
+				// Noted after it's drawn aside, which tells whether a pet beside someone has just walked in
+				// by where the game handed it over before this.
+				boolean aside = !petSpots.isEmpty() && drawPetAside(projection, scene, gameObject, (NPC) renderable, model, x, y, z);
 				if (index >= 0 && index < npcFrame.length)
 				{
 					npcFrame[index] = offsets.frame();
+					npcSeenAt[index] = packed(x, z);
 				}
-				if (!petSpots.isEmpty() && drawPetAside(projection, scene, gameObject, (NPC) renderable, model, x, y, z))
+				if (aside)
 				{
 					return;
 				}
@@ -2283,6 +2687,12 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		if (drawnId >= 0 && drawnId < OffsetTable.CAPACITY)
 		{
 			nativeFrame[drawnId] = offsets.frame();
+		}
+		if (drawn.getAnimation() != -1)
+		{
+			// Noted whenever they're busy, not only as they walk: an attack starts facing the target,
+			// and stepping away mid-attack the game stops having them face it (see fighting).
+			fighting(drawn);
 		}
 		int plane = gameObject.getPlane();
 		int layer = StackRegistry.layer(wv.getId(), plane);
@@ -2768,7 +3178,8 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 	 * been walking. Someone busy with an action (alching, tending a campfire) is shown walking too,
 	 * the action left out for the step (see {@link #modelMidStep}): with it in, it was drawn over the
 	 * walk, legs and all, and they glided. Returns null (draw them as the game did) if the animation
-	 * can't be read, or busy walks have been switched off. The model stays valid until the next model
+	 * can't be read, busy walks have been switched off, or a busy one keeps their action
+	 * ({@link #keepsOwnAction}: fighting, say). The model stays valid until the next model
 	 * is built.
 	 *
 	 * <p>The walk goes in as their action as well as their pose ({@link #modelStepping}): in a crowd
@@ -2783,6 +3194,10 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		if (action != -1 && !busyWalks)
 		{
 			walkSkippedBusy++;
+			return null;
+		}
+		if (action != -1 && keepsOwnAction(player))
+		{
 			return null;
 		}
 		int walk = player.getWalkAnimation();

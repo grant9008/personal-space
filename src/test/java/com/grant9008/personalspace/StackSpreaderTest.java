@@ -60,6 +60,50 @@ public class StackSpreaderTest
 	}
 
 	@Test
+	public void aCrowdTurnedRoundKeepsItsShape()
+	{
+		// Turned a quarter, a pair's two spots lie north and south instead of east and west, and
+		// every other spot turns with them. Unturned, it's the crowd as always.
+		List<int[]> plain = StackSpreader.spots(false, false, 0, false, 72, StackSpreader.CROWD_PATTERN_SIZE, null);
+		List<int[]> same = StackSpreader.crowdSpots(false, 72, StackSpreader.CROWD_PATTERN_SIZE, null, 0, false);
+		List<int[]> turned = StackSpreader.crowdSpots(false, 72, StackSpreader.CROWD_PATTERN_SIZE, null, 90, false);
+		Assert.assertEquals(plain.size(), turned.size());
+		for (int i = 0; i < plain.size(); i++)
+		{
+			Assert.assertArrayEquals("spot " + i, plain.get(i), same.get(i));
+			Assert.assertEquals("spot " + i + " turned", -plain.get(i)[1], turned.get(i)[0], 1);
+			Assert.assertEquals("spot " + i + " turned", plain.get(i)[0], turned.get(i)[1], 1);
+		}
+		Assert.assertArrayEquals("first, north", new int[]{0, 58}, turned.get(0));
+		Assert.assertArrayEquals("then south", new int[]{0, -58}, turned.get(1));
+	}
+
+	@Test
+	public void aCrowdGoingRoundTheOtherWayKeepsItsFirstTwoSpotsAndItsShape()
+	{
+		// Seen in a mirror along the line of its first two spots: those two stay where they are, and
+		// the rest are the same places in another order, the next after them across that line.
+		for (double turn : new double[]{0, 45, 90, 135})
+		{
+			List<int[]> anticlockwise = StackSpreader.crowdSpots(true, 72, StackSpreader.CROWD_PATTERN_SIZE, null, turn, false);
+			List<int[]> clockwise = StackSpreader.crowdSpots(true, 72, StackSpreader.CROWD_PATTERN_SIZE, null, turn, true);
+			Assert.assertArrayEquals(anticlockwise.get(0), clockwise.get(0));
+			Assert.assertArrayEquals(anticlockwise.get(1), clockwise.get(1));
+			double a = Math.toRadians(turn);
+			for (int i = 0; i < anticlockwise.size(); i++)
+			{
+				int[] p = anticlockwise.get(i);
+				int[] q = clockwise.get(i);
+				// q is p seen in the mirror along the first two spots' line.
+				double along = p[0] * Math.cos(a) + p[1] * Math.sin(a);
+				double across = -p[0] * Math.sin(a) + p[1] * Math.cos(a);
+				Assert.assertEquals("spot " + i + ", turned " + turn, along * Math.cos(a) + across * Math.sin(a), q[0], 1.5);
+				Assert.assertEquals("spot " + i + ", turned " + turn, along * Math.sin(a) - across * Math.cos(a), q[1], 1.5);
+			}
+		}
+	}
+
+	@Test
 	public void aGroupFacingTheSameWayHasASharedFacing()
 	{
 		List<StackSpreader.Entry> group = new ArrayList<>();
