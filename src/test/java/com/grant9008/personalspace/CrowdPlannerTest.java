@@ -5196,6 +5196,265 @@ public class CrowdPlannerTest
 		}
 	}
 
+	/** The tile north of the busy campfire in the tests below, where a second fire is lit among the people tending it. */
+	private static final long LIT = StackRegistry.key(0, 50, 51);
+
+	/**
+	 * Forester's Campfires on the tiles in {@code lit}, which may change from one tick to the next
+	 * (one lit, one gone out), as the plugin sees them: nobody drawn within its clearance of any.
+	 */
+	private static CrowdPlanner.Surroundings campfiresOn(Set<Long> lit)
+	{
+		CollisionTerrain terrain = new CollisionTerrain(openFlags());
+		return new CrowdPlanner.Surroundings()
+		{
+			private boolean fireOn(int sceneX, int sceneY)
+			{
+				return lit.contains(StackRegistry.key(0, sceneX, sceneY));
+			}
+
+			public boolean canStand(long t, int dx, int dz)
+			{
+				int x = StackRegistry.sceneX(t) * 128 + 64;
+				int z = StackRegistry.sceneY(t) * 128 + 64;
+				if (!terrain.canStand(0, x, z, x + dx, z + dz))
+				{
+					return false;
+				}
+				for (int cx : new int[]{x + dx - PersonalSpacePlugin.FIRE_CLEARANCE, x + dx + PersonalSpacePlugin.FIRE_CLEARANCE})
+				{
+					for (int cz : new int[]{z + dz - PersonalSpacePlugin.FIRE_CLEARANCE, z + dz + PersonalSpacePlugin.FIRE_CLEARANCE})
+					{
+						if (fireOn(cx >> 7, cz >> 7))
+						{
+							return false;
+						}
+					}
+				}
+				return true;
+			}
+			public boolean facesObstacle(long t, double a) { return false; }
+			public boolean isCounter(long t, double a) { return false; }
+			public boolean facesFire(long t, double a)
+			{
+				return fireOn(StackRegistry.sceneX(t) + (int) Math.round(-Math.sin(a)), StackRegistry.sceneY(t) + (int) Math.round(-Math.cos(a)));
+			}
+			public List<int[]> firesNear(long t)
+			{
+				List<int[]> out = new ArrayList<>();
+				for (int east = -1; east <= 1; east++)
+				{
+					for (int north = -1; north <= 1; north++)
+					{
+						if (fireOn(StackRegistry.sceneX(t) + east, StackRegistry.sceneY(t) + north))
+						{
+							out.add(new int[]{east, north});
+						}
+					}
+				}
+				return out;
+			}
+		};
+	}
+
+	/**
+	 * Whether a straight walk between two scene points passes through the flames of any of these
+	 * fires (the plugin's clearance round its tile), other than straight out of flames it starts in,
+	 * away from the fire: someone a fire is lit under has to walk out of it.
+	 */
+	private static boolean throughFlames(double ax, double az, double bx, double bz, Set<Long> lit)
+	{
+		int c = 64 + PersonalSpacePlugin.FIRE_CLEARANCE;
+		for (long fire : lit)
+		{
+			double fx = StackRegistry.sceneX(fire) * 128 + 64;
+			double fz = StackRegistry.sceneY(fire) * 128 + 64;
+			boolean startsIn = Math.abs(ax - fx) < c && Math.abs(az - fz) < c;
+			if (startsIn && (bx - ax) * (ax - fx) + (bz - az) * (az - fz) >= 0)
+			{
+				continue;
+			}
+			for (int k = startsIn ? 0 : 1; k < 64; k++)
+			{
+				double x = ax + (bx - ax) * k / 64.0;
+				double z = az + (bz - az) * k / 64.0;
+				if (Math.abs(x - fx) < c && Math.abs(z - fz) < c)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/** How far a scene point is from the nearest of these fires' tiles: 0 on one. */
+	private static double fromTheFires(double x, double z, Set<Long> lit)
+	{
+		double nearest = Double.MAX_VALUE;
+		for (long fire : lit)
+		{
+			nearest = Math.min(nearest, Math.hypot(Math.max(0, Math.abs(x - (StackRegistry.sceneX(fire) * 128 + 64)) - 64),
+				Math.max(0, Math.abs(z - (StackRegistry.sceneY(fire) * 128 + 64)) - 64)));
+		}
+		return nearest;
+	}
+
+	@Test
+	public void aFireLitAmongTheCrowdAtABusyCampfireIsStoodRoundByTheSameCrowd()
+	{
+		// Someone lights a fire on the tile north of a busy Forester's Campfire, among the people
+		// tending it there. The people standing on the new fire were laid out on its own, in its few
+		// places, most of them waiting out of sight in the flames, while the campfire's crowd gave up
+		// the ground round the new fire and its overflow waited out of sight beside it: an empty
+		// patch round the new fire, people piled up past it.
+		Set<Long> lit = new HashSet<>();
+		lit.add(FIRE);
+		CrowdPlanner.Surroundings fires = campfiresOn(lit);
+		List<StackSpreader.Entry> still = busyCampfire(16, 6, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, double[]> was = new HashMap<>();
+		for (int t = 1; t <= 16; t++)
+		{
+			if (t == 6)
+			{
+				lit.add(LIT);
+			}
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, fires);
+			Map<Integer, double[]> at = drawnAsThePluginDoes(plan, still);
+			if (t >= 3)
+			{
+				assertNobodyInsideAnybody("tick " + t, at);
+			}
+			for (StackSpreader.Placement p : plan.placements)
+			{
+				double[] a = at.get(p.id);
+				Assert.assertEquals("tick " + t + ": player " + p.id + " is one of the crowd round the fires", CrowdPlanner.ROUND_FIRE, plan.tiles.get(p.tile).shape);
+				Assert.assertTrue("tick " + t + ": player " + p.id + " is drawn " + Math.round(fromTheFires(a[0], a[1], lit)) + " from a fire's tile",
+					fromTheFires(a[0], a[1], lit) >= CrowdPlanner.FIRE_MARGIN - 0.5);
+				double[] from = was.get(p.id);
+				Assert.assertFalse("tick " + t + ": player " + p.id + " walks through a fire", from != null && throughFlames(from[0], from[1], a[0], a[1], lit));
+				// Only those in the new fire's way step aside: everyone a body's width clear of its flames stays put.
+				Assert.assertFalse("tick " + t + ": player " + p.id + " moves, clear of the new fire", t == 6 && from != null
+					&& fromTheFires(from[0], from[1], java.util.Collections.singleton(LIT)) >= CrowdPlanner.FIRE_MARGIN + CrowdPlanner.OBJECT_GAP
+					&& Math.hypot(a[0] - from[0], a[1] - from[1]) >= 1);
+			}
+			was = at;
+		}
+	}
+
+	@Test
+	public void aCrowdRoundTwoFiresStandsRoundBothRatherThanWaitOutOfSight()
+	{
+		// The same, with more at the campfire than its ground holds. The new fire only took ground
+		// from the campfire's crowd, which left more waiting out of sight than before, beside an
+		// empty patch round the new fire. Stood round both together, the crowd has the ground round
+		// the new fire as well, and fewer wait.
+		int[] waiting = new int[2];
+		for (int fires = 1; fires <= 2; fires++)
+		{
+			Set<Long> lit = new HashSet<>();
+			lit.add(FIRE);
+			CrowdPlanner.Surroundings around = campfiresOn(lit);
+			List<StackSpreader.Entry> still = busyCampfire(8, 6, true);
+			CrowdPlanner planner = new CrowdPlanner();
+			for (int t = 1; t <= 20; t++)
+			{
+				if (t == 6 && fires == 2)
+				{
+					lit.add(LIT);
+				}
+				CrowdPlanner.Plan plan = atTheFire(planner, still, t, around);
+				waiting[fires - 1] = still.size() - drawnAsThePluginDoes(plan, still).size();
+			}
+		}
+		Assert.assertTrue(waiting[1] + " wait out of sight round both fires, " + waiting[0] + " round the campfire alone", waiting[1] * 3 <= waiting[0] * 2);
+	}
+
+	@Test
+	public void whenTheNewFireGoesOutTheCrowdRoundBothKeepsItsPlaces()
+	{
+		// The fire lit beside the busy campfire goes out. The people round it walked off across the
+		// crowd to the nearest gaps round the campfire, or back into the middle of their tiles out of
+		// sight, all at once. Now they keep their places, out of the flames that are no longer there.
+		Set<Long> lit = new HashSet<>();
+		lit.add(FIRE);
+		lit.add(LIT);
+		CrowdPlanner.Surroundings fires = campfiresOn(lit);
+		List<StackSpreader.Entry> still = busyCampfire(16, 6, true);
+		CrowdPlanner planner = new CrowdPlanner();
+		Map<Integer, double[]> was = new HashMap<>();
+		for (int t = 1; t <= 16; t++)
+		{
+			if (t == 10)
+			{
+				lit.remove(LIT);
+			}
+			CrowdPlanner.Plan plan = atTheFire(planner, still, t, fires);
+			Map<Integer, double[]> at = drawnAsThePluginDoes(plan, still);
+			assertNobodyInsideAnybody("tick " + t, at);
+			if (t >= 10)
+			{
+				for (Map.Entry<Integer, double[]> e : was.entrySet())
+				{
+					double[] now = at.get(e.getKey());
+					Assert.assertNotNull("tick " + t + ": player " + e.getKey() + " vanishes", now);
+					Assert.assertTrue("tick " + t + ": player " + e.getKey() + " moves " + Math.round(Math.hypot(now[0] - e.getValue()[0], now[1] - e.getValue()[1])),
+						Math.hypot(now[0] - e.getValue()[0], now[1] - e.getValue()[1]) < 1);
+				}
+			}
+			was = at;
+		}
+	}
+
+	@Test
+	public void someoneAloneWhereAFireIsLitAmongTheCrowdStepsOutOfItRatherThanIntoIt()
+	{
+		// Someone alone on the tile north of a busy campfire, who came after the rest and stands out
+		// past their tile, when a fire is lit under them. Just short of its flames, the edge of the
+		// tile they stood over counted as a wall, so they had nowhere to walk to: they were drawn in
+		// the middle of their tile, in the new fire, and walked out of it a tick later.
+		for (int onIt = 2; onIt <= 16; onIt++)
+		{
+			for (int round = 3; round <= 5; round++)
+			{
+				Set<Long> lit = new HashSet<>();
+				lit.add(FIRE);
+				CrowdPlanner.Surroundings fires = campfiresOn(lit);
+				List<StackSpreader.Entry> everyone = busyCampfire(onIt, round, true);
+				StackSpreader.Entry alone = null;
+				for (java.util.Iterator<StackSpreader.Entry> it = everyone.iterator(); it.hasNext(); )
+				{
+					StackSpreader.Entry e = it.next();
+					if (e.tile == LIT && alone == null)
+					{
+						alone = e;
+					}
+					else if (e.tile == LIT)
+					{
+						it.remove();
+					}
+				}
+				CrowdPlanner planner = new CrowdPlanner();
+				for (int t = 1; t <= 10; t++)
+				{
+					if (t == 6)
+					{
+						lit.add(LIT);
+					}
+					List<StackSpreader.Entry> still = new ArrayList<>(everyone);
+					if (t < 3)
+					{
+						still.remove(alone);
+					}
+					double[] at = drawnAsThePluginDoes(atTheFire(planner, still, t, fires), still).get(alone.id);
+					Assert.assertFalse(onIt + " on the campfire, " + round + " round it, tick " + t + ": drawn in the fire lit under them",
+						at != null && t >= 6 && Math.abs(at[0] - (50 * 128 + 64)) < 64 + PersonalSpacePlugin.FIRE_CLEARANCE
+						&& Math.abs(at[1] - (51 * 128 + 64)) < 64 + PersonalSpacePlugin.FIRE_CLEARANCE);
+				}
+			}
+		}
+	}
+
 	/**
 	 * How far behind someone wearing a cape, and how far round from straight back, the legs of whoever
 	 * stands there pass through it, as the game's own models of the common capes have it (both

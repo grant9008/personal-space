@@ -173,7 +173,7 @@ public class AlchStylerTest
 		AlchStyler styler = new AlchStyler(client(new FakePlayer().proxy()));
 		int[] seen = new int[AlchStyler.PARTY_EMOTES.length];
 		int last = -1;
-		for (int cast = 0; cast < 600; cast++)
+		for (int cast = 0; cast < 1200; cast++)
 		{
 			int emote = styler.nextEmote(42);
 			Assert.assertNotEquals("cast " + cast + " repeated the last emote", last, emote);
@@ -185,8 +185,45 @@ public class AlchStylerTest
 		}
 		for (int i = 0; i < seen.length; i++)
 		{
-			Assert.assertTrue("emote " + AlchStyler.PARTY_EMOTES[i] + " came up " + seen[i] + " times in 600", seen[i] > 55);
+			Assert.assertTrue("emote " + AlchStyler.PARTY_EMOTES[i] + " came up " + seen[i] + " times in 1200", seen[i] > 800 / seen.length);
 		}
+	}
+
+	@Test
+	public void theCrabDanceTakesSpinsPlacePlayedOnceWithNoGlow()
+	{
+		// The emote tab's Crab dance instead of Spin, and the one that ends by itself, like the rest.
+		Assert.assertTrue(Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.HUMAN_EMOTE_CRABDANCE));
+		Assert.assertFalse("Spin is still in", Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.EMOTE_DANCE_SPIN));
+		Assert.assertFalse("the looping crab dance", Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.HUMAN_EMOTE_CRABDANCE_LOOP));
+		// The zombie dance and the goblin salute too, each the one that ends by itself.
+		Assert.assertTrue(Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.ZOMBIE_DANCE));
+		Assert.assertTrue(Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.HUMAN_CAVE_GOBLIN_DANCE));
+		Assert.assertFalse("the looping zombie dance", Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.ZOMBIE_DANCE_LOOP));
+		Assert.assertFalse("the looping goblin salute", Arrays.stream(AlchStyler.PARTY_EMOTES).anyMatch(e -> e == AnimationID.HUMAN_CAVE_GOBLIN_DANCE_LOOP));
+		Assert.assertEquals("an emote listed twice", AlchStyler.PARTY_EMOTES.length, Arrays.stream(AlchStyler.PARTY_EMOTES).distinct().count());
+		// A crab dance straight after the Party emote: from its first frame, and the glow goes.
+		cycle = 7000;
+		AlchStyler styler = new AlchStyler(client(new FakePlayer().proxy()));
+		FakePlayer alcher = new FakePlayer();
+		Player p = alcher.proxy();
+		boolean afterParty = false;
+		boolean seen = false;
+		for (int cast = 0; cast < 3000 && !seen; cast++)
+		{
+			alcher.animation = AnimationID.HUMAN_CASTHIGHLVLALCHEMY;
+			alcher.frame = 7;
+			styler.noticed(p);
+			styler.apply(PersonalSpaceConfig.Alchers.PARTY, true);
+			if (alcher.animation == AnimationID.HUMAN_EMOTE_CRABDANCE && afterParty)
+			{
+				Assert.assertEquals("from the start", 0, alcher.frame);
+				Assert.assertFalse("the Party glow under a crab dance", alcher.effects.containsKey(AlchStyler.PARTY_GLOW_SLOT));
+				seen = true;
+			}
+			afterParty = alcher.animation == AnimationID.EMOTE_PARTY;
+		}
+		Assert.assertTrue("no crab dance after the Party emote in 3000 casts", seen);
 	}
 
 	@Test
@@ -243,7 +280,7 @@ public class AlchStylerTest
 		{
 			Assert.assertFalse(AlchStyler.CASTS.contains(e));
 		}
-		Assert.assertEquals(6, AlchStyler.PARTY_EMOTES.length);
+		Assert.assertEquals(8, AlchStyler.PARTY_EMOTES.length);
 		Assert.assertTrue("alchs, superheat, charge orb, enchants", AlchStyler.CASTS.containsAll(Arrays.asList(712, 713, 725, 726, 719, 931)));
 		Assert.assertTrue(AlchStyler.EFFECTS.containsAll(Arrays.asList(112, 113, 148, 149, 150, 151, 152, 114, 238)));
 	}

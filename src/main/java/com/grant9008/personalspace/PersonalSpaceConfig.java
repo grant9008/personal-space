@@ -271,7 +271,7 @@ public interface PersonalSpaceConfig extends Config
 	@ConfigItem(
 		keyName = KEY_HOVER,
 		name = "Hover shows who",
-		description = "On: hover someone who's been moved to see their name and level. You still click people where they really stand.",
+		description = "On: hover someone who's been moved to see their name and level, or a pet to see whose it is. You still click people where they really stand.",
 		position = 9
 	)
 	default boolean hoverShowsWho()

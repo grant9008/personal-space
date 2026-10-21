@@ -50,7 +50,7 @@ dependencies {
 }
 
 group = 'com.grant9008'
-version = '1.9.35'
+version = '1.9.37'
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'

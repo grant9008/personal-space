@@ -411,7 +411,7 @@ final class PersonalSpacePanel extends PluginPanel
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
 		card.add(switchRow("Hover shows who", hoverSwitch,
-			"On: hover someone who's been moved to see their name and level. You still click people where they really stand."), c);
+			"On: hover someone who's been moved to see their name and level, or a pet to see whose it is. You still click people where they really stand."), c);
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);

@@ -1207,6 +1207,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 			int y = Perspective.getTileHeight(client, lp, plane) - npc.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + dx, z + dz);
 			int facing = s == null ? npc.getCurrentOrientation() : s.facing;
 			keep(lentProjection, lentScene, lentObject, npc, facing, facing, x + dx, y, z + dz, false);
+			notePetDrawn(npc, dx, dz);
 			Kept k = kept[keptCount - 1];
 			k.lent = true;
 			k.plane = plane;
@@ -1271,6 +1272,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		}
 		int y = Perspective.getTileHeight(client, lp, plane) - npc.getAnimationHeightOffset() + groundDelta(wv, plane, x, z, x + dx, z + dz);
 		keep(lentProjection, lentScene, lentObject, npc, s.facing, s.facing, x + dx, y, z + dz, false);
+		notePetDrawn(npc, dx, dz);
 		Kept k = kept[keptCount - 1];
 		k.lent = true;
 		k.plane = plane;
@@ -1379,6 +1381,48 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 
 	/** Pets drawn beside whoever stands on them, or on their way back, by NPC index. Nearly always empty. */
 	private final Map<Integer, PetSpot> petSpots = new HashMap<>();
+
+	/**
+	 * Pets drawn here this frame, by NPC index, and how far east and north of where each really is:
+	 * beside someone or a fire, on their way there or back, or where they stand though the game left
+	 * them out. Those the game handed over are drawn where it put them (see {@link #drawnAt}). Nearly
+	 * always empty.
+	 */
+	private final Map<Integer, int[]> petsDrawn = new HashMap<>();
+	private int petsDrawnFrame = Integer.MIN_VALUE;
+	/** Where an NPC the game handed over is drawn, from where it really is: right there. */
+	private static final int[] WHERE_IT_STANDS = {0, 0};
+
+	/** Noted as a pet is drawn here, (dx, dz) from where it really is (see {@link #petsDrawn}). */
+	private void notePetDrawn(NPC npc, int dx, int dz)
+	{
+		int frame = offsets.frame();
+		if (petsDrawnFrame != frame)
+		{
+			petsDrawn.clear();
+			petsDrawnFrame = frame;
+		}
+		petsDrawn.put(npc.getIndex(), new int[]{dx, dz});
+	}
+
+	/**
+	 * Client thread, once the scene is drawn: where this NPC of the main world was drawn this frame,
+	 * as {east, north} of where it really is, or null if it wasn't drawn at all. The game hands over
+	 * only those the render callbacks allow (another plugin may hide a pet), and a pet drawn here is
+	 * asked about too; one left under someone, as in the game, isn't drawn. For hovering a pet where
+	 * it's drawn (see {@link HoverOverlay}). Not to be changed.
+	 */
+	int[] drawnAt(NPC npc)
+	{
+		int index = npc.getIndex();
+		int frame = offsets.frame();
+		int[] aside = petsDrawnFrame == frame ? petsDrawn.get(index) : null;
+		if (aside != null)
+		{
+			return aside;
+		}
+		return index >= 0 && index < npcFrame.length && npcFrame[index] == frame ? WHERE_IT_STANDS : null;
+	}
 
 	/**
 	 * How far from the middle of its tile a pet is drawn beside whoever stands on it: just clear of
@@ -1966,6 +2010,7 @@ final class SpreadingDrawCallbacks implements DrawCallbacks
 		{
 			delegate.drawTemp(projection, scene, gameObject, model, s.facing, x + dx, drawY, z + dz);
 		}
+		notePetDrawn(npc, dx, dz);
 		if (dx != 0 || dz != 0)
 		{
 			followersBesideDrawn++;

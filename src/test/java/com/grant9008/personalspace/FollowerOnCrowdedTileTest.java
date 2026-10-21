@@ -88,6 +88,8 @@ public class FollowerOnCrowdedTileTest
 		int animationFrame;
 		int orientation;
 		Renderable interacting;
+		/** What it answers, as its stand-in has it: a test may add to it (an outline, say). */
+		Map<String, Object> answers;
 
 		Body(int id, int x, int z)
 		{
@@ -248,6 +250,7 @@ public class FollowerOnCrowdedTileTest
 			a.put("setPoseAnimationFrame", (Function<Object[], Object>) args -> b.poseFrame = (Integer) args[0]);
 			a.put("getCurrentOrientation", (Function<Object[], Object>) args -> b.orientation);
 			a.put("getInteracting", (Function<Object[], Object>) args -> b.interacting);
+			b.answers = a;
 			return a;
 		}
 
@@ -301,7 +304,9 @@ public class FollowerOnCrowdedTileTest
 			b.pose = PET_IDLE;
 			Map<String, Object> a = body(b);
 			b.walkModel = FakeMeshes.model(FakeMeshes.strip(4), 3000 + index);
-			NPCComposition composition = FakeMeshes.fake(NPCComposition.class, Map.of("isFollower", follower, "getSize", 1));
+			// A Nexling's options, as the game's cache has them: a pet, one its owner can pick up.
+			NPCComposition composition = FakeMeshes.fake(NPCComposition.class, Map.of("isFollower", follower, "getSize", 1,
+				"getActions", new String[]{"Talk-to", null, "Pick-up", null, null}));
 			a.put("getIndex", index);
 			a.put("getId", 11277);
 			a.put("getName", "Nexling");

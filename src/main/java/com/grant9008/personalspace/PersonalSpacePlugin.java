@@ -70,7 +70,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.35";
+	static final String VERSION = "1.9.37";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -590,6 +590,12 @@ public class PersonalSpacePlugin extends Plugin
 			// Off, paused while you fight or in a PvP area, nobody's action is swapped for a walk.
 			wrapper.spreading = filter != null && filter.enabled;
 			wrapper.youFighting = youFighting;
+		}
+		HoverOverlay hover = hoverOverlay;
+		if (hover != null)
+		{
+			// Hovering a pet: the shim knows where each one is drawn this frame.
+			hover.shim = wrapper;
 		}
 
 		long now = System.nanoTime();

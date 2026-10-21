@@ -52,9 +52,14 @@ final class AlchStyler
 		SpotanimID.ENCHANT_AMULET2_LVL4, SpotanimID.ENCHANT_AMULET2_LVL5, SpotanimID.ENCHANT_AMULET2_LVL6,
 		SpotanimID.ENCHANT_RING, SpotanimID.XBOWS_ENCHANTING_TIPS_SPOT);
 
-	/** Party: dance, jig, spin, cheer, jump for joy and the Party emote, with its glowing floor. */
+	/**
+	 * Party: dance, jig, crab dance, zombie dance, goblin salute, cheer, jump for joy and the Party
+	 * emote, with its glowing floor. Each plays once and ends by itself: the looping versions some of
+	 * them have would keep someone who stopped alching dancing for minutes.
+	 */
 	static final int[] PARTY_EMOTES = {
-		AnimationID.EMOTE_DANCE, AnimationID.EMOTE_DANCE_SCOTTISH, AnimationID.EMOTE_DANCE_SPIN,
+		AnimationID.EMOTE_DANCE, AnimationID.EMOTE_DANCE_SCOTTISH, AnimationID.HUMAN_EMOTE_CRABDANCE,
+		AnimationID.ZOMBIE_DANCE, AnimationID.HUMAN_CAVE_GOBLIN_DANCE,
 		AnimationID.EMOTE_CHEER, AnimationID.EMOTE_JUMP_WITH_JOY, AnimationID.EMOTE_PARTY,
 	};
 	/** The Party emote's floor glow, put under whoever does it (it changes colour as they dance). */

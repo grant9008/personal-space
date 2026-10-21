@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1935.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1937.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -34,7 +34,8 @@ turns out to be four friends hanging out.
 - **You stay in sight.** Nobody is drawn inside you, and with **Give me a spot** you get the
   front spot at a counter or fishing spot. **Draw me in front** keeps you on top of your crowd.
 - **Names and hover.** **Names over players** puts names over the bodies, using your Player
-  Indicators settings. Hover anyone to see who they are, with an arrow to where they really stand.
+  Indicators settings. Hover anyone to see who they are, with an arrow to where they really stand,
+  and hover a pet to see whose it is.
 - **Hide the level-3 bots.** An optional combat-level filter, which hides their chat too. Friends,
   friends chat and clan members always stay.
 - **Poses for screenshots.** Angle pairs and small groups towards each other, or draw any crowd up
@@ -91,14 +92,14 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Players per tile | How many on one tile get their own spot: 2 to 16, and 5 is the sweet spot. Higher fits more people, packed tighter. |
 | Hide chat further than | Off, or a distance in tiles: public chat from anyone further away isn't shown over their head or in the chat box, so a busy bank across the road stays quiet while you smith. Friends, friends chat and clan always show. |
 | Idle players sit | Off by default. On: other players who've stood doing nothing for 30 seconds (away from the keyboard) sit down, in the game's Sit emote, and get up the moment they move, talk or do something. Only on your screen. |
-| Alchers behavior | **Normal**, **Still** (other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell just stand, with no spell effect) or **Party** (each cast becomes a dance, jig, spin, cheer, jump for joy or the Party emote with its glowing floor, at random). Only how they look to you; your own spells never change. |
+| Alchers behavior | **Normal**, **Still** (other players casting High or Low Alchemy, Superheat Item, Charge Orb or an Enchant spell just stand, with no spell effect) or **Party** (each cast becomes a dance, jig, crab dance, zombie dance, goblin salute, cheer, jump for joy or the Party emote with its glowing floor, at random). Only how they look to you; your own spells never change. |
 | Hide players below | Off, or a combat level: anyone below it is hidden, like Entity Hider. **Hide their chat too** drops their chat as well. Friends, friends chat and clan always stay. |
 | Spacing | Close, Normal or Wide (the default), or drag the slider. **Use recommended** puts the crowd settings back to the defaults. |
 | Shape | **Smart** picks one for the place: rows at banks and counters, one crowd round an anvil or fire, a ring in the open. **Circle**, **Line** and **Arc** use that shape everywhere. |
 | Pose for 2 or 3 players | **Natural**, **Angled** (half turned towards each other) or **Facing** each other. |
 | Auto spacing | On: the gaps suit the place, staying close at banks, counters, walls and fires and for small groups. Off: the Spacing slider sets every gap, handy for photos. |
 | Names over players | Names over the bodies instead of the pile, with your Player Indicators settings. Turn off Player Indicators' name position, or you'll see two. |
-| Hover shows who | Hover someone drawn away from their tile to see their name and level. |
+| Hover shows who | Hover someone drawn away from their tile to see their name and level, or any pet to see whose it is ("Smolcano - Zezima's pet"). |
 | Arrow to their tile | Off by default. On: hovering someone who's been moved also shows an arrow to where they really stand. |
 | Use items through players | Using an item or spell on what you see (a fire, a booth), people drawn away from their tile or hidden in a crowd don't take the left-click. Right-click still lists them. |
 | Draw me in front | Always draw yourself over the people in your crowd. |
