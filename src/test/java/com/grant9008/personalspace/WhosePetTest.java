@@ -1,5 +1,6 @@
 package com.grant9008.personalspace;
 
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
@@ -16,6 +17,7 @@ import java.util.function.Function;
 import net.runelite.api.Client;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.Menu;
+import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.Perspective;
@@ -45,18 +47,21 @@ public class WhosePetTest
 	private static final int PERSON_HALF_WIDTH = 8;
 
 	/** The game, and the overlay over it with the mouse where a test puts it. */
-	private static final class Hover
+	static final class Hover
 	{
 		final FollowerOnCrowdedTileTest.Game g = new FollowerOnCrowdedTileTest.Game();
 		final Client client;
 		final LevelFilter filter;
 		final TooltipManager tooltips = new TooltipManager();
 		final HoverOverlay overlay;
-		final Graphics2D graphics = new BufferedImage(800, 600, BufferedImage.TYPE_INT_ARGB).createGraphics();
+		final BufferedImage screen = new BufferedImage(800, 600, BufferedImage.TYPE_INT_ARGB);
+		final Graphics2D graphics = screen.createGraphics();
 		boolean who = true;
+		boolean arrow;
 		boolean hooked = true;
 		Point mouse = new Point(-1, -1);
-		MenuEntry[] menu = new MenuEntry[0];
+		/** The game's menu as it last built it: the mouse over the world, unless a test says otherwise. */
+		MenuEntry[] menu = {entry("Cancel", MenuAction.CANCEL, null), entry("Walk here", MenuAction.WALK, null)};
 		Object follower;
 
 		Hover()
@@ -73,7 +78,8 @@ public class WhosePetTest
 			client = over(Client.class, g.client, c);
 			filter = new LevelFilter(client);
 			filter.enabled = true;
-			PersonalSpaceConfig config = FakeMeshes.fake(PersonalSpaceConfig.class, Map.of("hoverShowsWho", (Function<Object[], Object>) args -> who));
+			PersonalSpaceConfig config = FakeMeshes.fake(PersonalSpaceConfig.class, Map.of("hoverShowsWho", (Function<Object[], Object>) args -> who,
+				"hoverArrow", (Function<Object[], Object>) args -> arrow));
 			overlay = new HoverOverlay(client, config, g.offsets, g.stacks, tooltips, filter);
 		}
 
@@ -124,11 +130,29 @@ public class WhosePetTest
 		{
 			mouse = at;
 			tooltips.clear();
+			graphics.setBackground(new Color(0, 0, 0, 0));
+			graphics.clearRect(0, 0, screen.getWidth(), screen.getHeight());
 			overlay.shim = hooked ? g.shim : null;
 			overlay.render(graphics);
 			List<Tooltip> all = tooltips.getTooltips();
 			Assert.assertTrue("one tooltip at a time: " + all.size(), all.size() <= 1);
 			return all.isEmpty() ? null : all.get(0).getText();
+		}
+
+		/** Whether the last hover drew anything on the screen: the arrow, all the overlay draws. */
+		boolean drewOnScreen()
+		{
+			for (int y = 0; y < screen.getHeight(); y++)
+			{
+				for (int x = 0; x < screen.getWidth(); x++)
+				{
+					if ((screen.getRGB(x, y) >>> 24) != 0)
+					{
+						return true;
+					}
+				}
+			}
+			return false;
 		}
 	}
 
@@ -168,10 +192,12 @@ public class WhosePetTest
 		return p;
 	}
 
-	private static MenuEntry entry(String option, Object npc)
+	/** One of the game's menu entries: its option, its type, and the NPC it's on (if any). */
+	static MenuEntry entry(String option, MenuAction type, Object npc)
 	{
 		Map<String, Object> e = new HashMap<>();
 		e.put("getOption", option);
+		e.put("getType", type);
 		if (npc != null)
 		{
 			e.put("getNpc", npc);
@@ -263,10 +289,10 @@ public class WhosePetTest
 		h.follower = pet.actor;
 		g.run(pet, 2);
 		Assert.assertEquals("or the game says it's yours", "Nexling - your pet", h.hover(MIDDLE, MIDDLE, 30));
-		h.menu = new MenuEntry[]{entry("Walk here", null)};
+		h.menu = new MenuEntry[]{entry("Walk here", MenuAction.WALK, null)};
 		Assert.assertEquals("Nexling - your pet", h.hover(MIDDLE, MIDDLE, 30));
 		// With the game's left-click on it (Talk-to, Pick-up), its hover text, and Mouse Tooltips', name it already.
-		h.menu = new MenuEntry[]{entry("Walk here", null), entry("Talk-to", pet.actor)};
+		h.menu = new MenuEntry[]{entry("Walk here", MenuAction.WALK, null), entry("Talk-to", MenuAction.NPC_FIRST_OPTION, pet.actor)};
 		Assert.assertNull(h.hover(MIDDLE, MIDDLE, 30));
 	}
 
@@ -285,7 +311,7 @@ public class WhosePetTest
 		int[] spot = g.at(pet);
 		Assert.assertTrue("drawn beside you, east", spot[0] > MIDDLE + 50);
 		// Its click box is where it stands, under you: the game's left-click there is about you, not it.
-		h.menu = new MenuEntry[]{entry("Walk here", null)};
+		h.menu = new MenuEntry[]{entry("Walk here", MenuAction.WALK, null)};
 		Assert.assertEquals("Nexling - your pet", h.hover(spot[0], spot[1], 30));
 	}
 

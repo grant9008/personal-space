@@ -8,8 +8,11 @@ import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
+import java.util.EnumSet;
+import java.util.Set;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
+import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
@@ -36,6 +39,10 @@ import net.runelite.client.util.Text;
  * pet", and a quest companion who it follows, "Zanik - following Zezima", wherever it's drawn:
  * where it stands, or beside whoever stands on it. Whichever is nearest the camera under the
  * mouse, a pet or someone moved, is the one named.
+ *
+ * <p>Only over the world: with the mouse over an interface drawn over it, the Grand Exchange or a
+ * bank, or in resizable mode the inventory or the chatbox, nobody behind it is named and no arrow
+ * is drawn. Beside it, over the world, they are as ever.
  */
 final class HoverOverlay extends Overlay
 {
@@ -44,6 +51,24 @@ final class HoverOverlay extends Overlay
 	private static final BasicStroke ARROW_STROKE = new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
 	/** Closer than this on the screen and the arrow would be a smudge: they're standing right there. */
 	private static final int ARROW_MIN = 24;
+	/**
+	 * What the game puts in its menu only for the world under the mouse: "Walk here" ("Set heading"
+	 * on a boat), and the options on whoever or whatever is there, using an item or spell on them too.
+	 */
+	private static final Set<MenuAction> WORLD = EnumSet.of(MenuAction.WALK, MenuAction.SET_HEADING,
+		MenuAction.PLAYER_FIRST_OPTION, MenuAction.PLAYER_SECOND_OPTION, MenuAction.PLAYER_THIRD_OPTION, MenuAction.PLAYER_FOURTH_OPTION,
+		MenuAction.PLAYER_FIFTH_OPTION, MenuAction.PLAYER_SIXTH_OPTION, MenuAction.PLAYER_SEVENTH_OPTION, MenuAction.PLAYER_EIGHTH_OPTION,
+		MenuAction.WIDGET_TARGET_ON_PLAYER,
+		MenuAction.NPC_FIRST_OPTION, MenuAction.NPC_SECOND_OPTION, MenuAction.NPC_THIRD_OPTION, MenuAction.NPC_FOURTH_OPTION,
+		MenuAction.NPC_FIFTH_OPTION, MenuAction.WIDGET_TARGET_ON_NPC, MenuAction.EXAMINE_NPC,
+		MenuAction.GAME_OBJECT_FIRST_OPTION, MenuAction.GAME_OBJECT_SECOND_OPTION, MenuAction.GAME_OBJECT_THIRD_OPTION,
+		MenuAction.GAME_OBJECT_FOURTH_OPTION, MenuAction.GAME_OBJECT_FIFTH_OPTION, MenuAction.WIDGET_TARGET_ON_GAME_OBJECT,
+		MenuAction.EXAMINE_OBJECT,
+		MenuAction.GROUND_ITEM_FIRST_OPTION, MenuAction.GROUND_ITEM_SECOND_OPTION, MenuAction.GROUND_ITEM_THIRD_OPTION,
+		MenuAction.GROUND_ITEM_FOURTH_OPTION, MenuAction.GROUND_ITEM_FIFTH_OPTION, MenuAction.WIDGET_TARGET_ON_GROUND_ITEM,
+		MenuAction.EXAMINE_ITEM_GROUND,
+		MenuAction.WORLD_ENTITY_FIRST_OPTION, MenuAction.WORLD_ENTITY_SECOND_OPTION, MenuAction.WORLD_ENTITY_THIRD_OPTION,
+		MenuAction.WORLD_ENTITY_FOURTH_OPTION, MenuAction.WORLD_ENTITY_FIFTH_OPTION, MenuAction.EXAMINE_WORLD_ENTITY);
 
 	private final Client client;
 	private final PersonalSpaceConfig config;
@@ -85,7 +110,7 @@ final class HoverOverlay extends Overlay
 	{
 		boolean who = config.hoverShowsWho();
 		boolean arrow = config.hoverArrow();
-		if ((!who && !arrow) || client.isMenuOpen())
+		if ((!who && !arrow) || client.isMenuOpen() || !overTheWorld(client.getMenu().getMenuEntries()))
 		{
 			return null;
 		}
@@ -133,6 +158,32 @@ final class HoverOverlay extends Overlay
 			arrow(graphics, hoveredFeet, hoveredReal);
 		}
 		return null;
+	}
+
+	/**
+	 * Whether the game's menu, as it was last built, says the mouse is over the world rather than an
+	 * interface drawn over it. The game builds it each client tick, before the frame this overlay
+	 * draws in, from what's under the mouse. Where the world shows, it has "Walk here" and the
+	 * options on whoever is there. Where an interface covers it (the Grand Exchange, a bank, the
+	 * inventory or the chatbox in resizable mode), the interface puts the menu back to Cancel and
+	 * adds its own: the game's hover text names nothing of the world there, and nor does this. With
+	 * an item or spell picked to use there's no "Walk here", only whoever or whatever it could be
+	 * used on, so over bare ground then nobody is named.
+	 */
+	static boolean overTheWorld(MenuEntry[] menu)
+	{
+		if (menu == null)
+		{
+			return false;
+		}
+		for (MenuEntry entry : menu)
+		{
+			if (entry != null && WORLD.contains(entry.getType()))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Of this world's players drawn away from where they stand, the one under the mouse nearest the camera. */

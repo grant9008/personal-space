@@ -635,7 +635,7 @@ public class CombatWalkTest
 	@Test
 	public void pausedWhileYouFightNobodysActionIsSwapped()
 	{
-		// "Pause while I'm fighting" (on by default): the effect is off, so the alcher walking past
+		// "Pause in fights and raids" (on by default): the effect is off, so the alcher walking past
 		// you isn't drawn walking either, not just you.
 		nobodysActionIsSwapped(true, ATTACK);
 	}

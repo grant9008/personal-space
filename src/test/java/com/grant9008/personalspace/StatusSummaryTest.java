@@ -50,6 +50,23 @@ public class StatusSummaryTest
 	}
 
 	@Test
+	public void fightsAndRaidsArePausedNotDangerous()
+	{
+		Snapshot s = working();
+		s.gate = Snapshot.Gate.IN_RAID;
+		Assert.assertEquals("Paused", headline(s).title);
+		Assert.assertEquals("In a raid. Everyone is shown where they really stand until you leave.", headline(s).detail);
+		s.gate = Snapshot.Gate.IN_BOSS_ROOM;
+		Assert.assertEquals("Paused", headline(s).title);
+		s.gate = Snapshot.Gate.IN_COMBAT;
+		Assert.assertEquals("Paused", headline(s).title);
+		Assert.assertTrue(headline(s).detail.endsWith("until the fight is over."));
+		s.gate = Snapshot.Gate.PVP_ACTIVITY;
+		Assert.assertEquals("Paused for safety", headline(s).title);
+		Assert.assertEquals(StatusSummary.Level.PAUSED, headline(s).level);
+	}
+
+	@Test
 	public void pausedWinsOverEverythingElse()
 	{
 		Snapshot s = working();
@@ -226,7 +243,7 @@ public class StatusSummaryTest
 		Assert.assertTrue(r.contains("stacked tiles: 2"));
 		Assert.assertTrue(r.contains("players in other calls (should be 0): 0"));
 		Assert.assertTrue(r.contains("hidden shown/sec: 0"));
-		Assert.assertTrue(r.contains("pause in combat yes"));
+		Assert.assertTrue(r.contains("pause in fights and raids yes"));
 	}
 
 	private static boolean hasLabel(List<StatusSummary.Check> checks, String label)

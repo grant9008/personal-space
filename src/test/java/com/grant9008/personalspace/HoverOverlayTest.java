@@ -1,6 +1,8 @@
 package com.grant9008.personalspace;
 
 import java.util.Map;
+import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.NPCComposition;
 import org.junit.Assert;
 import org.junit.Test;
@@ -42,6 +44,29 @@ public class HoverOverlayTest
 		Assert.assertFalse("a companion with no options of its own", HoverOverlay.canPickUp(actions((String) null)));
 		Assert.assertFalse(HoverOverlay.canPickUp(FakeMeshes.fake(NPCComposition.class, Map.of())));
 		Assert.assertFalse(HoverOverlay.canPickUp(null));
+	}
+
+	@Test
+	public void theMouseIsOverTheWorldWhenTheGameSaysSo()
+	{
+		Assert.assertTrue(HoverOverlay.overTheWorld(menu(MenuAction.CANCEL, MenuAction.WALK)));
+		Assert.assertTrue("on a boat", HoverOverlay.overTheWorld(menu(MenuAction.CANCEL, MenuAction.SET_HEADING)));
+		Assert.assertTrue("a spell picked, someone to cast it on", HoverOverlay.overTheWorld(menu(MenuAction.CANCEL, MenuAction.WIDGET_TARGET_ON_NPC)));
+		Assert.assertFalse("an interface over it: Cancel, and its own", HoverOverlay.overTheWorld(menu(MenuAction.CANCEL, MenuAction.CC_OP, MenuAction.RUNELITE)));
+		Assert.assertFalse("a spell picked, over bare ground or an interface", HoverOverlay.overTheWorld(menu(MenuAction.CANCEL)));
+		Assert.assertFalse(HoverOverlay.overTheWorld(menu(MenuAction.CANCEL, MenuAction.WIDGET_TARGET_ON_WIDGET, MenuAction.UNKNOWN)));
+		Assert.assertFalse(HoverOverlay.overTheWorld(new MenuEntry[0]));
+		Assert.assertFalse(HoverOverlay.overTheWorld(null));
+	}
+
+	private static MenuEntry[] menu(MenuAction... types)
+	{
+		MenuEntry[] menu = new MenuEntry[types.length];
+		for (int i = 0; i < types.length; i++)
+		{
+			menu[i] = FakeMeshes.fake(MenuEntry.class, Map.of("getType", types[i]));
+		}
+		return menu;
 	}
 
 	private static NPCComposition actions(String... actions)

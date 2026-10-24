@@ -61,6 +61,17 @@ final class StatusSummary
 		{
 			return new Headline(Level.WAITING, "Waiting for you to log in", "Crowds are spread out once you're in game.");
 		}
+		if (s.gate == Snapshot.Gate.IN_COMBAT)
+		{
+			// A fight, a raid or a boss room isn't a danger, just somewhere to see who's really where.
+			return new Headline(Level.PAUSED, "Paused",
+				s.gate.label + ". Everyone is shown where they really stand until the fight is over.");
+		}
+		if (s.gate == Snapshot.Gate.IN_RAID || s.gate == Snapshot.Gate.IN_BOSS_ROOM)
+		{
+			return new Headline(Level.PAUSED, "Paused",
+				s.gate.label + ". Everyone is shown where they really stand until you leave.");
+		}
 		if (s.gate != Snapshot.Gate.SAFE)
 		{
 			return new Headline(Level.PAUSED, "Paused for safety",
@@ -186,7 +197,7 @@ final class StatusSummary
 			.append(", hide chat further than ").append(s.chatRange <= 0 ? "off" : s.chatRange + " tiles")
 			.append(", alchers behavior ").append(String.valueOf(s.alchers).toLowerCase())
 			.append(s.alchers == PersonalSpaceConfig.Alchers.NORMAL ? "" : " (" + s.alchersRestyled + " casts)")
-			.append(", pause in combat ").append(yesNo(s.pauseInCombat))
+			.append(", pause in fights and raids ").append(yesNo(s.pauseInCombat))
 
 			.append(", test offset ").append(s.testOffset).append('\n');
 		b.append("Safety: ").append(s.gate.label).append('\n');

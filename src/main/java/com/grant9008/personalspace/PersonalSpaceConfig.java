@@ -248,8 +248,8 @@ public interface PersonalSpaceConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_PAUSE_IN_COMBAT,
-		name = "Pause while I'm fighting",
-		description = "On (recommended): while you're fighting, everyone goes back to where they really stand, so you can see who's where. Keep it on for raids and bosses; turn it off for training spots like rock crabs.",
+		name = "Pause in fights and raids",
+		description = "On (recommended): everyone goes back to where they really stand while you fight, and the whole time you're in a raid or a group boss's room (Nex, the God Wars generals, the Nightmare, Corp, the Royal Titans, Yama), so you can see who's where. Raid lobbies and banks stay spread. Turn it off for training spots like rock crabs.",
 		position = 11
 	)
 	default boolean pauseInCombat()

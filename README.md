@@ -20,7 +20,7 @@ turns out to be four friends hanging out.
 
 [![Tip the developer](https://img.shields.io/badge/%E2%99%A5%20Tip%20the%20developer-ff981f?style=for-the-badge)](https://buy.stripe.com/aFafZg9ehaaxaVaf3e00000)
 
-<img src="docs/photos/sidebar-v1937.png" width="242" align="right" alt="The Personal Space sidebar">
+<img src="docs/photos/sidebar-v1939.png" width="242" align="right" alt="The Personal Space sidebar">
 
 ## What it does
 
@@ -41,8 +41,8 @@ turns out to be four friends hanging out.
 - **Poses for screenshots.** Angle pairs and small groups towards each other, or draw any crowd up
   in a **Line** or an **Arc**.
 - **Visual only, and safe.** Clicks, trades and names stay where people really stand. Off in the
-  Wilderness, PvP areas and worlds, PvP minigames and while you fight, and it never shows players
-  the game or another plugin hides.
+  Wilderness, PvP areas and worlds, PvP minigames, raids and group boss rooms, and while you
+  fight, and it never shows players the game or another plugin hides.
 - **Boats too.** New and untested (I have no boat): please report anything odd.
 
 ### Great for
@@ -51,7 +51,7 @@ turns out to be four friends hanging out.
   or draw a crowd up in a Line or an Arc, and turn Auto spacing off to spread people out for the shot.
 - **Shooting stars.** The team mining a star is a crowd again, not one body.
 - **Rock crabs and other shared training spots.** See everyone sharing the spot. Turn off
-  **Pause while I'm fighting** to keep the crowd spread out while you train.
+  **Pause in fights and raids** to keep the crowd spread out while you train.
 - **Banks and the Grand Exchange.** See how busy it really is, and hide the level-3 bots.
 - **Skilling with friends.** Fires, anvils, fishing spots and trees, everyone in view.
 - **Clan events, drop parties and streams.** A crowd looks as big as it really is.
@@ -80,7 +80,7 @@ Needs the **GPU** plugin or **117 HD** (the sidebar has a **Turn on GPU** button
 
 ### While you're fighting
 
-![Fighting with the plugin on: the Pause while I am fighting switch off, then on](docs/photos/combat-pause-switch.jpg)
+![Fighting with the plugin on: the Pause in fights and raids switch off, then on](docs/photos/combat-pause-switch.jpg)
 
 ## Using it
 
@@ -105,7 +105,7 @@ Click the **Personal Space** button on RuneLite's right-hand toolbar.
 | Draw me in front | Always draw yourself over the people in your crowd. |
 | Depth between players | On (recommended): in a crowd, shields, capes and hats stay properly in front of or behind the people next to them as you turn the camera. Off: everyone is drawn whole, one over another, as the game does, so gear pops between people. GPU plugin only. |
 | Give me a spot | On (the default): you're spread out too, taking a spot in the crowd (the front one, at a bank counter). Off: you stay exactly where you stand and the crowd spreads around you. |
-| Pause while I'm fighting | Shows everyone where they really stand while you fight. Keep it on for raids and bosses; turn it off for training spots like rock crabs. |
+| Pause in fights and raids | Shows everyone where they really stand while you fight, and the whole time you're in a raid (Chambers of Xeric, Theatre of Blood, Tombs of Amascut, every mode) or a group boss's room (Nex, the God Wars generals, the Nightmare, Corp, the Royal Titans, Yama). Raid lobbies and banks stay spread. Turn it off for training spots like rock crabs. |
 | Show sidebar button | Hide the sidebar button; every setting is still in the plugin's configuration. |
 | Troubleshooting | Live status and checks, and **Copy report** for bug reports. |
 

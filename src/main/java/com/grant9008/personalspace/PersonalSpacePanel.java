@@ -420,8 +420,8 @@ final class PersonalSpacePanel extends PluginPanel
 
 		c.gridy++;
 		c.insets = new Insets(8, 0, 0, 0);
-		card.add(switchRow("Pause while I'm fighting", combatSwitch,
-			"On (recommended): while you're fighting, everyone goes back to where they really stand, so you can see who's where. Keep it on for raids and bosses; turn it off for training spots like rock crabs."), c);
+		card.add(switchRow("Pause in fights and raids", combatSwitch,
+			"On (recommended): everyone goes back to where they really stand while you fight, and the whole time you're in a raid or a group boss's room (Nex, the God Wars generals, the Nightmare, Corp, the Royal Titans, Yama), so you can see who's where. Raid lobbies and banks stay spread. Turn it off for training spots like rock crabs."), c);
 
 		return wrapCard(card);
 	}

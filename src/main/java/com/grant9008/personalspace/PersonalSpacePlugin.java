@@ -70,7 +70,7 @@ import org.slf4j.LoggerFactory;
 )
 public class PersonalSpacePlugin extends Plugin
 {
-	static final String VERSION = "1.9.37";
+	static final String VERSION = "1.9.39";
 
 	private static final Logger log = LoggerFactory.getLogger(PersonalSpacePlugin.class);
 
@@ -587,7 +587,7 @@ public class PersonalSpacePlugin extends Plugin
 		{
 			wrapper.drawMeInFront = config.drawMeInFront();
 			wrapper.depthBetweenPlayers = config.depthBetweenPlayers();
-			// Off, paused while you fight or in a PvP area, nobody's action is swapped for a walk.
+			// Off, paused (a fight, a raid, a group boss) or in a PvP area, nobody's action is swapped for a walk.
 			wrapper.spreading = filter != null && filter.enabled;
 			wrapper.youFighting = youFighting;
 		}
@@ -1160,7 +1160,29 @@ public class PersonalSpacePlugin extends Plugin
 		Actor target = local.getInteracting();
 		boolean attacking = target instanceof NPC || target instanceof Player;
 		youFighting = combat.update(local.getHealthRatio() != -1, attacking, attacking && target.getHealthRatio() != -1, tick);
-		if (youFighting && config.pauseInCombat())
+		if (!config.pauseInCombat())
+		{
+			return Snapshot.Gate.SAFE;
+		}
+		// Raids and group bosses first, so the sidebar says so the whole time rather than "in
+		// combat" on and off between fights.
+		WorldView top = client.getTopLevelWorldView();
+		LocalPoint here = local.getLocalLocation();
+		boolean aboard = local.getWorldView() != null && local.getWorldView().getId() != WorldView.TOPLEVEL;
+		// Where you stand in the game's own map: in an instance (a raid, the Nightmare's arena), the
+		// spot it was copied from. Not aboard a boat, whose deck has coordinates of its own.
+		WorldPoint spot = here == null || aboard || top == null ? null : WorldPoint.fromLocalInstance(client, here);
+		if (GroupFights.inRaid(client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON), client.getVarbitValue(VarbitID.TOB_CLIENT_PARTYSTATUS),
+			client.getVarbitValue(VarbitID.TOA_CLIENT_PARTYSTATUS), top != null && top.isInstance(),
+			spot == null ? -1 : spot.getX(), spot == null ? -1 : spot.getY()))
+		{
+			return Snapshot.Gate.IN_RAID;
+		}
+		if (spot != null && GroupFights.inBossRoom(spot.getX(), spot.getY(), spot.getPlane()))
+		{
+			return Snapshot.Gate.IN_BOSS_ROOM;
+		}
+		if (youFighting)
 		{
 			return Snapshot.Gate.IN_COMBAT;
 		}

@@ -15,7 +15,10 @@ final class Snapshot
 		PVP_AREA("In a PvP area"),
 		PVP_WORLD("On a PvP-type world"),
 		PVP_ACTIVITY("Players can fight here"),
-		IN_COMBAT("You are in combat");
+		IN_COMBAT("You are in combat"),
+		/** Inside a raid, or a group boss's room: paused the whole time, fighting or not (see {@link GroupFights}). */
+		IN_RAID("In a raid"),
+		IN_BOSS_ROOM("In a group boss room");
 
 		final String label;
 
